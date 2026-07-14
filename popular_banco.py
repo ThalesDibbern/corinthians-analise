@@ -2,8 +2,16 @@
 Script que busca jogos, gols, cartões e substituições do Corinthians
 na API-Football e salva no banco Postgres (Railway).
 
-MODO TESTE: busca só 3 jogos da temporada 2023, pra validar
-que tudo está funcionando antes de rodar o histórico completo.
+MODO HISTÓRICO: busca todos os jogos das temporadas 2022, 2023 e 2024
+(as disponíveis no plano grátis). Pula jogos que já estão no banco,
+então é seguro rodar esse script várias vezes - ele só processa o que
+falta, sem duplicar nada.
+
+O plano grátis da API-Football tem um limite de 100 requisições por dia.
+Cada jogo consome 1 requisição de eventos (a lista de jogos em si já vem
+numa única chamada por temporada). Com 3 temporadas de ~38 jogos cada
+(~114 jogos), pode ser necessário rodar o script em mais de um dia até
+completar tudo - ele simplesmente continua de onde parou.
 
 Variáveis de ambiente necessárias (configuradas no Railway, aba "Variables"):
   - API_FOOTBALL_KEY   -> sua chave da API-Football (api-sports.io)
@@ -23,35 +31,55 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 API_BASE = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
-LEAGUE_ID = 71    # Brasileirão Série A
-TEAM_ID = 131     # Corinthians
-SEASON = 2023     # temporada de teste (plano grátis cobre 2022-2024)
-LIMITE_TESTE = 3  # quantidade de jogos pra esse teste inicial
+LEAGUE_ID = 71                    # Brasileirão Série A
+TEAM_ID = 131                      # Corinthians
+TEMPORADAS = [2022, 2023, 2024]    # todas as disponíveis no plano grátis
+LIMITE_REQUISICOES_DIA = 90        # margem de segurança abaixo do limite de 100/dia
+
+requisicoes_usadas = 0
 
 
-def buscar_jogos():
-    """Busca os jogos do Corinthians na temporada definida."""
-    url = f"{API_BASE}/fixtures"
-    params = {"league": LEAGUE_ID, "season": SEASON, "team": TEAM_ID}
-    resp = requests.get(url, headers=HEADERS, params=params)
+def chamar_api(endpoint, params):
+    """Faz uma chamada à API contando requisições, e para se o limite diário chegar perto."""
+    global requisicoes_usadas
+    if requisicoes_usadas >= LIMITE_REQUISICOES_DIA:
+        raise SystemExit(
+            f"\nLimite de segurança de {LIMITE_REQUISICOES_DIA} requisições atingido. "
+            "Rode o script novamente amanhã para continuar de onde parou."
+        )
+    resp = requests.get(f"{API_BASE}/{endpoint}", headers=HEADERS, params=params)
+    requisicoes_usadas += 1
     resp.raise_for_status()
-    dados = resp.json()
+    return resp.json()
+
+
+def buscar_jogos(temporada):
+    """Busca os jogos do Corinthians numa temporada específica."""
+    dados = chamar_api("fixtures", {"league": LEAGUE_ID, "season": temporada, "team": TEAM_ID})
 
     if dados.get("errors"):
-        raise RuntimeError(f"Erro da API: {dados['errors']}")
+        print(f"  Aviso da API para temporada {temporada}: {dados['errors']}")
+        return []
 
-    jogos = dados["response"][:LIMITE_TESTE]
-    print(f"Encontrados {len(dados['response'])} jogos no total. Usando {len(jogos)} para o teste.")
+    jogos = dados["response"]
+    print(f"Temporada {temporada}: {len(jogos)} jogos encontrados.")
     return jogos
+
+
+def jogo_ja_processado(cur, fixture_id):
+    """Verifica se esse jogo já tem eventos salvos (pra não buscar de novo)."""
+    cur.execute(
+        "SELECT 1 FROM gols WHERE jogo_id = %s "
+        "UNION SELECT 1 FROM cartoes WHERE jogo_id = %s "
+        "UNION SELECT 1 FROM substituicoes WHERE jogo_id = %s LIMIT 1",
+        (fixture_id, fixture_id, fixture_id),
+    )
+    return cur.fetchone() is not None
 
 
 def buscar_eventos(fixture_id):
     """Busca gols, cartões e substituições de um jogo específico."""
-    url = f"{API_BASE}/fixtures/events"
-    params = {"fixture": fixture_id}
-    resp = requests.get(url, headers=HEADERS, params=params)
-    resp.raise_for_status()
-    dados = resp.json()
+    dados = chamar_api("fixtures/events", {"fixture": fixture_id})
     return dados["response"]
 
 
@@ -169,24 +197,35 @@ def main():
     cur = conn.cursor()
 
     try:
-        jogos = buscar_jogos()
+        total_processados = 0
+        total_pulados = 0
 
-        for fixture in jogos:
-            fixture_id = fixture["fixture"]["id"]
-            print(f"\nProcessando jogo {fixture_id}...")
+        for temporada in TEMPORADAS:
+            jogos = buscar_jogos(temporada)
 
-            jogo_id = get_or_create_jogo(cur, fixture)
-            eventos = buscar_eventos(fixture_id)
-            contagem = salvar_eventos(cur, jogo_id, eventos)
+            for fixture in jogos:
+                fixture_id = fixture["fixture"]["id"]
 
-            print(f"  -> {contagem['gols']} gols, {contagem['cartoes']} cartões, "
-                  f"{contagem['substituicoes']} substituições salvos "
-                  f"({contagem['ignorados']} eventos ignorados).")
+                if jogo_ja_processado(cur, fixture_id):
+                    total_pulados += 1
+                    continue
 
-            conn.commit()
-            time.sleep(1)  # respeita o limite de requisições do plano grátis
+                print(f"\nProcessando jogo {fixture_id} (temporada {temporada})...")
 
-        print("\nConcluído! Dados de teste salvos no banco.")
+                jogo_id = get_or_create_jogo(cur, fixture)
+                eventos = buscar_eventos(fixture_id)
+                contagem = salvar_eventos(cur, jogo_id, eventos)
+
+                print(f"  -> {contagem['gols']} gols, {contagem['cartoes']} cartões, "
+                      f"{contagem['substituicoes']} substituições salvos "
+                      f"({contagem['ignorados']} eventos ignorados).")
+
+                conn.commit()
+                total_processados += 1
+                time.sleep(1)  # respeita o limite de requisições do plano grátis
+
+        print(f"\nConcluído! {total_processados} jogos novos processados, "
+              f"{total_pulados} já existiam no banco e foram pulados.")
 
     except Exception as e:
         conn.rollback()
