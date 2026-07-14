@@ -39,18 +39,30 @@ LIMITE_REQUISICOES_DIA = 90        # margem de segurança abaixo do limite de 10
 requisicoes_usadas = 0
 
 
-def chamar_api(endpoint, params):
-    """Faz uma chamada à API contando requisições, e para se o limite diário chegar perto."""
+def chamar_api(endpoint, params, tentativas=3):
+    """Faz uma chamada à API contando requisições. Se bater no limite por minuto
+    (erro 429), espera um pouco e tenta de novo automaticamente."""
     global requisicoes_usadas
     if requisicoes_usadas >= LIMITE_REQUISICOES_DIA:
         raise SystemExit(
             f"\nLimite de segurança de {LIMITE_REQUISICOES_DIA} requisições atingido. "
             "Rode o script novamente amanhã para continuar de onde parou."
         )
-    resp = requests.get(f"{API_BASE}/{endpoint}", headers=HEADERS, params=params)
-    requisicoes_usadas += 1
-    resp.raise_for_status()
-    return resp.json()
+
+    for tentativa in range(1, tentativas + 1):
+        resp = requests.get(f"{API_BASE}/{endpoint}", headers=HEADERS, params=params)
+        requisicoes_usadas += 1
+
+        if resp.status_code == 429:
+            espera = 20 * tentativa
+            print(f"  Limite por minuto atingido, esperando {espera}s antes de tentar de novo...")
+            time.sleep(espera)
+            continue
+
+        resp.raise_for_status()
+        return resp.json()
+
+    raise RuntimeError(f"Falhou após {tentativas} tentativas por causa do erro 429 (limite por minuto).")
 
 
 def buscar_jogos(temporada):
@@ -222,7 +234,7 @@ def main():
 
                 conn.commit()
                 total_processados += 1
-                time.sleep(1)  # respeita o limite de requisições do plano grátis
+                time.sleep(7)  # respeita o limite de ~10 requisições por minuto do plano grátis
 
         print(f"\nConcluído! {total_processados} jogos novos processados, "
               f"{total_pulados} já existiam no banco e foram pulados.")
