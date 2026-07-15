@@ -1,10 +1,11 @@
 """
-Motor de padrões - Cartões de jogador + Escanteios do time.
+Motor de padrões - Cartões, faltas, desarmes, chutes e impedimentos de
+jogador + Escanteios do time.
 
 Para cada jogador com dados suficientes, calcula a frequência histórica de
-ele receber cartão (amarelo ou vermelho). E, para o time, calcula a
-frequência de passar de cada linha de escanteios testada (3.5, 4.5, ...).
-Ambos considerando os últimos 50 jogos disponíveis.
+cada padrão (ex: recebeu cartão, cometeu falta, teve X+ desarmes...). Para
+o time, calcula a frequência de passar de cada linha de escanteios testada.
+Todos considerando os últimos 50 jogos disponíveis.
 
 Feito para rodar automaticamente todo dia (depois que o script de coleta
 de dados já rodou), recalculando os padrões com os dados mais recentes.
@@ -24,6 +25,18 @@ JANELA_MAXIMA_DE_JOGOS = 50       # olha no máximo os últimos 50 jogos
 # linhas de escanteio testadas, no mesmo padrão que as casas de aposta usam
 # (mercados "mais de X.5 escanteios")
 LINHAS_ESCANTEIO = [3.5, 4.5, 5.5, 6.5, 7.5]
+
+# novos padrões por jogador: nome do tipo -> (coluna no banco, linhas testadas)
+PADROES_LINHA_JOGADOR = {
+    "falta_cometida": ("faltas_cometidas", [0.5, 1.5, 2.5]),
+    "desarme": ("desarmes", [0.5, 1.5, 2.5]),
+    "chute_no_gol": ("chutes_no_gol", [0.5, 1.5]),
+}
+
+# padrões simples (sim/não teve pelo menos 1 no jogo)
+PADROES_FREQUENCIA_JOGADOR = {
+    "impedimento": "impedimentos",
+}
 
 
 def calcular_padroes_cartao(cur):
@@ -129,6 +142,107 @@ def salvar_padroes_escanteio(cur, resultados):
         print(f"  Mais de {linha} escanteios: {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
 
 
+def calcular_padrao_linha_jogador(cur, coluna, linhas_testadas):
+    """Função genérica: para cada jogador, testa várias linhas (0.5, 1.5, ...)
+    numa coluna numérica da tabela jogador_estatisticas_jogo (ex: desarmes)."""
+    cur.execute("SELECT id, nome FROM jogadores")
+    jogadores = cur.fetchall()
+
+    resultados = []
+
+    for jogador_id, nome in jogadores:
+        cur.execute(
+            f"""
+            SELECT jeg.{coluna}
+            FROM jogador_estatisticas_jogo jeg
+            JOIN jogos j ON j.id = jeg.jogo_id
+            WHERE jeg.jogador_id = %s AND jeg.{coluna} IS NOT NULL
+            ORDER BY j.data_jogo DESC
+            LIMIT %s
+            """,
+            (jogador_id, JANELA_MAXIMA_DE_JOGOS),
+        )
+        valores = [row[0] for row in cur.fetchall()]
+
+        jogos_analisados = len(valores)
+        if jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR:
+            continue
+
+        for linha in linhas_testadas:
+            jogos_acima = sum(1 for v in valores if float(v) > linha)
+            frequencia = round(100 * jogos_acima / jogos_analisados, 2)
+            resultados.append((jogador_id, nome, linha, jogos_analisados, jogos_acima, frequencia))
+
+    return resultados
+
+
+def salvar_padrao_linha_jogador(cur, tipo, resultados):
+    for jogador_id, nome, linha, jogos_analisados, jogos_acima, frequencia in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_jogador_linha (jogador_id, tipo, linha, jogos_analisados, jogos_acima, frequencia, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (jogador_id, tipo, linha) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                jogos_acima = EXCLUDED.jogos_acima,
+                frequencia = EXCLUDED.frequencia,
+                atualizado_em = NOW()
+            """,
+            (jogador_id, tipo, linha, jogos_analisados, jogos_acima, frequencia),
+        )
+    print(f"  {tipo}: {len(resultados)} linha(s)/jogador(es) calculados.")
+
+
+def calcular_padrao_frequencia_jogador(cur, coluna):
+    """Função genérica: para cada jogador, calcula a frequência de ter tido
+    pelo menos 1 ocorrência (ex: pelo menos 1 impedimento no jogo)."""
+    cur.execute("SELECT id, nome FROM jogadores")
+    jogadores = cur.fetchall()
+
+    resultados = []
+
+    for jogador_id, nome in jogadores:
+        cur.execute(
+            f"""
+            SELECT jeg.{coluna}
+            FROM jogador_estatisticas_jogo jeg
+            JOIN jogos j ON j.id = jeg.jogo_id
+            WHERE jeg.jogador_id = %s AND jeg.{coluna} IS NOT NULL
+            ORDER BY j.data_jogo DESC
+            LIMIT %s
+            """,
+            (jogador_id, JANELA_MAXIMA_DE_JOGOS),
+        )
+        valores = [row[0] for row in cur.fetchall()]
+
+        jogos_analisados = len(valores)
+        if jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR:
+            continue
+
+        jogos_com_evento = sum(1 for v in valores if v and v > 0)
+        frequencia = round(100 * jogos_com_evento / jogos_analisados, 2)
+        resultados.append((jogador_id, nome, jogos_analisados, jogos_com_evento, frequencia))
+
+    return resultados
+
+
+def salvar_padrao_frequencia_jogador(cur, tipo, resultados):
+    for jogador_id, nome, jogos_analisados, jogos_com_evento, frequencia in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_jogador_frequencia (jogador_id, tipo, jogos_analisados, jogos_com_evento, frequencia, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (jogador_id, tipo) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                jogos_com_evento = EXCLUDED.jogos_com_evento,
+                frequencia = EXCLUDED.frequencia,
+                atualizado_em = NOW()
+            """,
+            (jogador_id, tipo, jogos_analisados, jogos_com_evento, frequencia),
+        )
+    print(f"  {tipo}: {len(resultados)} jogador(es) calculados.")
+
+
 def main():
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = False
@@ -158,6 +272,24 @@ def main():
             salvar_padroes_escanteio(cur, resultados_escanteio)
             conn.commit()
             print(f"Concluído! Padrões de escanteio calculados com base em {jogos_analisados} jogo(s).")
+
+        print("\nCalculando padrões de linha por jogador (faltas, desarmes, chutes)...")
+        for tipo, (coluna, linhas) in PADROES_LINHA_JOGADOR.items():
+            resultados = calcular_padrao_linha_jogador(cur, coluna, linhas)
+            if resultados:
+                salvar_padrao_linha_jogador(cur, tipo, resultados)
+                conn.commit()
+            else:
+                print(f"  {tipo}: nenhum jogador com dados suficientes ainda.")
+
+        print("\nCalculando padrões de frequência por jogador (impedimentos)...")
+        for tipo, coluna in PADROES_FREQUENCIA_JOGADOR.items():
+            resultados = calcular_padrao_frequencia_jogador(cur, coluna)
+            if resultados:
+                salvar_padrao_frequencia_jogador(cur, tipo, resultados)
+                conn.commit()
+            else:
+                print(f"  {tipo}: nenhum jogador com dados suficientes ainda.")
 
     except Exception as e:
         conn.rollback()
