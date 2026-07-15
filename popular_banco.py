@@ -39,14 +39,19 @@ LIMITE_REQUISICOES_DIA = 90        # margem de segurança abaixo do limite de 10
 requisicoes_usadas = 0
 
 
+class LimiteDiarioAtingido(Exception):
+    """Levantada quando chegamos perto do limite diário de requisições da API."""
+    pass
+
+
 def chamar_api(endpoint, params, tentativas=3):
     """Faz uma chamada à API contando requisições. Se bater no limite por minuto
     (erro 429), espera um pouco e tenta de novo automaticamente."""
     global requisicoes_usadas
     if requisicoes_usadas >= LIMITE_REQUISICOES_DIA:
-        raise SystemExit(
-            f"\nLimite de segurança de {LIMITE_REQUISICOES_DIA} requisições atingido. "
-            "Rode o script novamente amanhã para continuar de onde parou."
+        raise LimiteDiarioAtingido(
+            f"Limite de segurança de {LIMITE_REQUISICOES_DIA} requisições atingido. "
+            "O script vai continuar de onde parou na próxima execução automática."
         )
 
     for tentativa in range(1, tentativas + 1):
@@ -303,6 +308,11 @@ def main():
 
         print(f"\nConcluído! {total_processados} jogos novos processados, "
               f"{total_pulados} já existiam no banco e foram pulados.")
+
+    except LimiteDiarioAtingido as e:
+        conn.commit()  # garante que o que já foi processado nessa execução fica salvo
+        print(f"\n{e}")
+        print(f"({total_processados} jogos processados nessa execução antes de parar.)")
 
     except Exception as e:
         conn.rollback()
