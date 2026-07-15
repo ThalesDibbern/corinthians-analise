@@ -1,9 +1,10 @@
 """
-Motor de padrões - Cartões de jogador.
+Motor de padrões - Cartões de jogador + Escanteios do time.
 
-Para cada jogador com dados suficientes no banco, calcula a frequência
-histórica de ele receber cartão (amarelo ou vermelho), considerando os
-últimos 50 jogos dele (ou menos, se ainda não tiver 50 registrados).
+Para cada jogador com dados suficientes, calcula a frequência histórica de
+ele receber cartão (amarelo ou vermelho). E, para o time, calcula a
+frequência de passar de cada linha de escanteios testada (3.5, 4.5, ...).
+Ambos considerando os últimos 50 jogos disponíveis.
 
 Feito para rodar automaticamente todo dia (depois que o script de coleta
 de dados já rodou), recalculando os padrões com os dados mais recentes.
@@ -18,7 +19,11 @@ import psycopg2
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 JOGOS_MINIMOS_PARA_ANALISAR = 5   # não vale a pena calcular padrão com poucos jogos
-JANELA_MAXIMA_DE_JOGOS = 50       # olha no máximo os últimos 50 jogos do jogador
+JANELA_MAXIMA_DE_JOGOS = 50       # olha no máximo os últimos 50 jogos
+
+# linhas de escanteio testadas, no mesmo padrão que as casas de aposta usam
+# (mercados "mais de X.5 escanteios")
+LINHAS_ESCANTEIO = [3.5, 4.5, 5.5, 6.5, 7.5]
 
 
 def calcular_padroes_cartao(cur):
@@ -74,6 +79,56 @@ def salvar_padroes(cur, resultados):
         print(f"  {nome}: {jogos_com_cartao}/{jogos_analisados} jogos com cartão ({frequencia}%)")
 
 
+def calcular_padroes_escanteio(cur):
+    """Olha os escanteios do Corinthians (não do adversário) nos últimos jogos,
+    e calcula a frequência de passar de cada linha testada (3.5, 4.5, ...)."""
+    cur.execute(
+        """
+        SELECT eg.escanteios
+        FROM estatisticas_jogo eg
+        JOIN jogos j ON j.id = eg.jogo_id
+        WHERE (j.mandante = TRUE AND eg.lado = 'mandante')
+           OR (j.mandante = FALSE AND eg.lado = 'visitante')
+        ORDER BY j.data_jogo DESC
+        LIMIT %s
+        """,
+        (JANELA_MAXIMA_DE_JOGOS,),
+    )
+    linhas_brutas = [row[0] for row in cur.fetchall() if row[0] is not None]
+
+    jogos_analisados = len(linhas_brutas)
+    if jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR:
+        return None, jogos_analisados
+
+    media = round(sum(float(v) for v in linhas_brutas) / jogos_analisados, 2)
+
+    resultados = []
+    for linha in LINHAS_ESCANTEIO:
+        jogos_acima = sum(1 for v in linhas_brutas if float(v) > linha)
+        frequencia = round(100 * jogos_acima / jogos_analisados, 2)
+        resultados.append((linha, jogos_analisados, jogos_acima, frequencia, media))
+
+    return resultados, jogos_analisados
+
+
+def salvar_padroes_escanteio(cur, resultados):
+    for linha, jogos_analisados, jogos_acima, frequencia, media in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_time_escanteio (linha, jogos_analisados, jogos_acima_da_linha, frequencia, media, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (linha) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                jogos_acima_da_linha = EXCLUDED.jogos_acima_da_linha,
+                frequencia = EXCLUDED.frequencia,
+                media = EXCLUDED.media,
+                atualizado_em = NOW()
+            """,
+            (linha, jogos_analisados, jogos_acima, frequencia, media),
+        )
+        print(f"  Mais de {linha} escanteios: {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
+
+
 def main():
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = False
@@ -81,19 +136,28 @@ def main():
 
     try:
         print("Calculando padrões de cartão por jogador...")
-        resultados = calcular_padroes_cartao(cur)
+        resultados_cartao = calcular_padroes_cartao(cur)
 
-        if not resultados:
+        if not resultados_cartao:
             print("Nenhum jogador com dados suficientes ainda "
                   f"(mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos analisados).")
-            return
+        else:
+            # ordena do mais frequente pro menos frequente, só para o log ficar mais legível
+            resultados_cartao.sort(key=lambda r: r[4], reverse=True)
+            salvar_padroes(cur, resultados_cartao)
+            conn.commit()
+            print(f"Concluído! Padrões de cartão calculados para {len(resultados_cartao)} jogador(es).")
 
-        # ordena do mais frequente pro menos frequente, só para o log ficar mais legível
-        resultados.sort(key=lambda r: r[4], reverse=True)
-        salvar_padroes(cur, resultados)
+        print("\nCalculando padrões de escanteio do time...")
+        resultados_escanteio, jogos_analisados = calcular_padroes_escanteio(cur)
 
-        conn.commit()
-        print(f"\nConcluído! Padrões calculados para {len(resultados)} jogador(es).")
+        if not resultados_escanteio:
+            print(f"Dados insuficientes ainda para escanteio ({jogos_analisados} jogos analisados, "
+                  f"mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+        else:
+            salvar_padroes_escanteio(cur, resultados_escanteio)
+            conn.commit()
+            print(f"Concluído! Padrões de escanteio calculados com base em {jogos_analisados} jogo(s).")
 
     except Exception as e:
         conn.rollback()
