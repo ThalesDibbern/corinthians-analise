@@ -1,17 +1,19 @@
 """
-Script que busca jogos, gols, cartões, substituições e estatísticas agregadas
-(posse de bola, escanteios, faltas, passes, finalizações) do Corinthians na
-API-Football, e salva tudo no banco Postgres (Railway).
+Script que busca jogos, gols, cartões, substituições, estatísticas agregadas
+do time (posse de bola, escanteios, faltas, passes, finalizações) e
+estatísticas individuais por jogador (chutes, desarmes, faltas cometidas e
+sofridas, impedimentos, nota etc.) do Corinthians na API-Football, e salva
+tudo no banco Postgres (Railway).
 
 MODO HISTÓRICO: busca todos os jogos das temporadas 2022, 2023 e 2024
 (as disponíveis no plano grátis). Pula o que já está no banco - verifica
-eventos e estatísticas de forma independente, então é seguro rodar esse
-script várias vezes, ele só processa o que falta, sem duplicar nada.
+eventos e cada tipo de estatística de forma independente, então é seguro
+rodar esse script várias vezes, ele só processa o que falta, sem duplicar nada.
 
 O plano grátis da API-Football tem um limite de 100 requisições por dia.
-Cada jogo consome até 2 requisições (eventos + estatísticas). Pode ser
-necessário rodar o script em mais de um dia até completar tudo - ele
-simplesmente continua de onde parou.
+Cada jogo consome até 3 requisições (eventos + estatísticas do time +
+estatísticas por jogador). Pode ser necessário rodar o script em mais de
+um dia até completar tudo - ele simplesmente continua de onde parou.
 
 Variáveis de ambiente necessárias (configuradas no Railway, aba "Variables"):
   - API_FOOTBALL_KEY   -> sua chave da API-Football (api-sports.io)
@@ -100,6 +102,12 @@ def jogo_tem_estatisticas(cur, fixture_id):
     return cur.fetchone() is not None
 
 
+def jogo_tem_estatisticas_jogador(cur, fixture_id):
+    """Verifica se esse jogo já tem as estatísticas individuais por jogador salvas."""
+    cur.execute("SELECT 1 FROM jogador_estatisticas_jogo WHERE jogo_id = %s LIMIT 1", (fixture_id,))
+    return cur.fetchone() is not None
+
+
 def buscar_eventos(fixture_id):
     """Busca gols, cartões e substituições de um jogo específico."""
     dados = chamar_api("fixtures/events", {"fixture": fixture_id})
@@ -110,6 +118,13 @@ def buscar_estatisticas(fixture_id):
     """Busca as estatísticas agregadas do jogo (posse, escanteios, faltas etc.),
     uma entrada por lado (mandante/visitante)."""
     dados = chamar_api("fixtures/statistics", {"fixture": fixture_id})
+    return dados["response"]
+
+
+def buscar_estatisticas_jogadores(fixture_id):
+    """Busca as estatísticas individuais de cada jogador que entrou em campo
+    (faltas cometidas/sofridas, chutes, desarmes, impedimentos etc.)."""
+    dados = chamar_api("fixtures/players", {"fixture": fixture_id})
     return dados["response"]
 
 
@@ -160,6 +175,74 @@ def salvar_estatisticas(cur, jogo_id, estatisticas, home_team_id):
             ),
         )
         salvos += 1
+
+    return salvos
+
+
+def salvar_estatisticas_jogadores(cur, jogo_id, dados_jogadores, home_team_id):
+    """Salva uma linha por jogador que entrou em campo, com suas estatísticas
+    individuais do jogo (faltas, chutes, desarmes, impedimentos etc.)."""
+    salvos = 0
+
+    for bloco_time in dados_jogadores:
+        team_id = bloco_time["team"]["id"]
+        lado = "mandante" if team_id == home_team_id else "visitante"
+
+        for bloco_jogador in bloco_time["players"]:
+            nome = bloco_jogador["player"]["name"]
+            if not nome:
+                continue
+
+            stats_lista = bloco_jogador.get("statistics") or []
+            if not stats_lista:
+                continue
+            s = stats_lista[0]  # um jogador normalmente tem só um bloco por jogo
+
+            minutos = (s.get("games") or {}).get("minutes")
+            if minutos is None:
+                continue  # jogador nem entrou em campo, não vale a pena salvar
+
+            jogador_id = get_or_create_jogador(cur, nome)
+
+            games = s.get("games") or {}
+            shots = s.get("shots") or {}
+            goals = s.get("goals") or {}
+            passes = s.get("passes") or {}
+            tackles = s.get("tackles") or {}
+            duels = s.get("duels") or {}
+            dribbles = s.get("dribbles") or {}
+            fouls = s.get("fouls") or {}
+            cards = s.get("cards") or {}
+            penalty = s.get("penalty") or {}
+
+            cur.execute(
+                """INSERT INTO jogador_estatisticas_jogo (
+                       jogo_id, jogador_id, lado, minutos, posicao, nota,
+                       chutes, chutes_no_gol, gols, assistencias,
+                       passes, passes_certos, desarmes, interceptacoes,
+                       duelos_total, duelos_vencidos, dribles_tentados, dribles_sucesso,
+                       faltas_cometidas, faltas_sofridas, impedimentos,
+                       cartao_amarelo, cartao_vermelho,
+                       penalti_marcado, penalti_perdido, penalti_sofrido
+                   ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (
+                    jogo_id, jogador_id, lado, minutos,
+                    games.get("position"),
+                    games.get("rating"),
+                    shots.get("total"), shots.get("on"),
+                    goals.get("total"), goals.get("assists"),
+                    passes.get("total"), passes.get("key"),
+                    tackles.get("total"), tackles.get("interceptions"),
+                    duels.get("total"), duels.get("won"),
+                    dribbles.get("attempts"), dribbles.get("success"),
+                    fouls.get("committed"), fouls.get("drawn"),
+                    s.get("offsides"),
+                    cards.get("yellow"), cards.get("red"),
+                    penalty.get("scored"), penalty.get("missed"), penalty.get("won"),
+                ),
+            )
+            salvos += 1
 
     return salvos
 
@@ -280,8 +363,9 @@ def main():
 
                 falta_eventos = not jogo_ja_processado(cur, fixture_id)
                 falta_estatisticas = not jogo_tem_estatisticas(cur, fixture_id)
+                falta_estatisticas_jogador = not jogo_tem_estatisticas_jogador(cur, fixture_id)
 
-                if not falta_eventos and not falta_estatisticas:
+                if not falta_eventos and not falta_estatisticas and not falta_estatisticas_jogador:
                     total_pulados += 1
                     continue
 
@@ -301,6 +385,13 @@ def main():
                     estatisticas = buscar_estatisticas(fixture_id)
                     salvos = salvar_estatisticas(cur, jogo_id, estatisticas, home_team_id)
                     print(f"  -> estatísticas de {salvos} lado(s) salvas.")
+                    conn.commit()
+                    time.sleep(7)
+
+                if falta_estatisticas_jogador:
+                    stats_jogadores = buscar_estatisticas_jogadores(fixture_id)
+                    salvos = salvar_estatisticas_jogadores(cur, jogo_id, stats_jogadores, home_team_id)
+                    print(f"  -> estatísticas individuais de {salvos} jogador(es) salvas.")
                     conn.commit()
                     time.sleep(7)
 
