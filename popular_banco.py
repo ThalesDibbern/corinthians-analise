@@ -1,3 +1,4 @@
+
 """
 Script que busca jogos, gols, cartões, substituições, estatísticas agregadas
 do time (posse de bola, escanteios, faltas, passes, finalizações) e
@@ -39,6 +40,27 @@ TEMPORADAS = [2022, 2023, 2024]    # todas as disponíveis no plano grátis
 LIMITE_REQUISICOES_DIA = 90        # margem de segurança abaixo do limite de 100/dia
 
 requisicoes_usadas = 0
+_cursor_para_contador = None  # referência ao cursor do banco, usada só pelo controle de limite
+
+
+def carregar_requisicoes_usadas_hoje(cur):
+    """Lê do banco quantas requisições já foram usadas HOJE, considerando
+    também execuções anteriores do script no mesmo dia."""
+    cur.execute(
+        "INSERT INTO controle_api_uso (dia, requisicoes) VALUES (CURRENT_DATE, 0) "
+        "ON CONFLICT (dia) DO NOTHING"
+    )
+    cur.execute("SELECT requisicoes FROM controle_api_uso WHERE dia = CURRENT_DATE")
+    return cur.fetchone()[0]
+
+
+def persistir_uma_requisicao(cur):
+    """Registra no banco que mais uma requisição foi usada hoje, para que
+    outras execuções do script no mesmo dia saibam disso."""
+    cur.execute(
+        "UPDATE controle_api_uso SET requisicoes = requisicoes + 1 WHERE dia = CURRENT_DATE"
+    )
+    cur.connection.commit()
 
 
 class LimiteDiarioAtingido(Exception):
@@ -52,13 +74,16 @@ def chamar_api(endpoint, params, tentativas=3):
     global requisicoes_usadas
     if requisicoes_usadas >= LIMITE_REQUISICOES_DIA:
         raise LimiteDiarioAtingido(
-            f"Limite de segurança de {LIMITE_REQUISICOES_DIA} requisições atingido. "
-            "O script vai continuar de onde parou na próxima execução automática."
+            f"Limite de segurança de {LIMITE_REQUISICOES_DIA} requisições atingido hoje "
+            "(somando todas as execuções do dia). O script vai continuar de onde parou "
+            "na próxima execução automática, amanhã."
         )
 
     for tentativa in range(1, tentativas + 1):
         resp = requests.get(f"{API_BASE}/{endpoint}", headers=HEADERS, params=params)
         requisicoes_usadas += 1
+        if _cursor_para_contador is not None:
+            persistir_uma_requisicao(_cursor_para_contador)
 
         if resp.status_code == 429:
             espera = 20 * tentativa
@@ -346,9 +371,15 @@ def salvar_eventos(cur, jogo_id, eventos):
 
 
 def main():
+    global requisicoes_usadas, _cursor_para_contador
+
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = False
     cur = conn.cursor()
+    _cursor_para_contador = cur
+
+    requisicoes_usadas = carregar_requisicoes_usadas_hoje(cur)
+    print(f"Requisições já usadas hoje (somando execuções anteriores): {requisicoes_usadas}")
 
     try:
         total_processados = 0
