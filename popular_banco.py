@@ -1,17 +1,17 @@
 """
-Script que busca jogos, gols, cartões e substituições do Corinthians
-na API-Football e salva no banco Postgres (Railway).
+Script que busca jogos, gols, cartões, substituições e estatísticas agregadas
+(posse de bola, escanteios, faltas, passes, finalizações) do Corinthians na
+API-Football, e salva tudo no banco Postgres (Railway).
 
 MODO HISTÓRICO: busca todos os jogos das temporadas 2022, 2023 e 2024
-(as disponíveis no plano grátis). Pula jogos que já estão no banco,
-então é seguro rodar esse script várias vezes - ele só processa o que
-falta, sem duplicar nada.
+(as disponíveis no plano grátis). Pula o que já está no banco - verifica
+eventos e estatísticas de forma independente, então é seguro rodar esse
+script várias vezes, ele só processa o que falta, sem duplicar nada.
 
 O plano grátis da API-Football tem um limite de 100 requisições por dia.
-Cada jogo consome 1 requisição de eventos (a lista de jogos em si já vem
-numa única chamada por temporada). Com 3 temporadas de ~38 jogos cada
-(~114 jogos), pode ser necessário rodar o script em mais de um dia até
-completar tudo - ele simplesmente continua de onde parou.
+Cada jogo consome até 2 requisições (eventos + estatísticas). Pode ser
+necessário rodar o script em mais de um dia até completar tudo - ele
+simplesmente continua de onde parou.
 
 Variáveis de ambiente necessárias (configuradas no Railway, aba "Variables"):
   - API_FOOTBALL_KEY   -> sua chave da API-Football (api-sports.io)
@@ -89,9 +89,22 @@ def jogo_ja_processado(cur, fixture_id):
     return cur.fetchone() is not None
 
 
+def jogo_tem_estatisticas(cur, fixture_id):
+    """Verifica se esse jogo já tem as estatísticas agregadas salvas."""
+    cur.execute("SELECT 1 FROM estatisticas_jogo WHERE jogo_id = %s LIMIT 1", (fixture_id,))
+    return cur.fetchone() is not None
+
+
 def buscar_eventos(fixture_id):
     """Busca gols, cartões e substituições de um jogo específico."""
     dados = chamar_api("fixtures/events", {"fixture": fixture_id})
+    return dados["response"]
+
+
+def buscar_estatisticas(fixture_id):
+    """Busca as estatísticas agregadas do jogo (posse, escanteios, faltas etc.),
+    uma entrada por lado (mandante/visitante)."""
+    dados = chamar_api("fixtures/statistics", {"fixture": fixture_id})
     return dados["response"]
 
 
@@ -103,6 +116,47 @@ def get_or_create_jogador(cur, nome):
         return row[0]
     cur.execute("INSERT INTO jogadores (nome) VALUES (%s) RETURNING id", (nome,))
     return cur.fetchone()[0]
+
+
+def salvar_estatisticas(cur, jogo_id, estatisticas, home_team_id):
+    """Salva as estatísticas agregadas (por lado) na tabela `estatisticas_jogo`."""
+    salvos = 0
+
+    for bloco in estatisticas:
+        team_id = bloco["team"]["id"]
+        lado = "mandante" if team_id == home_team_id else "visitante"
+
+        valores = {item["type"]: item["value"] for item in bloco["statistics"]}
+
+        def numero(chave):
+            v = valores.get(chave)
+            if v is None:
+                return None
+            if isinstance(v, str) and v.endswith("%"):
+                v = v.replace("%", "")
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        cur.execute(
+            """INSERT INTO estatisticas_jogo (jogo_id, lado, posse_de_bola, escanteios,
+                                                faltas, passes, finalizacoes, desarmes)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            (
+                jogo_id,
+                lado,
+                numero("Ball Possession"),
+                numero("Corner Kicks"),
+                numero("Fouls"),
+                numero("Total passes"),
+                numero("Total Shots"),
+                None,  # a API não fornece desarmes (tackles) nesse endpoint
+            ),
+        )
+        salvos += 1
+
+    return salvos
 
 
 def get_or_create_jogo(cur, fixture):
@@ -217,24 +271,35 @@ def main():
 
             for fixture in jogos:
                 fixture_id = fixture["fixture"]["id"]
+                home_team_id = fixture["teams"]["home"]["id"]
 
-                if jogo_ja_processado(cur, fixture_id):
+                falta_eventos = not jogo_ja_processado(cur, fixture_id)
+                falta_estatisticas = not jogo_tem_estatisticas(cur, fixture_id)
+
+                if not falta_eventos and not falta_estatisticas:
                     total_pulados += 1
                     continue
 
                 print(f"\nProcessando jogo {fixture_id} (temporada {temporada})...")
-
                 jogo_id = get_or_create_jogo(cur, fixture)
-                eventos = buscar_eventos(fixture_id)
-                contagem = salvar_eventos(cur, jogo_id, eventos)
 
-                print(f"  -> {contagem['gols']} gols, {contagem['cartoes']} cartões, "
-                      f"{contagem['substituicoes']} substituições salvos "
-                      f"({contagem['ignorados']} eventos ignorados).")
+                if falta_eventos:
+                    eventos = buscar_eventos(fixture_id)
+                    contagem = salvar_eventos(cur, jogo_id, eventos)
+                    print(f"  -> {contagem['gols']} gols, {contagem['cartoes']} cartões, "
+                          f"{contagem['substituicoes']} substituições salvos "
+                          f"({contagem['ignorados']} eventos ignorados).")
+                    conn.commit()
+                    time.sleep(7)  # respeita o limite de ~10 requisições por minuto do plano grátis
 
-                conn.commit()
+                if falta_estatisticas:
+                    estatisticas = buscar_estatisticas(fixture_id)
+                    salvos = salvar_estatisticas(cur, jogo_id, estatisticas, home_team_id)
+                    print(f"  -> estatísticas de {salvos} lado(s) salvas.")
+                    conn.commit()
+                    time.sleep(7)
+
                 total_processados += 1
-                time.sleep(7)  # respeita o limite de ~10 requisições por minuto do plano grátis
 
         print(f"\nConcluído! {total_processados} jogos novos processados, "
               f"{total_pulados} já existiam no banco e foram pulados.")
