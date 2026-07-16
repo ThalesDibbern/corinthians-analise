@@ -28,21 +28,33 @@ PARTICIPANT_ID = 1957   # Corinthians
 BOOKMAKERS = "betano.bet.br,superbet.bet.br"
 DIAS_ANTECEDENCIA = 2   # busca odds de jogos que acontecem em até X dias
 
-# Palavras usadas para filtrar quais mercados nos interessam (cartão de
-# jogador + escanteios do time). Comparação é feita sem diferenciar maiúsculas.
-PALAVRAS_MERCADO_INTERESSE = ["card", "cartão", "cartao", "corner", "escanteio"]
+# Palavras usadas para filtrar quais mercados nos interessam. Comparação é
+# feita sem diferenciar maiúsculas.
+PALAVRAS_MERCADO_INTERESSE = [
+    "card", "cartão", "cartao", "corner", "escanteio",
+    "falta", "desarme", "chute", "impediment",
+]
 
 
 def buscar_catalogo_mercados():
-    """Busca a lista de todos os mercados existentes, para traduzir o
-    market_id (um número) para o nome real do mercado (ex: 'Cartão do Jogador')."""
+    """Busca a lista de todos os mercados existentes, incluindo a linha
+    (handicap) de cada mercado e o nome de cada outcome (Mais/Menos/Sim/Não/
+    0/1+/2+), para conseguirmos interpretar as odds corretamente depois."""
     resp = requests.get(
         f"{API_BASE}/markets",
         params={"sportId": SPORT_ID, "language": "pt", "apiKey": API_KEY},
     )
     resp.raise_for_status()
     mercados = resp.json()
-    return {str(m["marketId"]): m["marketName"] for m in mercados}
+
+    catalogo = {}
+    for m in mercados:
+        catalogo[str(m["marketId"])] = {
+            "nome": m["marketName"],
+            "handicap": m.get("handicap"),
+            "outcomes": {str(o["outcomeId"]): o["outcomeName"] for o in m.get("outcomes", [])},
+        }
+    return catalogo
 
 
 def buscar_proximos_jogos():
@@ -127,7 +139,8 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante):
 
 def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados):
     """Percorre as odds de todas as casas/mercados retornados e salva só os
-    mercados de interesse (cartão de jogador + escanteios do time)."""
+    mercados de interesse (cartão de jogador + escanteios do time), incluindo
+    a linha (handicap) e a direção (Mais/Menos/Sim/Não) de cada odd."""
     salvos = 0
     bookmaker_odds = dados_odds.get("bookmakerOdds", {})
 
@@ -137,12 +150,16 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados):
 
         markets = info_casa.get("markets", {})
         for market_id, market_info in markets.items():
-            nome_mercado = catalogo_mercados.get(market_id)
-            if not nome_mercado or not mercado_interessa(nome_mercado):
+            info_mercado = catalogo_mercados.get(market_id)
+            if not info_mercado or not mercado_interessa(info_mercado["nome"]):
                 continue
+
+            nome_mercado = info_mercado["nome"]
+            linha = info_mercado["handicap"]
 
             outcomes = market_info.get("outcomes", {})
             for outcome_id, outcome_info in outcomes.items():
+                direcao = info_mercado["outcomes"].get(outcome_id)
                 players = outcome_info.get("players", {})
 
                 for player_key, dados in players.items():
@@ -161,9 +178,9 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados):
                         descricao_mercado = f"{nome_mercado} - {player_name}"
 
                     cur.execute(
-                        """INSERT INTO odds (jogo_id, jogador_id, casa_aposta, mercado, valor_odd)
-                           VALUES (%s, %s, %s, %s, %s)""",
-                        (jogo_id, jogador_id, casa, descricao_mercado, price),
+                        """INSERT INTO odds (jogo_id, jogador_id, casa_aposta, mercado, valor_odd, linha, direcao)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                        (jogo_id, jogador_id, casa, descricao_mercado, price, linha, direcao),
                     )
                     salvos += 1
 
