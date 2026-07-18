@@ -163,11 +163,11 @@ PAGINA = """
             <div class="linha-filtro">
                 <div>
                     <label for="odd_min">Odd mínima</label>
-                    <input type="number" step="0.1" min="1.01" name="odd_min" id="odd_min" value="{{ odd_min }}">
+                    <input type="number" step="0.01" min="1.01" name="odd_min" id="odd_min" value="{{ odd_min }}">
                 </div>
                 <div>
                     <label for="odd_max">Odd máxima</label>
-                    <input type="number" step="0.1" min="1.01" name="odd_max" id="odd_max" value="{{ odd_max }}">
+                    <input type="number" step="0.01" min="1.01" name="odd_max" id="odd_max" value="{{ odd_max }}">
                 </div>
                 <button type="submit">Gerar recomendações da rodada</button>
             </div>
