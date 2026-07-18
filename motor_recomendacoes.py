@@ -140,6 +140,7 @@ def calcular_recomendacoes(cur):
                 "odd_oferecida": valor_odd,
                 "probabilidade_historica": round(probabilidade * 100, 2),
                 "valor_esperado": valor_esperado,
+                "linha": linha,
                 "adversario": adversario,
                 "data_jogo": data_jogo,
             })
@@ -148,20 +149,23 @@ def calcular_recomendacoes(cur):
 
 
 def salvar_recomendacoes(cur, recomendacoes):
-    # limpa recomendações antigas antes de gerar as novas, pra não acumular
-    # recomendações desatualizadas de execuções anteriores
-    cur.execute("DELETE FROM recomendacoes")
+    # limpa só as recomendações de jogos FUTUROS antes de gerar as novas
+    # (as de jogos já ocorridos ficam intactas até o script de arquivamento
+    # processá-las - senão perderíamos o histórico antes de avaliar acerto/erro)
+    cur.execute(
+        "DELETE FROM recomendacoes WHERE jogo_id IN (SELECT id FROM jogos WHERE data_jogo >= CURRENT_DATE)"
+    )
 
     for r in recomendacoes:
         cur.execute(
             """INSERT INTO recomendacoes
                (jogo_id, jogador_id, tipo_padrao, descricao, casa_aposta,
-                odd_oferecida, probabilidade_historica, valor_esperado)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                odd_oferecida, probabilidade_historica, valor_esperado, linha)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 r["jogo_id"], r["jogador_id"], r["tipo_padrao"], r["descricao"],
                 r["casa_aposta"], r["odd_oferecida"], r["probabilidade_historica"],
-                r["valor_esperado"],
+                r["valor_esperado"], r.get("linha"),
             ),
         )
         print(f"  [{r['data_jogo']} vs {r['adversario']}] {r['descricao']} "
