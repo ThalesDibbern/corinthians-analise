@@ -30,9 +30,14 @@ DIAS_ANTECEDENCIA = 2   # busca odds de jogos que acontecem em até X dias
 
 # Palavras usadas para filtrar quais mercados nos interessam. Comparação é
 # feita sem diferenciar maiúsculas.
+# OBS: "resultado"/"vencedor"/"1x2" tentam capturar o mercado de resultado
+# final (1X2) - o nome exato em português na OddsPapi ainda não foi
+# confirmado manualmente, então pode ser necessário ajustar essas palavras
+# depois de ver o dado real chegando (ou não) na tabela `odds`.
 PALAVRAS_MERCADO_INTERESSE = [
     "card", "cartão", "cartao", "corner", "escanteio",
     "falta", "desarme", "chute", "impediment",
+    "resultado", "vencedor", "1x2",
 ]
 
 
