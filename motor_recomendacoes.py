@@ -1,176 +1,126 @@
 """
-Motor de recomendações - cruza os padrões já calculados (motor_padroes.py)
-com as odds reais coletadas (atualizar_odds.py) para encontrar apostas
-com "valor esperado" positivo: onde a probabilidade histórica do padrão
-acontecer é maior do que a odd da casa está sugerindo.
+Motor de combinações - pega as recomendações individuais já geradas
+(motor_recomendacoes.py) e monta "múltiplas" (2 ou 3 apostas combinadas),
+buscando bater dentro de uma faixa de odd desejada.
 
-Fórmula usada (valor esperado por unidade apostada):
-    VE = (probabilidade_historica * odd) - 1
-Se VE > 0, a aposta é estatisticamente favorável no longo prazo, segundo
-o nosso histórico.
+Regras aplicadas:
+  - Só combina apostas da MESMA casa de apostas (múltiplas não funcionam
+    misturando casas diferentes).
+  - Nunca combina duas pernas do mesmo jogador (reduz o risco de tratar
+    eventos correlacionados como se fossem independentes).
+  - Odd combinada = produto das odds individuais.
+  - Probabilidade combinada = produto das probabilidades individuais
+    (assumindo independência - ver ressalva abaixo).
 
-IMPORTANTE: isso não é garantia de acerto em uma aposta individual - é uma
-estimativa baseada em dados históricos, que só faz sentido com dados de
-jogadores/temporada atuais. Enquanto o banco ainda é de 2022-2024, use
-os resultados aqui só para validar a lógica, não para apostar de verdade.
+IMPORTANTE - limitação conhecida: o cálculo de probabilidade combinada
+assume que os eventos são independentes entre si. Isso é uma aproximação;
+eventos do mesmo jogo (ex: cartões e escanteios) podem ter alguma
+correlação real (jogos mais "quentes" tendem a ter mais de ambos). Trate
+a probabilidade combinada como uma estimativa, não um valor exato.
 
-Só considera odds de jogos que ainda vão acontecer (data_jogo >= hoje).
-
-Variáveis de ambiente necessárias:
+Variáveis de ambiente:
   - DATABASE_URL -> a URL de conexão do Postgres (mesma usada nos outros scripts)
+  - ODD_MINIMA    -> (opcional) menor odd combinada aceita (padrão: 1.5)
+  - ODD_MAXIMA    -> (opcional) maior odd combinada aceita (padrão: 5.0)
 """
 
 import os
+from itertools import combinations
+
 import psycopg2
 
 DATABASE_URL = os.environ["DATABASE_URL"]
-
-VALOR_ESPERADO_MINIMO = 0.0  # só guarda recomendações com VE acima disso
-
-
-def identificar_tipo_padrao(mercado):
-    """Adivinha a que tipo de padrão um mercado se refere, a partir do nome
-    (em português, como vem da OddsPapi)."""
-    nome = mercado.lower()
-    if "cartão" in nome or "cartao" in nome or "card" in nome:
-        return "cartao"
-    if "falta" in nome:
-        return "falta_cometida"
-    if "desarme" in nome or "tackle" in nome:
-        return "desarme"
-    if "chute" in nome or "shot" in nome:
-        return "chute_no_gol"
-    if "impediment" in nome:
-        return "impedimento"
-    if "escanteio" in nome or "corner" in nome:
-        return "escanteio_time"
-    return None
+ODD_MINIMA = float(os.environ.get("ODD_MINIMA", "1.5"))
+ODD_MAXIMA = float(os.environ.get("ODD_MAXIMA", "5.0"))
+TAMANHOS_DE_MULTIPLA = [2, 3, 4, 5]
+MAXIMO_SUGESTOES = 10
 
 
-def buscar_odds_futuras(cur):
-    """Busca odds de jogos que ainda não aconteceram."""
+def buscar_recomendacoes(cur):
     cur.execute(
         """
-        SELECT o.id, o.jogo_id, o.jogador_id, o.casa_aposta, o.mercado,
-               o.valor_odd, o.linha, o.direcao, j.data_jogo, j.adversario
-        FROM odds o
-        JOIN jogos j ON j.id = o.jogo_id
-        WHERE j.data_jogo >= CURRENT_DATE
+        SELECT r.id, r.jogo_id, r.jogador_id, r.descricao, r.casa_aposta,
+               r.odd_oferecida, r.probabilidade_historica, j.adversario, j.data_jogo, r.tipo_padrao
+        FROM recomendacoes r
+        JOIN jogos j ON j.id = r.jogo_id
         """
     )
     return cur.fetchall()
 
 
-def buscar_frequencia_cartao(cur, jogador_id):
-    cur.execute(
-        "SELECT frequencia FROM padroes_jogador_cartao WHERE jogador_id = %s",
-        (jogador_id,),
-    )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+def montar_combinacoes(recomendacoes):
+    """Agrupa por (jogo, casa de apostas) e testa combinações de 2 a 5 pernas.
+    O mercado 'resultado_final' só entra na lista de candidatos quando a
+    faixa de odd pedida permite valores acima de 5.0 (alta variância)."""
+    grupos = {}
+    for rec in recomendacoes:
+        (_, jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo, tipo_padrao) = rec
 
-
-def buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha):
-    cur.execute(
-        "SELECT frequencia FROM padroes_jogador_linha WHERE jogador_id = %s AND tipo = %s AND linha = %s",
-        (jogador_id, tipo, linha),
-    )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
-
-
-def buscar_frequencia_simples_jogador(cur, jogador_id, tipo):
-    cur.execute(
-        "SELECT frequencia FROM padroes_jogador_frequencia WHERE jogador_id = %s AND tipo = %s",
-        (jogador_id, tipo),
-    )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
-
-
-def buscar_frequencia_escanteio_time(cur, linha):
-    cur.execute(
-        "SELECT frequencia FROM padroes_time_escanteio WHERE linha = %s",
-        (linha,),
-    )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
-
-
-def calcular_recomendacoes(cur):
-    odds = buscar_odds_futuras(cur)
-    recomendacoes = []
-
-    for (odd_id, jogo_id, jogador_id, casa, mercado, valor_odd,
-         linha, direcao, data_jogo, adversario) in odds:
-
-        tipo = identificar_tipo_padrao(mercado)
-        if tipo is None:
+        if tipo_padrao == "resultado_final" and ODD_MAXIMA <= 5.0:
             continue
 
-        frequencia = None
+        chave = (jogo_id, casa)
+        grupos.setdefault(chave, []).append({
+            "jogador_id": jogador_id,
+            "descricao": descricao,
+            "odd": float(odd),
+            "probabilidade": float(prob) / 100,
+            "adversario": adversario,
+            "data_jogo": data_jogo,
+        })
 
-        if tipo == "cartao" and jogador_id and direcao and direcao.lower() == "sim":
-            frequencia = buscar_frequencia_cartao(cur, jogador_id)
+    combinacoes_validas = []
 
-        elif tipo in ("falta_cometida", "desarme", "chute_no_gol") and jogador_id \
-                and direcao and direcao.lower() == "mais" and linha is not None:
-            frequencia = buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha)
+    for (jogo_id, casa), pernas in grupos.items():
+        for tamanho in TAMANHOS_DE_MULTIPLA:
+            if len(pernas) < tamanho:
+                continue
 
-        elif tipo == "impedimento" and jogador_id and direcao and direcao.lower() == "sim":
-            frequencia = buscar_frequencia_simples_jogador(cur, jogador_id, "impedimento")
+            for combo in combinations(pernas, tamanho):
+                jogadores_no_combo = [p["jogador_id"] for p in combo if p["jogador_id"] is not None]
+                if len(jogadores_no_combo) != len(set(jogadores_no_combo)):
+                    continue  # tem jogador repetido nessa combinação, pula
 
-        elif tipo == "escanteio_time" and not jogador_id \
-                and direcao and direcao.lower() == "mais" and linha is not None:
-            frequencia = buscar_frequencia_escanteio_time(cur, linha)
+                odd_combinada = 1.0
+                prob_combinada = 1.0
+                for perna in combo:
+                    odd_combinada *= perna["odd"]
+                    prob_combinada *= perna["probabilidade"]
 
-        if frequencia is None:
-            continue  # não temos padrão calculado pra cruzar com essa odd ainda
+                if not (ODD_MINIMA <= odd_combinada <= ODD_MAXIMA):
+                    continue
 
-        probabilidade = frequencia / 100
-        valor_esperado = round((probabilidade * float(valor_odd)) - 1, 3)
+                valor_esperado = round((prob_combinada * odd_combinada) - 1, 3)
+                descricao_completa = " + ".join(p["descricao"] for p in combo)
 
-        if valor_esperado > VALOR_ESPERADO_MINIMO:
-            recomendacoes.append({
-                "jogo_id": jogo_id,
-                "jogador_id": jogador_id,
-                "tipo_padrao": tipo,
-                "descricao": mercado,
-                "casa_aposta": casa,
-                "odd_oferecida": valor_odd,
-                "probabilidade_historica": round(probabilidade * 100, 2),
-                "valor_esperado": valor_esperado,
-                "linha": linha,
-                "adversario": adversario,
-                "data_jogo": data_jogo,
-            })
+                combinacoes_validas.append({
+                    "jogo_id": jogo_id,
+                    "casa_aposta": casa,
+                    "descricao": descricao_completa,
+                    "odd_combinada": round(odd_combinada, 2),
+                    "probabilidade_combinada": round(prob_combinada * 100, 2),
+                    "valor_esperado": valor_esperado,
+                    "adversario": combo[0]["adversario"],
+                    "data_jogo": combo[0]["data_jogo"],
+                })
 
-    return recomendacoes
+    return combinacoes_validas
 
 
-def salvar_recomendacoes(cur, recomendacoes):
-    # limpa só as recomendações de jogos FUTUROS antes de gerar as novas
-    # (as de jogos já ocorridos ficam intactas até o script de arquivamento
-    # processá-las - senão perderíamos o histórico antes de avaliar acerto/erro)
-    cur.execute(
-        "DELETE FROM recomendacoes WHERE jogo_id IN (SELECT id FROM jogos WHERE data_jogo >= CURRENT_DATE)"
-    )
+def salvar_combinacoes(cur, combinacoes):
+    cur.execute("DELETE FROM combinacoes_sugeridas")
 
-    for r in recomendacoes:
+    for c in combinacoes:
         cur.execute(
-            """INSERT INTO recomendacoes
-               (jogo_id, jogador_id, tipo_padrao, descricao, casa_aposta,
-                odd_oferecida, probabilidade_historica, valor_esperado, linha)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (
-                r["jogo_id"], r["jogador_id"], r["tipo_padrao"], r["descricao"],
-                r["casa_aposta"], r["odd_oferecida"], r["probabilidade_historica"],
-                r["valor_esperado"], r.get("linha"),
-            ),
+            """INSERT INTO combinacoes_sugeridas
+               (jogo_id, casa_aposta, descricao, odd_combinada, probabilidade_combinada, valor_esperado_combinado)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            (c["jogo_id"], c["casa_aposta"], c["descricao"], c["odd_combinada"],
+             c["probabilidade_combinada"], c["valor_esperado"]),
         )
-        print(f"  [{r['data_jogo']} vs {r['adversario']}] {r['descricao']} "
-              f"({r['casa_aposta']}) - odd {r['odd_oferecida']} | "
-              f"prob. histórica {r['probabilidade_historica']}% | VE {r['valor_esperado']}")
+        print(f"  [{c['data_jogo']} vs {c['adversario']}] ({c['casa_aposta']}) "
+              f"ODD {c['odd_combinada']} | prob. {c['probabilidade_combinada']}% | "
+              f"VE {c['valor_esperado']}\n    -> {c['descricao']}")
 
 
 def main():
@@ -179,19 +129,22 @@ def main():
     cur = conn.cursor()
 
     try:
-        print("Cruzando padrões com odds de jogos futuros...")
-        recomendacoes = calcular_recomendacoes(cur)
+        print(f"Buscando recomendações para montar múltiplas entre odd {ODD_MINIMA} e {ODD_MAXIMA}...")
+        recomendacoes = buscar_recomendacoes(cur)
+        total_salvas = 0
 
-        if not recomendacoes:
-            print("Nenhuma recomendação de valor encontrada no momento "
-                  "(sem jogo próximo, sem odds coletadas, ou sem padrão correspondente).")
-            salvar_recomendacoes(cur, [])  # ainda assim limpa recomendações antigas
+        if len(recomendacoes) < 2:
+            print("Recomendações insuficientes para montar múltiplas (precisa de pelo menos 2).")
+            salvar_combinacoes(cur, [])
         else:
-            recomendacoes.sort(key=lambda r: r["valor_esperado"], reverse=True)
-            salvar_recomendacoes(cur, recomendacoes)
+            combinacoes = montar_combinacoes(recomendacoes)
+            combinacoes.sort(key=lambda c: c["valor_esperado"], reverse=True)
+            melhores = combinacoes[:MAXIMO_SUGESTOES]
+            salvar_combinacoes(cur, melhores)
+            total_salvas = len(melhores)
 
         conn.commit()
-        print(f"\nConcluído! {len(recomendacoes)} recomendação(ões) salva(s).")
+        print(f"\nConcluído! {total_salvas} combinação(ões) salva(s).")
 
     except Exception as e:
         conn.rollback()
