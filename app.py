@@ -206,7 +206,7 @@ def buscar_recomendacoes(cur):
     cur.execute(
         """
         SELECT r.jogo_id, r.jogador_id, r.descricao, r.casa_aposta,
-               r.odd_oferecida, r.probabilidade_historica, j.adversario, j.data_jogo
+               r.odd_oferecida, r.probabilidade_historica, j.adversario, j.data_jogo, r.tipo_padrao
         FROM recomendacoes r
         JOIN jogos j ON j.id = r.jogo_id
         """
@@ -217,7 +217,13 @@ def buscar_recomendacoes(cur):
 def montar_combinacoes(recomendacoes, odd_min, odd_max):
     grupos = {}
     for rec in recomendacoes:
-        (jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo) = rec
+        (jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo, tipo_padrao) = rec
+
+        # resultado final (1X2) só entra como candidato quando a faixa pedida
+        # permite odds acima de 5.0 (mercado de alta variância)
+        if tipo_padrao == "resultado_final" and odd_max <= 5.0:
+            continue
+
         chave = (jogo_id, casa)
         grupos.setdefault(chave, []).append({
             "jogador_id": jogador_id,
@@ -230,7 +236,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
 
     resultado = []
     for (jogo_id, casa), pernas in grupos.items():
-        for tamanho in (2, 3):
+        for tamanho in (2, 3, 4, 5):
             if len(pernas) < tamanho:
                 continue
             for combo in combinations(pernas, tamanho):
