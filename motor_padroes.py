@@ -243,6 +243,60 @@ def salvar_padrao_frequencia_jogador(cur, tipo, resultados):
     print(f"  {tipo}: {len(resultados)} jogador(es) calculados.")
 
 
+def calcular_padroes_resultado(cur):
+    """Calcula a frequência histórica de vitória/empate/derrota do Corinthians,
+    separado por mandante e visitante."""
+    resultados_finais = []
+
+    for lado_bool, lado_nome in [(True, "mandante"), (False, "visitante")]:
+        cur.execute(
+            """
+            SELECT placar_corinthians, placar_adversario
+            FROM jogos
+            WHERE mandante = %s AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+            ORDER BY data_jogo DESC
+            LIMIT %s
+            """,
+            (lado_bool, JANELA_MAXIMA_DE_JOGOS),
+        )
+        jogos = cur.fetchall()
+        total = len(jogos)
+        if total < JOGOS_MINIMOS_PARA_ANALISAR:
+            continue
+
+        contagem = {"vitoria": 0, "empate": 0, "derrota": 0}
+        for placar_cor, placar_adv in jogos:
+            if placar_cor > placar_adv:
+                contagem["vitoria"] += 1
+            elif placar_cor == placar_adv:
+                contagem["empate"] += 1
+            else:
+                contagem["derrota"] += 1
+
+        for resultado, ocorrencias in contagem.items():
+            frequencia = round(100 * ocorrencias / total, 2)
+            resultados_finais.append((lado_nome, resultado, total, ocorrencias, frequencia))
+
+    return resultados_finais
+
+
+def salvar_padroes_resultado(cur, resultados):
+    for lado, resultado, total, ocorrencias, frequencia in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_time_resultado (lado, resultado, jogos_analisados, ocorrencias, frequencia, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (lado, resultado) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                ocorrencias = EXCLUDED.ocorrencias,
+                frequencia = EXCLUDED.frequencia,
+                atualizado_em = NOW()
+            """,
+            (lado, resultado, total, ocorrencias, frequencia),
+        )
+        print(f"  {lado} - {resultado}: {ocorrencias}/{total} jogos ({frequencia}%)")
+
+
 def main():
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = False
@@ -290,6 +344,14 @@ def main():
                 conn.commit()
             else:
                 print(f"  {tipo}: nenhum jogador com dados suficientes ainda.")
+
+        print("\nCalculando padrões de resultado final (vitória/empate/derrota)...")
+        resultados_finais = calcular_padroes_resultado(cur)
+        if resultados_finais:
+            salvar_padroes_resultado(cur, resultados_finais)
+            conn.commit()
+        else:
+            print("  Dados insuficientes ainda para resultado final.")
 
     except Exception as e:
         conn.rollback()
