@@ -26,7 +26,7 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 RODADAS_A_MANTER_DETALHADAS = 5
 
 
-def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha):
+def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao):
     """Compara a recomendação com o resultado real do jogo, se disponível.
     Retorna 'acertou', 'errou' ou 'pendente' (se ainda não temos o dado real)."""
 
@@ -80,6 +80,24 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha):
             return "pendente"
         return "acertou" if float(row[0]) > float(linha) else "errou"
 
+    if tipo_padrao == "resultado_final":
+        cur.execute(
+            "SELECT placar_corinthians, placar_adversario FROM jogos WHERE id = %s",
+            (jogo_id,),
+        )
+        row = cur.fetchone()
+        if row is None or row[0] is None or row[1] is None:
+            return "pendente"
+        placar_cor, placar_adv = row
+        if placar_cor > placar_adv:
+            resultado_real = "vitória"
+        elif placar_cor == placar_adv:
+            resultado_real = "empate"
+        else:
+            resultado_real = "derrota"
+        # a descrição salva foi montada como "Resultado Final - Vitória do Corinthians" etc.
+        return "acertou" if resultado_real in descricao.lower() else "errou"
+
     return "pendente"
 
 
@@ -119,7 +137,7 @@ def arquivar(cur, recomendacoes):
     for (rec_id, jogo_id, jogador_id, tipo_padrao, descricao, casa,
          odd, prob, ve, linha, data_jogo) in recomendacoes:
 
-        resultado = avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha)
+        resultado = avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao)
         contagem[resultado] += 1
 
         cur.execute(
