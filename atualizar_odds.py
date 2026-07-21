@@ -20,7 +20,7 @@ Variáveis de ambiente necessárias (configuradas no Railway, aba "Variables"):
 """
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import requests
 import psycopg2
@@ -86,15 +86,22 @@ def buscar_proximos_jogos():
     resp.raise_for_status()
     jogos = resp.json()
 
-    agora = datetime.now(timezone.utc)
-    limite = agora + timedelta(days=DIAS_ANTECEDENCIA)
+    hoje = datetime.now(timezone.utc).date()
 
     proximos = []
     for jogo in jogos:
         if not jogo.get("startTime"):
             continue
         inicio = datetime.fromisoformat(jogo["startTime"].replace("Z", "+00:00"))
-        if agora <= inicio <= limite:
+        data_do_jogo = inicio.date()
+
+        # NOVO: compara por DIA calendário, não por horário exato. Assim,
+        # se o jogo é dia 23, o script já funciona a partir de 00:00 do dia
+        # 21 (D-2), em vez de só a partir de exatas 48h antes do horário
+        # do jogo (o que antes travava até as 19:30 do dia 21, por exemplo,
+        # se o jogo fosse às 19:30 do dia 23).
+        dias_de_diferenca = (data_do_jogo - hoje).days
+        if 0 <= dias_de_diferenca <= DIAS_ANTECEDENCIA:
             proximos.append(jogo)
 
     return proximos
@@ -143,11 +150,7 @@ def buscar_arbitro_api_football(data_jogo):
         return None
 
 
-def get_or_create_jogador(cur, api_football_id, nome):
-    # a OddsPapi não fornece o id da API-Football, então aqui a busca/criação
-    # continua sendo feita só pelo nome (api_football_id sempre chega como None
-    # nas chamadas deste arquivo - o parâmetro existe só pra manter a mesma
-    # assinatura usada em popular_banco.py)
+def get_or_create_jogador(cur, nome):
     cur.execute("SELECT id FROM jogadores WHERE nome = %s", (nome,))
     row = cur.fetchone()
     if row:
@@ -226,7 +229,7 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados):
                     descricao_mercado = nome_mercado
                     jogador_id = None
                     if player_name:
-                        jogador_id = get_or_create_jogador(cur, None, player_name)
+                        jogador_id = get_or_create_jogador(cur, player_name)
                         descricao_mercado = f"{nome_mercado} - {player_name}"
 
                     cur.execute(
