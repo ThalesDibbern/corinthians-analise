@@ -1,3 +1,4 @@
+
 """
 Script que busca jogos, gols, cartões, substituições, estatísticas agregadas
 do time (posse de bola, escanteios, faltas, passes, finalizações) e
@@ -14,6 +15,16 @@ NOVO: também salva o árbitro de cada jogo (campo "referee" da API), usado
 depois pelo motor_padroes.py pra calcular o "perfil" de cada árbitro
 (tendência a dar mais ou menos cartão). Testado: 114/114 jogos do
 Corinthians em 2022-2024 vieram com esse campo preenchido.
+
+NOVO (identidade de jogador): a tabela `jogadores` agora tem a coluna
+`api_football_id`, que é o identificador único que a própria API-Football
+usa pra cada jogador. Antes, jogadores eram identificados só pelo nome, o
+que podia misturar jogadores homônimos de times diferentes (ex: dois
+jogadores chamados "Gabriel" em times diferentes viravam uma única pessoa
+no banco). Agora a função get_or_create_jogador procura primeiro pelo id;
+se não achar, procura pelo nome (pra aproveitar jogadores já cadastrados
+antes dessa mudança) e completa o id neles; só cria um registro novo se não
+encontrar de nenhuma forma.
 
 O plano grátis da API-Football tem um limite de 100 requisições por dia.
 Cada jogo consome até 3 requisições (eventos + estatísticas do time +
@@ -157,8 +168,51 @@ def buscar_estatisticas_jogadores(fixture_id):
     return dados["response"]
 
 
-def get_or_create_jogador(cur, nome):
-    """Garante que o jogador existe na tabela `jogadores`, retorna o id."""
+def get_or_create_jogador(cur, api_football_id, nome):
+    """Garante que o jogador existe na tabela `jogadores`, retorna o id.
+
+    Usa o api_football_id (identificador único da própria API-Football) como
+    chave principal de identidade, pra evitar misturar jogadores homônimos de
+    times diferentes (ex: dois jogadores chamados "Gabriel" em clubes
+    diferentes). A checagem acontece em camadas:
+
+      1. Procura pelo api_football_id - se achar, é o jogador certo, sem
+         ambiguidade nenhuma.
+      2. Se não achar pelo id, procura pelo nome (cobre jogadores que já
+         existiam no banco antes dessa mudança, cadastrados só com nome).
+         Se encontrar um jogador com esse nome que ainda não tem id salvo,
+         aproveita e completa o registro com o id agora.
+      3. Se não encontrar de nenhuma forma, cria um jogador novo já com
+         nome + id.
+
+    Se a API não mandar o id (caso raro, dados incompletos), cai de volta
+    pro comportamento antigo: busca/cria só pelo nome.
+    """
+    if api_football_id is not None:
+        cur.execute("SELECT id FROM jogadores WHERE api_football_id = %s", (api_football_id,))
+        row = cur.fetchone()
+        if row:
+            return row[0]
+
+        cur.execute("SELECT id, api_football_id FROM jogadores WHERE nome = %s", (nome,))
+        row = cur.fetchone()
+        if row:
+            jogador_id, id_existente = row
+            if id_existente is None:
+                cur.execute(
+                    "UPDATE jogadores SET api_football_id = %s WHERE id = %s",
+                    (api_football_id, jogador_id),
+                )
+            return jogador_id
+
+        cur.execute(
+            "INSERT INTO jogadores (nome, api_football_id) VALUES (%s, %s) RETURNING id",
+            (nome, api_football_id),
+        )
+        return cur.fetchone()[0]
+
+    # sem id vindo da API (não deveria acontecer normalmente, mas por segurança
+    # não trava o script - cai pro comportamento antigo, só por nome)
     cur.execute("SELECT id FROM jogadores WHERE nome = %s", (nome,))
     row = cur.fetchone()
     if row:
@@ -222,6 +276,8 @@ def salvar_estatisticas_jogadores(cur, jogo_id, dados_jogadores, home_team_id):
             if not nome:
                 continue
 
+            api_id = bloco_jogador["player"].get("id")
+
             stats_lista = bloco_jogador.get("statistics") or []
             if not stats_lista:
                 continue
@@ -231,7 +287,7 @@ def salvar_estatisticas_jogadores(cur, jogo_id, dados_jogadores, home_team_id):
             if minutos is None:
                 continue  # jogador nem entrou em campo, não vale a pena salvar
 
-            jogador_id = get_or_create_jogador(cur, nome)
+            jogador_id = get_or_create_jogador(cur, api_id, nome)
 
             games = s.get("games") or {}
             shots = s.get("shots") or {}
@@ -334,12 +390,13 @@ def salvar_eventos(cur, jogo_id, eventos):
         minuto = ev["time"]["elapsed"]
         lado = "mandante" if ev["team"]["id"] == TEAM_ID else "visitante"
         jogador_nome = ev["player"]["name"] if ev["player"]["name"] else None
+        jogador_api_id = ev["player"].get("id") if ev.get("player") else None
 
         if not jogador_nome:
             contagem["ignorados"] += 1
             continue
 
-        jogador_id = get_or_create_jogador(cur, jogador_nome)
+        jogador_id = get_or_create_jogador(cur, jogador_api_id, jogador_nome)
         periodo = "1_tempo" if minuto <= 45 else "2_tempo"
 
         if tipo == "Goal":
@@ -366,8 +423,9 @@ def salvar_eventos(cur, jogo_id, eventos):
 
         elif tipo == "subst":
             jogador_entrou_nome = ev["assist"]["name"] if ev.get("assist") else None
+            jogador_entrou_api_id = ev["assist"].get("id") if ev.get("assist") else None
             jogador_entrou_id = (
-                get_or_create_jogador(cur, jogador_entrou_nome)
+                get_or_create_jogador(cur, jogador_entrou_api_id, jogador_entrou_nome)
                 if jogador_entrou_nome
                 else None
             )
