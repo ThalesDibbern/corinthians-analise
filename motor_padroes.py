@@ -1,11 +1,15 @@
 """
 Motor de padrões - Cartões, faltas, desarmes, chutes e impedimentos de
-jogador + Escanteios do time.
+jogador + Escanteios do time + NOVO: perfil de cada árbitro.
 
 Para cada jogador com dados suficientes, calcula a frequência histórica de
 cada padrão (ex: recebeu cartão, cometeu falta, teve X+ desarmes...). Para
 o time, calcula a frequência de passar de cada linha de escanteios testada.
-Todos considerando os últimos 50 jogos disponíveis.
+Para cada árbitro, calcula a média de cartões e faltas nos jogos que ele
+apitou (some os dois times, não só o Corinthians - a ideia é capturar o
+"jeito de apitar" dele, que vale pro jogo inteiro).
+Todos considerando os últimos 50 jogos disponíveis (ou todos os jogos
+apitados, no caso do árbitro).
 
 Feito para rodar automaticamente todo dia (depois que o script de coleta
 de dados já rodou), recalculando os padrões com os dados mais recentes.
@@ -37,6 +41,12 @@ PADROES_LINHA_JOGADOR = {
 PADROES_FREQUENCIA_JOGADOR = {
     "impedimento": "impedimentos",
 }
+
+# ajuste do fator de árbitro: limita o quanto a probabilidade de um jogador
+# pode ser puxada pra cima/baixo com base no árbitro, pra não deixar o
+# sistema "confiar demais" numa amostra que ainda é pequena por árbitro
+FATOR_ARBITRO_MINIMO = 0.85
+FATOR_ARBITRO_MAXIMO = 1.15
 
 
 def calcular_padroes_cartao(cur):
@@ -297,6 +307,91 @@ def salvar_padroes_resultado(cur, resultados):
         print(f"  {lado} - {resultado}: {ocorrencias}/{total} jogos ({frequencia}%)")
 
 
+def calcular_padroes_arbitro(cur):
+    """NOVO: para cada árbitro que já apitou algum jogo do Corinthians (e já
+    tem resultado conhecido), calcula a média de cartões e faltas do jogo
+    inteiro (ambos os times, não só o Corinthians) e a frequência de jogos
+    com pelo menos 1 cartão vermelho. Não usa janela de 50 - usa todos os
+    jogos disponíveis daquele árbitro, já que a amostra por árbitro é bem
+    menor que a de jogador."""
+    cur.execute(
+        """
+        SELECT DISTINCT arbitro FROM jogos
+        WHERE arbitro IS NOT NULL AND data_jogo < CURRENT_DATE
+        """
+    )
+    arbitros = [row[0] for row in cur.fetchall()]
+
+    resultados = []
+
+    for arbitro in arbitros:
+        cur.execute(
+            "SELECT id FROM jogos WHERE arbitro = %s AND data_jogo < CURRENT_DATE",
+            (arbitro,),
+        )
+        jogo_ids = [row[0] for row in cur.fetchall()]
+
+        jogos_analisados = len(jogo_ids)
+        if jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR:
+            continue  # amostra pequena demais pra confiar no perfil desse árbitro ainda
+
+        # cartões totais do jogo (os dois times, não só o Corinthians -
+        # a tabela `cartoes` já guarda eventos de ambos os lados)
+        cur.execute(
+            "SELECT jogo_id, COUNT(*) FROM cartoes WHERE jogo_id = ANY(%s) GROUP BY jogo_id",
+            (jogo_ids,),
+        )
+        cartoes_por_jogo = dict(cur.fetchall())
+        total_cartoes = sum(cartoes_por_jogo.values())
+        media_cartoes = round(total_cartoes / jogos_analisados, 2)
+
+        # jogos com pelo menos 1 cartão vermelho
+        cur.execute(
+            "SELECT DISTINCT jogo_id FROM cartoes WHERE jogo_id = ANY(%s) AND cor = 'vermelho'",
+            (jogo_ids,),
+        )
+        jogos_com_vermelho = len(cur.fetchall())
+        frequencia_vermelho = round(100 * jogos_com_vermelho / jogos_analisados, 2)
+
+        # faltas totais do jogo (soma dos dois lados, quando a estatística existe)
+        cur.execute(
+            "SELECT jogo_id, SUM(faltas) FROM estatisticas_jogo WHERE jogo_id = ANY(%s) AND faltas IS NOT NULL GROUP BY jogo_id",
+            (jogo_ids,),
+        )
+        faltas_por_jogo = dict(cur.fetchall())
+        media_faltas = None
+        if faltas_por_jogo:
+            media_faltas = round(sum(float(v) for v in faltas_por_jogo.values()) / len(faltas_por_jogo), 2)
+
+        resultados.append((
+            arbitro, jogos_analisados, media_cartoes, media_faltas,
+            jogos_com_vermelho, frequencia_vermelho,
+        ))
+
+    return resultados
+
+
+def salvar_padroes_arbitro(cur, resultados):
+    for arbitro, jogos_analisados, media_cartoes, media_faltas, jogos_com_vermelho, frequencia_vermelho in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_arbitro (arbitro, jogos_analisados, media_cartoes, media_faltas,
+                                          jogos_com_vermelho, frequencia_vermelho, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (arbitro) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                media_cartoes = EXCLUDED.media_cartoes,
+                media_faltas = EXCLUDED.media_faltas,
+                jogos_com_vermelho = EXCLUDED.jogos_com_vermelho,
+                frequencia_vermelho = EXCLUDED.frequencia_vermelho,
+                atualizado_em = NOW()
+            """,
+            (arbitro, jogos_analisados, media_cartoes, media_faltas, jogos_com_vermelho, frequencia_vermelho),
+        )
+        print(f"  {arbitro}: {jogos_analisados} jogo(s), média de {media_cartoes} cartões/jogo, "
+              f"{frequencia_vermelho}% dos jogos com vermelho")
+
+
 def main():
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = False
@@ -352,6 +447,15 @@ def main():
             conn.commit()
         else:
             print("  Dados insuficientes ainda para resultado final.")
+
+        print("\nCalculando perfil de árbitros (cartões e faltas por jogo apitado)...")
+        resultados_arbitro = calcular_padroes_arbitro(cur)
+        if resultados_arbitro:
+            salvar_padroes_arbitro(cur, resultados_arbitro)
+            conn.commit()
+            print(f"Concluído! Perfil calculado para {len(resultados_arbitro)} árbitro(s).")
+        else:
+            print(f"  Nenhum árbitro com dados suficientes ainda (mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos apitados).")
 
     except Exception as e:
         conn.rollback()
