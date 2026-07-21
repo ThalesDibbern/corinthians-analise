@@ -1,4 +1,3 @@
-
 """
 Script que busca jogos, gols, cartões, substituições, estatísticas agregadas
 do time (posse de bola, escanteios, faltas, passes, finalizações) e
@@ -10,6 +9,11 @@ MODO HISTÓRICO: busca todos os jogos das temporadas 2022, 2023 e 2024
 (as disponíveis no plano grátis). Pula o que já está no banco - verifica
 eventos e cada tipo de estatística de forma independente, então é seguro
 rodar esse script várias vezes, ele só processa o que falta, sem duplicar nada.
+
+NOVO: também salva o árbitro de cada jogo (campo "referee" da API), usado
+depois pelo motor_padroes.py pra calcular o "perfil" de cada árbitro
+(tendência a dar mais ou menos cartão). Testado: 114/114 jogos do
+Corinthians em 2022-2024 vieram com esse campo preenchido.
 
 O plano grátis da API-Football tem um limite de 100 requisições por dia.
 Cada jogo consome até 3 requisições (eventos + estatísticas do time +
@@ -273,12 +277,21 @@ def salvar_estatisticas_jogadores(cur, jogo_id, dados_jogadores, home_team_id):
 
 
 def get_or_create_jogo(cur, fixture):
-    """Garante que o jogo existe na tabela `jogos`, retorna o id."""
+    """Garante que o jogo existe na tabela `jogos`, retorna o id.
+    NOVO: também salva o árbitro (campo "referee" da API), tanto na criação
+    quanto num backfill pra jogos que já existiam no banco sem esse dado."""
     fixture_id = fixture["fixture"]["id"]
-    cur.execute("SELECT id FROM jogos WHERE id = %s", (fixture_id,))
+    arbitro = fixture["fixture"].get("referee")  # pode vir None em alguns casos
+
+    cur.execute("SELECT id, arbitro FROM jogos WHERE id = %s", (fixture_id,))
     row = cur.fetchone()
     if row:
-        return row[0]
+        jogo_id, arbitro_salvo = row
+        # backfill: jogo já existia (de antes dessa funcionalidade) mas
+        # está sem árbitro salvo, e agora a API nos deu esse dado - atualiza.
+        if arbitro_salvo is None and arbitro:
+            cur.execute("UPDATE jogos SET arbitro = %s WHERE id = %s", (arbitro, fixture_id))
+        return jogo_id
 
     data_jogo = fixture["fixture"]["date"][:10]
     mandante_nome = fixture["teams"]["home"]["name"]
@@ -295,8 +308,8 @@ def get_or_create_jogo(cur, fixture):
     cur.execute(
         """
         INSERT INTO jogos (id, data_jogo, adversario, mandante, competicao,
-                            placar_corinthians, placar_adversario)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            placar_corinthians, placar_adversario, arbitro)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             fixture_id,
@@ -306,6 +319,7 @@ def get_or_create_jogo(cur, fixture):
             "Brasileirão Série A",
             placar_corinthians,
             placar_adversario,
+            arbitro,
         ),
     )
     return fixture_id
@@ -396,12 +410,17 @@ def main():
                 falta_estatisticas = not jogo_tem_estatisticas(cur, fixture_id)
                 falta_estatisticas_jogador = not jogo_tem_estatisticas_jogador(cur, fixture_id)
 
+                # NOVO: mesmo que o jogo já esteja completo, ainda passamos por
+                # get_or_create_jogo pra garantir o backfill do árbitro em jogos
+                # antigos - por isso não usamos mais "continue" direto aqui.
+                jogo_id = get_or_create_jogo(cur, fixture)
+                conn.commit()
+
                 if not falta_eventos and not falta_estatisticas and not falta_estatisticas_jogador:
                     total_pulados += 1
                     continue
 
                 print(f"\nProcessando jogo {fixture_id} (temporada {temporada})...")
-                jogo_id = get_or_create_jogo(cur, fixture)
 
                 if falta_eventos:
                     eventos = buscar_eventos(fixture_id)
