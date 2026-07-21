@@ -107,19 +107,69 @@ def buscar_proximos_jogos():
     return proximos
 
 
-def buscar_odds(fixture_id):
-    """Busca as odds de um jogo específico nas casas configuradas."""
+# NOVO: cache dos bookmakers que já sabemos estar restritos nesse plano,
+# descoberto na primeira vez que a API recusar. Reaproveitado pro resto da
+# execução, pra não gastar 2 requisições por jogo (uma que sempre falha +
+# o retry) - a partir do 2º jogo, já pede direto só com os liberados.
+_bookmakers_restritos_conhecidos = set()
+
+
+def buscar_odds(fixture_id, bookmakers=None):
+    """Busca as odds de um jogo específico nas casas configuradas.
+
+    NOVO: se a OddsPapi recusar por causa de bookmaker restrito no plano
+    (erro "RESTRICTED_ACCESS"), remove automaticamente esse bookmaker da
+    lista e tenta de novo só com os que têm acesso liberado - assim uma
+    casa sem permissão no plano não derruba a busca de odds de todos os
+    jogos (e, por consequência, o cron inteiro). O bookmaker restrito fica
+    guardado em cache pro resto da execução, evitando repetir a descoberta
+    (e a requisição extra) a cada jogo processado."""
+    global _bookmakers_restritos_conhecidos
+
+    if bookmakers is None:
+        bookmakers = [b for b in BOOKMAKERS.split(",") if b not in _bookmakers_restritos_conhecidos]
+
+    if not bookmakers:
+        return {"bookmakerOdds": {}}
+
     resp = requests.get(
         f"{API_BASE}/odds",
         params={
             "fixtureId": fixture_id,
-            "bookmakers": BOOKMAKERS,
+            "bookmakers": ",".join(bookmakers),
             "oddsFormat": "decimal",
             "language": "pt",
             "verbosity": 3,
             "apiKey": API_KEY,
         },
     )
+
+    if resp.status_code == 403:
+        try:
+            erro = resp.json().get("error", {})
+        except ValueError:
+            erro = {}
+
+        if erro.get("code") == "RESTRICTED_ACCESS":
+            restritos = [b for b in bookmakers if b in erro.get("details", "")]
+            restantes = [b for b in bookmakers if b not in restritos]
+
+            # trava de segurança: se não identificou nenhum bookmaker restrito
+            # a partir do texto do erro (formato de mensagem mudou, por ex.),
+            # não tenta de novo com a mesma lista - isso causaria loop infinito
+            if not restritos:
+                print(f"  Aviso: acesso negado (RESTRICTED_ACCESS), mas não foi possível "
+                      f"identificar qual bookmaker está restrito. Detalhe da API: "
+                      f"{erro.get('details')}")
+                resp.raise_for_status()
+
+            # guarda no cache, pra não precisar redescobrir isso a cada jogo
+            _bookmakers_restritos_conhecidos.update(restritos)
+
+            print(f"  Aviso: sem acesso a {restritos} nesse plano. "
+                  f"Tentando de novo só com {restantes or '(nenhum restante)'}...")
+            return buscar_odds(fixture_id, bookmakers=restantes)
+
     resp.raise_for_status()
     return resp.json()
 
@@ -272,7 +322,18 @@ def main():
             jogo_id = get_or_create_jogo(cur, data_jogo, adversario, eh_mandante)
             conn.commit()
 
-            dados_odds = buscar_odds(jogo["fixtureId"])
+            # NOVO: se a busca de odds falhar pra ESSE jogo específico (ex: 403,
+            # jogo fora da cobertura da OddsPapi, competição não suportada),
+            # não deixa isso travar o restante do pipeline - avisa e segue pro
+            # próximo jogo. Sem isso, um único jogo problemático derrubava o
+            # script inteiro e, por consequência, todos os scripts seguintes
+            # do cron (motor_padroes, motor_recomendacoes etc.) deixavam de rodar.
+            try:
+                dados_odds = buscar_odds(jogo["fixtureId"])
+            except Exception as e:
+                print(f"  Aviso: não foi possível buscar odds desse jogo ({e}). Pulando pro próximo.")
+                continue
+
             salvos = salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados)
 
             print(f"  -> {salvos} odds salvas.")
