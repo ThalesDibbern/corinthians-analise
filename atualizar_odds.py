@@ -143,7 +143,11 @@ def buscar_arbitro_api_football(data_jogo):
         return None
 
 
-def get_or_create_jogador(cur, nome):
+def get_or_create_jogador(cur, api_football_id, nome):
+    # a OddsPapi não fornece o id da API-Football, então aqui a busca/criação
+    # continua sendo feita só pelo nome (api_football_id sempre chega como None
+    # nas chamadas deste arquivo - o parâmetro existe só pra manter a mesma
+    # assinatura usada em popular_banco.py)
     cur.execute("SELECT id FROM jogadores WHERE nome = %s", (nome,))
     row = cur.fetchone()
     if row:
@@ -222,7 +226,7 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados):
                     descricao_mercado = nome_mercado
                     jogador_id = None
                     if player_name:
-                        jogador_id = get_or_create_jogador(cur, player_name)
+                        jogador_id = get_or_create_jogador(cur, None, player_name)
                         descricao_mercado = f"{nome_mercado} - {player_name}"
 
                     cur.execute(
