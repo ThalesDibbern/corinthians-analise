@@ -44,9 +44,19 @@ DIAS_ANTECEDENCIA = 2   # busca odds de jogos que acontecem em até X dias
 # "tempo completo" captura especificamente o mercado "Resultado Tempo Completo"
 # (confirmado manualmente na OddsPapi) - sem pegar por engano os mercados de
 # resultado do 1º/2º tempo, que têm nomes parecidos mas não têm "completo".
+#
+# TEMPORÁRIO: mercados de JOGADOR (card, falta, desarme, chute, impedimento)
+# comentados porque exigem acesso a "Player Props" na OddsPapi, que o plano
+# Free não inclui (confirmado no painel: Player Props = bloqueado pra todos
+# os bookmakers). Nada foi apagado do banco - os dados de jogador que já
+# existem (padroes_jogador_*) continuam intactos, só não vão receber odds
+# NOVAS até o plano ser atualizado. Só reativar as linhas comentadas quando
+# isso acontecer.
 PALAVRAS_MERCADO_INTERESSE = [
-    "card", "cartão", "cartao", "corner", "escanteio",
-    "falta", "desarme", "chute", "impediment", "tempo completo",
+    "corner", "escanteio", "tempo completo",
+    # "card", "cartão", "cartao",       # Player Props - reativar com plano pago
+    # "falta", "desarme", "chute",      # Player Props - reativar com plano pago
+    # "impediment",                     # Player Props - reativar com plano pago
 ]
 
 
