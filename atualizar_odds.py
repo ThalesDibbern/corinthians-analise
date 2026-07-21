@@ -1,15 +1,22 @@
-
 """
 Script que verifica se o Corinthians tem jogo nos próximos dias e, se tiver,
 busca as odds desse jogo (cartões de jogador + escanteios do time) na
 OddsPapi, salvando tudo na tabela `odds` do Postgres.
 
+NOVO: também tenta descobrir o árbitro escalado pra esse jogo, consultando
+a API-Football (a OddsPapi não fornece esse dado). A escalação de árbitro
+geralmente só é confirmada perto do jogo, então essa busca roda na mesma
+janela de 2 dias de antecedência que já é usada pras odds. Se a API ainda
+não tiver o árbitro definido, o campo fica em branco por enquanto - o
+motor_recomendacoes.py simplesmente não aplica o ajuste de árbitro nesse caso.
+
 Feito para rodar automaticamente todo dia (Cron Schedule no Railway).
 Se não houver jogo próximo, o script simplesmente não faz nada naquele dia.
 
 Variáveis de ambiente necessárias (configuradas no Railway, aba "Variables"):
-  - ODDSPAPI_KEY  -> sua chave da OddsPapi (api.oddspapi.io)
-  - DATABASE_URL  -> a URL de conexão do Postgres (mesma usada no outro script)
+  - ODDSPAPI_KEY      -> sua chave da OddsPapi (api.oddspapi.io)
+  - API_FOOTBALL_KEY  -> sua chave da API-Football (usada só pra buscar o árbitro)
+  - DATABASE_URL      -> a URL de conexão do Postgres (mesma usada no outro script)
 """
 
 import os
@@ -20,12 +27,15 @@ import psycopg2
 
 # ---------- Configurações ----------
 API_KEY = os.environ["ODDSPAPI_KEY"]
+API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY")  # opcional: sem ela, só pula o árbitro
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 API_BASE = "https://api.oddspapi.io/v4"
+API_FOOTBALL_BASE = "https://v3.football.api-sports.io"
 SPORT_ID = 10
 TOURNAMENT_ID = 325     # Brasileirão Série A
 PARTICIPANT_ID = 1957   # Corinthians
+TEAM_ID_API_FOOTBALL = 131  # Corinthians na API-Football (id diferente do da OddsPapi)
 BOOKMAKERS = "betano.bet.br,superbet.bet.br"
 DIAS_ANTECEDENCIA = 2   # busca odds de jogos que acontecem em até X dias
 
@@ -107,9 +117,30 @@ def buscar_odds(fixture_id):
     return resp.json()
 
 
-def mercado_interessa(nome_mercado):
-    nome = nome_mercado.lower()
-    return any(palavra in nome for palavra in PALAVRAS_MERCADO_INTERESSE)
+def buscar_arbitro_api_football(data_jogo):
+    """NOVO: consulta a API-Football pra descobrir o árbitro escalado pro
+    jogo do Corinthians numa data específica. Retorna None se a chave não
+    estiver configurada, se a API ainda não tiver o árbitro definido, ou se
+    a consulta falhar por qualquer motivo (não deve travar o script todo -
+    o árbitro é um dado complementar, não essencial)."""
+    if not API_FOOTBALL_KEY:
+        return None
+
+    try:
+        resp = requests.get(
+            f"{API_FOOTBALL_BASE}/fixtures",
+            headers={"x-apisports-key": API_FOOTBALL_KEY},
+            params={"team": TEAM_ID_API_FOOTBALL, "date": data_jogo},
+        )
+        resp.raise_for_status()
+        dados = resp.json()
+        jogos = dados.get("response", [])
+        if not jogos:
+            return None
+        return jogos[0]["fixture"].get("referee")
+    except Exception as e:
+        print(f"  Aviso: não foi possível buscar o árbitro ({e}). Seguindo sem esse dado.")
+        return None
 
 
 def get_or_create_jogador(cur, nome):
@@ -124,19 +155,32 @@ def get_or_create_jogador(cur, nome):
 def get_or_create_jogo(cur, data_jogo, adversario, mandante):
     """Encontra (ou cria) o jogo pela combinação data + adversário - assim
     esse script funciona independente do jogo já existir vindo do outro
-    script (API-Football) ou ser inteiramente novo (jogo futuro)."""
+    script (API-Football) ou ser inteiramente novo (jogo futuro).
+    NOVO: se o jogo já existe mas ainda não tem árbitro salvo, tenta buscar
+    e atualizar (a escalação pode ter sido confirmada entre uma execução e
+    outra do cron, já que ambas rodam na mesma janela de 2 dias)."""
     cur.execute(
-        "SELECT id FROM jogos WHERE data_jogo = %s AND adversario = %s",
+        "SELECT id, arbitro FROM jogos WHERE data_jogo = %s AND adversario = %s",
         (data_jogo, adversario),
     )
     row = cur.fetchone()
     if row:
-        return row[0]
+        jogo_id, arbitro_salvo = row
+        if arbitro_salvo is None:
+            arbitro = buscar_arbitro_api_football(data_jogo)
+            if arbitro:
+                cur.execute("UPDATE jogos SET arbitro = %s WHERE id = %s", (arbitro, jogo_id))
+                print(f"  Árbitro confirmado: {arbitro}")
+        return jogo_id
+
+    arbitro = buscar_arbitro_api_football(data_jogo)
+    if arbitro:
+        print(f"  Árbitro confirmado: {arbitro}")
 
     cur.execute(
-        """INSERT INTO jogos (data_jogo, adversario, mandante, competicao)
-           VALUES (%s, %s, %s, %s) RETURNING id""",
-        (data_jogo, adversario, mandante, "Brasileirão Série A"),
+        """INSERT INTO jogos (data_jogo, adversario, mandante, competicao, arbitro)
+           VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+        (data_jogo, adversario, mandante, "Brasileirão Série A", arbitro),
     )
     return cur.fetchone()[0]
 
@@ -191,6 +235,11 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados):
     return salvos
 
 
+def mercado_interessa(nome_mercado):
+    nome = nome_mercado.lower()
+    return any(palavra in nome for palavra in PALAVRAS_MERCADO_INTERESSE)
+
+
 def main():
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = False
@@ -214,6 +263,8 @@ def main():
             print(f"\nJogo encontrado: Corinthians x {adversario} em {data_jogo}")
 
             jogo_id = get_or_create_jogo(cur, data_jogo, adversario, eh_mandante)
+            conn.commit()
+
             dados_odds = buscar_odds(jogo["fixtureId"])
             salvos = salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados)
 
