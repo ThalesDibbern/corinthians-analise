@@ -4,6 +4,13 @@ com as odds reais coletadas (atualizar_odds.py) para encontrar apostas
 com "valor esperado" positivo: onde a probabilidade histórica do padrão
 acontecer é maior do que a odd da casa está sugerindo.
 
+NOVO: quando o jogo já tem o árbitro confirmado (salvo pelo atualizar_odds.py)
+e existe um perfil calculado pra ele (motor_padroes.py), a probabilidade de
+cartão e falta é ajustada pelo "fator" desse árbitro - juízes que dão mais
+cartão que a média puxam a probabilidade pra cima, os que seguram mais o
+cartão puxam pra baixo. O ajuste é limitado a um intervalo (0.85x a 1.15x)
+pra não deixar uma amostra ainda pequena por árbitro dominar a conta.
+
 Fórmula usada (valor esperado por unidade apostada):
     VE = (probabilidade_historica * odd) - 1
 Se VE > 0, a aposta é estatisticamente favorável no longo prazo, segundo
@@ -26,6 +33,11 @@ import psycopg2
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 VALOR_ESPERADO_MINIMO = 0.0  # só guarda recomendações com VE acima disso
+
+# limites do ajuste de árbitro - evita que uma amostra pequena por árbitro
+# distorça demais a probabilidade calculada a partir dos últimos 50 jogos do jogador
+FATOR_ARBITRO_MINIMO = 0.85
+FATOR_ARBITRO_MAXIMO = 1.15
 
 
 def identificar_tipo_padrao(mercado):
@@ -50,11 +62,13 @@ def identificar_tipo_padrao(mercado):
 
 
 def buscar_odds_futuras(cur):
-    """Busca odds de jogos que ainda não aconteceram."""
+    """Busca odds de jogos que ainda não aconteceram. NOVO: também traz o
+    árbitro do jogo (j.arbitro), usado no ajuste de cartão/falta."""
     cur.execute(
         """
         SELECT o.id, o.jogo_id, o.jogador_id, o.casa_aposta, o.mercado,
-               o.valor_odd, o.linha, o.direcao, j.data_jogo, j.adversario, j.mandante
+               o.valor_odd, o.linha, o.direcao, j.data_jogo, j.adversario,
+               j.mandante, j.arbitro
         FROM odds o
         JOIN jogos j ON j.id = o.jogo_id
         WHERE j.data_jogo >= CURRENT_DATE
@@ -108,6 +122,43 @@ def buscar_frequencia_resultado(cur, lado, resultado):
     return float(row[0]) if row else None
 
 
+def buscar_media_geral_cartoes(cur):
+    """NOVO: média geral de cartões por jogo, calculada a partir de todos os
+    árbitros com perfil já calculado. Serve de linha de base pra saber se um
+    árbitro específico dá mais ou menos cartão que a média."""
+    cur.execute("SELECT AVG(media_cartoes) FROM padroes_arbitro")
+    row = cur.fetchone()
+    return float(row[0]) if row and row[0] is not None else None
+
+
+def buscar_perfil_arbitro(cur, arbitro):
+    cur.execute(
+        "SELECT media_cartoes, media_faltas FROM padroes_arbitro WHERE arbitro = %s",
+        (arbitro,),
+    )
+    return cur.fetchone()
+
+
+def calcular_fator_arbitro(cur, arbitro, media_geral_cartoes):
+    """NOVO: retorna o multiplicador a aplicar na probabilidade de cartão,
+    com base em quanto esse árbitro se desvia da média geral. Limitado ao
+    intervalo [FATOR_ARBITRO_MINIMO, FATOR_ARBITRO_MAXIMO]. Retorna None se
+    não houver árbitro definido, perfil calculado, ou média geral disponível."""
+    if not arbitro or media_geral_cartoes is None or media_geral_cartoes == 0:
+        return None
+
+    perfil = buscar_perfil_arbitro(cur, arbitro)
+    if not perfil:
+        return None
+
+    media_cartoes_arbitro, _ = perfil
+    if media_cartoes_arbitro is None:
+        return None
+
+    fator = float(media_cartoes_arbitro) / media_geral_cartoes
+    return max(FATOR_ARBITRO_MINIMO, min(FATOR_ARBITRO_MAXIMO, fator))
+
+
 def resultado_do_ponto_de_vista_corinthians(direcao, mandante):
     """Traduz o outcome da odd (1/X/2) para vitória/empate/derrota do
     Corinthians, considerando se ele é mandante ou visitante nesse jogo."""
@@ -126,8 +177,11 @@ def calcular_recomendacoes(cur):
     odds = buscar_odds_futuras(cur)
     recomendacoes = []
 
+    # NOVO: calcula a média geral de cartões uma única vez, fora do loop
+    media_geral_cartoes = buscar_media_geral_cartoes(cur)
+
     for (odd_id, jogo_id, jogador_id, casa, mercado, valor_odd,
-         linha, direcao, data_jogo, adversario, mandante) in odds:
+         linha, direcao, data_jogo, adversario, mandante, arbitro) in odds:
 
         tipo = identificar_tipo_padrao(mercado)
         if tipo is None:
@@ -135,9 +189,17 @@ def calcular_recomendacoes(cur):
 
         frequencia = None
         resultado_cor = None
+        fator_arbitro_aplicado = None
 
         if tipo == "cartao" and jogador_id and direcao and direcao.lower() == "sim":
             frequencia = buscar_frequencia_cartao(cur, jogador_id)
+
+            # NOVO: aplica o ajuste de árbitro, se disponível
+            if frequencia is not None:
+                fator = calcular_fator_arbitro(cur, arbitro, media_geral_cartoes)
+                if fator is not None:
+                    frequencia = min(round(frequencia * fator, 2), 100.0)
+                    fator_arbitro_aplicado = fator
 
         elif tipo in ("falta_cometida", "desarme", "chute_no_gol") and jogador_id \
                 and direcao and direcao.lower() == "mais" and linha is not None:
@@ -166,6 +228,9 @@ def calcular_recomendacoes(cur):
         if tipo == "resultado_final":
             nomes = {"vitoria": "Vitória do Corinthians", "empate": "Empate", "derrota": "Derrota do Corinthians"}
             descricao_final = f"Resultado Final - {nomes[resultado_cor]}"
+
+        if fator_arbitro_aplicado is not None:
+            descricao_final += f" (ajustado pelo árbitro, fator {fator_arbitro_aplicado:.2f}x)"
 
         if valor_esperado > VALOR_ESPERADO_MINIMO:
             recomendacoes.append({
