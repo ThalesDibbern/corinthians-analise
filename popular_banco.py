@@ -6,10 +6,14 @@ estatísticas individuais por jogador (chutes, desarmes, faltas cometidas e
 sofridas, impedimentos, nota etc.) do Corinthians na API-Football, e salva
 tudo no banco Postgres (Railway).
 
-MODO HISTÓRICO: busca todos os jogos das temporadas 2022, 2023 e 2024
-(as disponíveis no plano grátis). Pula o que já está no banco - verifica
-eventos e cada tipo de estatística de forma independente, então é seguro
-rodar esse script várias vezes, ele só processa o que falta, sem duplicar nada.
+MODO HISTÓRICO + ATUAL: busca todos os jogos das temporadas 2022 a 2026
+(plano pago da API-Football libera dados atualizados até 2026). Pula o que
+já está no banco - verifica eventos e cada tipo de estatística de forma
+independente, então é seguro rodar esse script várias vezes, ele só
+processa o que falta, sem duplicar nada.
+
+ESCOPO ATUAL: só Corinthians (TEAM_ID = 131). Teste com escopo menor antes
+de expandir pra outros times do Brasileirão.
 
 NOVO: também salva o árbitro de cada jogo (campo "referee" da API), usado
 depois pelo motor_padroes.py pra calcular o "perfil" de cada árbitro
@@ -26,10 +30,12 @@ se não achar, procura pelo nome (pra aproveitar jogadores já cadastrados
 antes dessa mudança) e completa o id neles; só cria um registro novo se não
 encontrar de nenhuma forma.
 
-O plano grátis da API-Football tem um limite de 100 requisições por dia.
+O plano atual da API-Football tem um limite de 7.500 requisições por dia.
 Cada jogo consome até 3 requisições (eventos + estatísticas do time +
-estatísticas por jogador). Pode ser necessário rodar o script em mais de
-um dia até completar tudo - ele simplesmente continua de onde parou.
+estatísticas por jogador). Com esse volume, o histórico completo (2022-2026)
+do Corinthians deve caber tranquilamente numa única execução, mas o script
+continua seguro pra rodar em mais de um dia se precisar - ele continua de
+onde parou.
 
 Variáveis de ambiente necessárias (configuradas no Railway, aba "Variables"):
   - API_FOOTBALL_KEY   -> sua chave da API-Football (api-sports.io)
@@ -51,8 +57,8 @@ HEADERS = {"x-apisports-key": API_KEY}
 
 LEAGUE_ID = 71                    # Brasileirão Série A
 TEAM_ID = 131                      # Corinthians
-TEMPORADAS = [2022, 2023, 2024]    # todas as disponíveis no plano grátis
-LIMITE_REQUISICOES_DIA = 90        # margem de segurança abaixo do limite de 100/dia
+TEMPORADAS = [2022, 2023, 2024, 2025, 2026]  # histórico + temporada atual (plano pago libera 2025/2026)
+LIMITE_REQUISICOES_DIA = 7000      # margem de segurança abaixo do limite de 7.500/dia do plano novo
 
 requisicoes_usadas = 0
 _cursor_para_contador = None  # referência ao cursor do banco, usada só pelo controle de limite
