@@ -288,10 +288,9 @@ def montar_descricao_mercado(nome_mercado, linha, direcao, mandante, adversario,
 
     descricao = re.sub(r"Equipe\s*([12])", substituir, descricao, flags=re.IGNORECASE)
 
-    if linha is not None and direcao:
+    direcao_normalizada = (direcao or "").strip().lower()
+    if linha is not None and direcao_normalizada in ("mais", "menos"):
         detalhe = f"{direcao} de {linha}"
-    elif linha is not None:
-        detalhe = str(linha)
     else:
         detalhe = direcao
 
