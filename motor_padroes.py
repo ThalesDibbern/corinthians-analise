@@ -1,13 +1,18 @@
 """
 Motor de padrões - Cartões, faltas, desarmes, chutes e impedimentos de
-jogador + Escanteios do time + NOVO: perfil de cada árbitro.
+jogador + Escanteios do time + perfil de cada árbitro + NOVO: escanteios e
+cartões TOTAIS do jogo (mandante + visitante somados).
 
 Para cada jogador com dados suficientes, calcula a frequência histórica de
 cada padrão (ex: recebeu cartão, cometeu falta, teve X+ desarmes...). Para
-o time, calcula a frequência de passar de cada linha de escanteios testada.
-Para cada árbitro, calcula a média de cartões e faltas nos jogos que ele
-apitou (some os dois times, não só o Corinthians - a ideia é capturar o
-"jeito de apitar" dele, que vale pro jogo inteiro).
+o time, calcula a frequência de passar de cada linha de escanteios testada
+(só o lado do Corinthians). Para o jogo como um todo, calcula a mesma coisa
+mas somando os dois lados (escanteios e cartões totais) - mercados desse
+tipo tendem a ter frequência histórica mais alta que os de um lado só,
+aumentando a chance de gerar recomendação com odd mais baixa. Para cada
+árbitro, calcula a média de cartões e faltas nos jogos que ele apitou (soma
+os dois times, não só o Corinthians - a ideia é capturar o "jeito de
+apitar" dele, que vale pro jogo inteiro).
 Todos considerando os últimos 50 jogos disponíveis (ou todos os jogos
 apitados, no caso do árbitro).
 
@@ -29,6 +34,14 @@ JANELA_MAXIMA_DE_JOGOS = 50       # olha no máximo os últimos 50 jogos
 # linhas de escanteio testadas, no mesmo padrão que as casas de aposta usam
 # (mercados "mais de X.5 escanteios")
 LINHAS_ESCANTEIO = [3.5, 4.5, 5.5, 6.5, 7.5]
+
+# NOVO: linhas testadas pro escanteio TOTAL do jogo (mandante + visitante
+# somados) - naturalmente mais alto que o escanteio só do Corinthians
+LINHAS_ESCANTEIO_TOTAL = [7.5, 8.5, 9.5, 10.5, 11.5, 12.5]
+
+# NOVO: linhas testadas pro cartão TOTAL do jogo (mandante + visitante
+# somados)
+LINHAS_CARTAO_TOTAL = [2.5, 3.5, 4.5, 5.5]
 
 # novos padrões por jogador: nome do tipo -> (coluna no banco, linhas testadas)
 PADROES_LINHA_JOGADOR = {
@@ -150,6 +163,123 @@ def salvar_padroes_escanteio(cur, resultados):
             (linha, jogos_analisados, jogos_acima, frequencia, media),
         )
         print(f"  Mais de {linha} escanteios: {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
+
+
+def calcular_padroes_escanteio_total(cur):
+    """NOVO: escanteios do jogo INTEIRO (mandante + visitante somados),
+    diferente de calcular_padroes_escanteio, que olha só o lado do
+    Corinthians. Mercados de "total do jogo" tendem a ter frequência
+    histórica mais alta que mercados de um lado só, o que aumenta a chance
+    de gerar recomendação com odd mais baixa."""
+    cur.execute(
+        """
+        SELECT totais.total_escanteios
+        FROM (
+            SELECT eg.jogo_id, j.data_jogo, SUM(eg.escanteios) AS total_escanteios,
+                   COUNT(DISTINCT eg.lado) AS lados
+            FROM estatisticas_jogo eg
+            JOIN jogos j ON j.id = eg.jogo_id
+            WHERE j.data_jogo < CURRENT_DATE AND eg.escanteios IS NOT NULL
+            GROUP BY eg.jogo_id, j.data_jogo
+        ) totais
+        WHERE totais.lados = 2
+        ORDER BY totais.data_jogo DESC
+        LIMIT %s
+        """,
+        (JANELA_MAXIMA_DE_JOGOS,),
+    )
+    valores = [row[0] for row in cur.fetchall()]
+
+    jogos_analisados = len(valores)
+    if jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR:
+        return None, jogos_analisados
+
+    media = round(sum(float(v) for v in valores) / jogos_analisados, 2)
+
+    resultados = []
+    for linha in LINHAS_ESCANTEIO_TOTAL:
+        jogos_acima = sum(1 for v in valores if float(v) > linha)
+        frequencia = round(100 * jogos_acima / jogos_analisados, 2)
+        resultados.append((linha, jogos_analisados, jogos_acima, frequencia, media))
+
+    return resultados, jogos_analisados
+
+
+def salvar_padroes_escanteio_total(cur, resultados):
+    for linha, jogos_analisados, jogos_acima, frequencia, media in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_escanteio_total (linha, jogos_analisados, jogos_acima_da_linha, frequencia, media, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (linha) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                jogos_acima_da_linha = EXCLUDED.jogos_acima_da_linha,
+                frequencia = EXCLUDED.frequencia,
+                media = EXCLUDED.media,
+                atualizado_em = NOW()
+            """,
+            (linha, jogos_analisados, jogos_acima, frequencia, media),
+        )
+        print(f"  Mais de {linha} escanteios (total do jogo): {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
+
+
+def calcular_padroes_cartao_total(cur):
+    """NOVO: cartões do jogo INTEIRO (mandante + visitante somados). Só
+    considera jogos "completos" (com estatísticas dos dois lados já salvas
+    em estatisticas_jogo) como critério de que o jogo já foi totalmente
+    processado - sem isso, um jogo ainda não coletado entraria como "0
+    cartões" por engano, em vez de simplesmente não entrar na amostra."""
+    cur.execute(
+        """
+        SELECT contagem.total_cartoes
+        FROM (
+            SELECT j.id AS jogo_id, j.data_jogo, COUNT(c.id) AS total_cartoes,
+                   COUNT(DISTINCT eg.lado) AS lados
+            FROM jogos j
+            JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
+            LEFT JOIN cartoes c ON c.jogo_id = j.id
+            WHERE j.data_jogo < CURRENT_DATE
+            GROUP BY j.id, j.data_jogo
+        ) contagem
+        WHERE contagem.lados = 2
+        ORDER BY contagem.data_jogo DESC
+        LIMIT %s
+        """,
+        (JANELA_MAXIMA_DE_JOGOS,),
+    )
+    valores = [row[0] for row in cur.fetchall()]
+
+    jogos_analisados = len(valores)
+    if jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR:
+        return None, jogos_analisados
+
+    media = round(sum(float(v) for v in valores) / jogos_analisados, 2)
+
+    resultados = []
+    for linha in LINHAS_CARTAO_TOTAL:
+        jogos_acima = sum(1 for v in valores if float(v) > linha)
+        frequencia = round(100 * jogos_acima / jogos_analisados, 2)
+        resultados.append((linha, jogos_analisados, jogos_acima, frequencia, media))
+
+    return resultados, jogos_analisados
+
+
+def salvar_padroes_cartao_total(cur, resultados):
+    for linha, jogos_analisados, jogos_acima, frequencia, media in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_cartao_total (linha, jogos_analisados, jogos_acima_da_linha, frequencia, media, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (linha) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                jogos_acima_da_linha = EXCLUDED.jogos_acima_da_linha,
+                frequencia = EXCLUDED.frequencia,
+                media = EXCLUDED.media,
+                atualizado_em = NOW()
+            """,
+            (linha, jogos_analisados, jogos_acima, frequencia, media),
+        )
+        print(f"  Mais de {linha} cartões (total do jogo): {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
 
 
 def calcular_padrao_linha_jogador(cur, coluna, linhas_testadas):
@@ -421,6 +551,30 @@ def main():
             salvar_padroes_escanteio(cur, resultados_escanteio)
             conn.commit()
             print(f"Concluído! Padrões de escanteio calculados com base em {jogos_analisados} jogo(s).")
+
+        print("\nCalculando padrões de escanteio TOTAL do jogo (mandante + visitante)...")
+        resultados_escanteio_total, jogos_analisados_escanteio_total = calcular_padroes_escanteio_total(cur)
+
+        if not resultados_escanteio_total:
+            print(f"Dados insuficientes ainda para escanteio total ({jogos_analisados_escanteio_total} jogos "
+                  f"analisados, mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+        else:
+            salvar_padroes_escanteio_total(cur, resultados_escanteio_total)
+            conn.commit()
+            print(f"Concluído! Padrões de escanteio total calculados com base em "
+                  f"{jogos_analisados_escanteio_total} jogo(s).")
+
+        print("\nCalculando padrões de cartão TOTAL do jogo (mandante + visitante)...")
+        resultados_cartao_total, jogos_analisados_cartao_total = calcular_padroes_cartao_total(cur)
+
+        if not resultados_cartao_total:
+            print(f"Dados insuficientes ainda para cartão total ({jogos_analisados_cartao_total} jogos "
+                  f"analisados, mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+        else:
+            salvar_padroes_cartao_total(cur, resultados_cartao_total)
+            conn.commit()
+            print(f"Concluído! Padrões de cartão total calculados com base em "
+                  f"{jogos_analisados_cartao_total} jogo(s).")
 
         print("\nCalculando padrões de linha por jogador (faltas, desarmes, chutes)...")
         for tipo, (coluna, linhas) in PADROES_LINHA_JOGADOR.items():
