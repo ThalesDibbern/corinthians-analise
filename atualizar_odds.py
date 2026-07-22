@@ -10,6 +10,25 @@ janela de 2 dias de antecedência que já é usada pras odds. Se a API ainda
 não tiver o árbitro definido, o campo fica em branco por enquanto - o
 motor_recomendacoes.py simplesmente não aplica o ajuste de árbitro nesse caso.
 
+NOVO (descrição legível e específica da odd): a OddsPapi nomeia mercados de
+time genericamente como "Equipe 1"/"Equipe 2" (mandante/visitante), sem dizer
+qual time é qual - e a descrição salva não incluía a linha (handicap) nem a
+direção (Mais/Menos/Sim/Não) escolhida. Isso causava dois problemas: (1) duas
+odds de linhas diferentes do mesmo mercado (ex: +3.5 e +5.5 escanteios)
+ficavam com a MESMA descrição, parecendo apostas idênticas quando eram
+diferentes; (2) não dava pra saber, só olhando a descrição, se "Equipe 2" era
+o Corinthians ou o adversário. Agora a descrição é montada já traduzindo o
+time certo e incluindo linha + direção (ex: "Escanteios Corinthians - Mais de
+4.5").
+
+NOVO (limpeza de odds antigas): antes, o script só inseria odds novas, sem
+nunca apagar as antigas do mesmo jogo. Como o Cron roda todo dia dentro da
+janela de 2 dias antes do jogo, isso fazia a tabela `odds` acumular várias
+cópias da mesma aposta (uma por dia rodado), cada uma com o preço daquele
+dia - gerando "recomendações duplicadas" com odd e probabilidade levemente
+diferentes. Agora, antes de salvar as odds de um jogo, o script apaga as
+odds anteriores desse mesmo jogo.
+
 Feito para rodar automaticamente todo dia (Cron Schedule no Railway).
 Se não houver jogo próximo, o script simplesmente não faz nada naquele dia.
 
@@ -20,6 +39,7 @@ Variáveis de ambiente necessárias (configuradas no Railway, aba "Variables"):
 """
 
 import os
+import re
 from datetime import datetime, timezone
 
 import requests
@@ -242,10 +262,55 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante):
     return cur.fetchone()[0]
 
 
-def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados):
+def nome_time_por_posicao(mandante, adversario, posicao):
+    """NOVO: traduz "Equipe 1"/"Equipe 2" (nomenclatura genérica que a
+    OddsPapi usa pra mercados de time) pro nome real do time. Convenção da
+    OddsPapi: Equipe 1 = mandante do jogo, Equipe 2 = visitante."""
+    corinthians_eh_equipe_1 = mandante
+    if posicao == "1":
+        return "Corinthians" if corinthians_eh_equipe_1 else adversario
+    return adversario if corinthians_eh_equipe_1 else "Corinthians"
+
+
+def montar_descricao_mercado(nome_mercado, linha, direcao, mandante, adversario, player_name=None):
+    """NOVO: monta uma descrição legível e ESPECÍFICA da odd, resolvendo
+    "Equipe 1"/"Equipe 2" pro nome real do time e incluindo a linha
+    (handicap) e a direção escolhida (Mais/Menos/Sim/Não).
+
+    Sem isso, duas odds do mesmo mercado com linhas diferentes (ex: "mais de
+    3.5 escanteios" e "mais de 5.5 escanteios") ficavam com a mesma descrição
+    salva, e o motor de combinações não tinha como saber que eram apostas
+    diferentes (ou que media a mesma coisa em pontos de corte diferentes)."""
+    descricao = nome_mercado
+
+    def substituir(match):
+        return nome_time_por_posicao(mandante, adversario, match.group(1))
+
+    descricao = re.sub(r"Equipe\s*([12])", substituir, descricao, flags=re.IGNORECASE)
+
+    if linha is not None and direcao:
+        detalhe = f"{direcao} de {linha}"
+    elif linha is not None:
+        detalhe = str(linha)
+    else:
+        detalhe = direcao
+
+    if detalhe:
+        descricao = f"{descricao} - {detalhe}"
+
+    if player_name:
+        descricao = f"{descricao} - {player_name}"
+
+    return descricao
+
+
+def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, adversario):
     """Percorre as odds de todas as casas/mercados retornados e salva só os
     mercados de interesse (cartão de jogador + escanteios do time), incluindo
-    a linha (handicap) e a direção (Mais/Menos/Sim/Não) de cada odd."""
+    a linha (handicap) e a direção (Mais/Menos/Sim/Não) de cada odd.
+
+    NOVO: a descrição agora é montada com montar_descricao_mercado, que
+    traduz o time e inclui linha + direção (ver docstring dela)."""
     salvos = 0
     bookmaker_odds = dados_odds.get("bookmakerOdds", {})
 
@@ -276,11 +341,13 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados):
                         continue
 
                     player_name = dados.get("playerName")
-                    descricao_mercado = nome_mercado
                     jogador_id = None
                     if player_name:
                         jogador_id = get_or_create_jogador(cur, player_name)
-                        descricao_mercado = f"{nome_mercado} - {player_name}"
+
+                    descricao_mercado = montar_descricao_mercado(
+                        nome_mercado, linha, direcao, mandante, adversario, player_name
+                    )
 
                     cur.execute(
                         """INSERT INTO odds (jogo_id, jogador_id, casa_aposta, mercado, valor_odd, linha, direcao)
@@ -334,7 +401,16 @@ def main():
                 print(f"  Aviso: não foi possível buscar odds desse jogo ({e}). Pulando pro próximo.")
                 continue
 
-            salvos = salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados)
+            # NOVO: apaga as odds antigas desse jogo antes de salvar as novas.
+            # Sem isso, cada execução do cron (dentro da janela de 2 dias)
+            # inseria de novo as mesmas odds com o preço daquele dia,
+            # acumulando "duplicatas" com odd/probabilidade levemente
+            # diferentes de uma execução pra outra.
+            cur.execute("DELETE FROM odds WHERE jogo_id = %s", (jogo_id,))
+
+            salvos = salvar_odds_do_jogo(
+                cur, jogo_id, dados_odds, catalogo_mercados, eh_mandante, adversario
+            )
 
             print(f"  -> {salvos} odds salvas.")
             conn.commit()
