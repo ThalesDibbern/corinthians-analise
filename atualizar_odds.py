@@ -229,35 +229,95 @@ def get_or_create_jogador(cur, nome):
     return cur.fetchone()[0]
 
 
-def get_or_create_jogo(cur, data_jogo, adversario, mandante):
+def get_or_create_time(cur, oddspapi_participant_id, nome):
+    """Garante que o time existe na tabela `times`, retorna o id.
+
+    Mesma lógica de identidade por id da API usada em get_or_create_jogador,
+    só que aqui usando o participantId da OddsPapi (que é diferente do
+    team_id da API-Football - por isso a coluna separada oddspapi_participant_id
+    em `times`). Times criados aqui casam automaticamente com os que o
+    popular_banco.py cria pelo lado da API-Football, porque os dois caem no
+    mesmo fallback por nome quando o id de uma das duas APIs ainda não está
+    salvo no registro."""
+    if oddspapi_participant_id is not None:
+        cur.execute("SELECT id FROM times WHERE oddspapi_participant_id = %s", (oddspapi_participant_id,))
+        row = cur.fetchone()
+        if row:
+            return row[0]
+
+        cur.execute("SELECT id, oddspapi_participant_id FROM times WHERE nome = %s", (nome,))
+        row = cur.fetchone()
+        if row:
+            time_id, id_existente = row
+            if id_existente is None:
+                cur.execute(
+                    "UPDATE times SET oddspapi_participant_id = %s WHERE id = %s",
+                    (oddspapi_participant_id, time_id),
+                )
+            return time_id
+
+        cur.execute(
+            "INSERT INTO times (nome, oddspapi_participant_id) VALUES (%s, %s) RETURNING id",
+            (nome, oddspapi_participant_id),
+        )
+        return cur.fetchone()[0]
+
+    cur.execute("SELECT id FROM times WHERE nome = %s", (nome,))
+    row = cur.fetchone()
+    if row:
+        return row[0]
+    cur.execute("INSERT INTO times (nome) VALUES (%s) RETURNING id", (nome,))
+    return cur.fetchone()[0]
+
+
+def get_or_create_jogo(cur, data_jogo, adversario, mandante,
+                        mandante_nome, visitante_nome,
+                        mandante_oddspapi_id, visitante_oddspapi_id):
     """Encontra (ou cria) o jogo pela combinação data + adversário - assim
     esse script funciona independente do jogo já existir vindo do outro
     script (API-Football) ou ser inteiramente novo (jogo futuro).
     NOVO: se o jogo já existe mas ainda não tem árbitro salvo, tenta buscar
     e atualizar (a escalação pode ter sido confirmada entre uma execução e
-    outra do cron, já que ambas rodam na mesma janela de 2 dias)."""
+    outra do cron, já que ambas rodam na mesma janela de 2 dias).
+    NOVO (times): também preenche mandante_id/visitante_id (tabela `times`),
+    com o mesmo backfill automático pra jogos que já existiam sem esse dado."""
     cur.execute(
-        "SELECT id, arbitro FROM jogos WHERE data_jogo = %s AND adversario = %s",
+        "SELECT id, arbitro, mandante_id, visitante_id FROM jogos WHERE data_jogo = %s AND adversario = %s",
         (data_jogo, adversario),
     )
     row = cur.fetchone()
     if row:
-        jogo_id, arbitro_salvo = row
+        jogo_id, arbitro_salvo, mandante_id_salvo, visitante_id_salvo = row
         if arbitro_salvo is None:
             arbitro = buscar_arbitro_api_football(data_jogo)
             if arbitro:
                 cur.execute("UPDATE jogos SET arbitro = %s WHERE id = %s", (arbitro, jogo_id))
                 print(f"  Árbitro confirmado: {arbitro}")
+
+        # backfill: jogo já existia de antes da tabela `times` existir -
+        # completa mandante_id/visitante_id agora.
+        if mandante_id_salvo is None or visitante_id_salvo is None:
+            mandante_id = get_or_create_time(cur, mandante_oddspapi_id, mandante_nome)
+            visitante_id = get_or_create_time(cur, visitante_oddspapi_id, visitante_nome)
+            cur.execute(
+                "UPDATE jogos SET mandante_id = %s, visitante_id = %s WHERE id = %s",
+                (mandante_id, visitante_id, jogo_id),
+            )
         return jogo_id
 
     arbitro = buscar_arbitro_api_football(data_jogo)
     if arbitro:
         print(f"  Árbitro confirmado: {arbitro}")
 
+    mandante_id = get_or_create_time(cur, mandante_oddspapi_id, mandante_nome)
+    visitante_id = get_or_create_time(cur, visitante_oddspapi_id, visitante_nome)
+
     cur.execute(
-        """INSERT INTO jogos (data_jogo, adversario, mandante, competicao, arbitro)
-           VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-        (data_jogo, adversario, mandante, "Brasileirão Série A", arbitro),
+        """INSERT INTO jogos (data_jogo, adversario, mandante, competicao, arbitro,
+                               mandante_id, visitante_id)
+           VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+        (data_jogo, adversario, mandante, "Brasileirão Série A", arbitro,
+         mandante_id, visitante_id),
     )
     return cur.fetchone()[0]
 
@@ -381,11 +441,23 @@ def main():
         for jogo in jogos:
             eh_mandante = jogo["participant1Id"] == PARTICIPANT_ID
             adversario = jogo["participant2Name"] if eh_mandante else jogo["participant1Name"]
+            adversario_oddspapi_id = jogo.get("participant2Id") if eh_mandante else jogo.get("participant1Id")
             data_jogo = jogo["startTime"][:10]
 
             print(f"\nJogo encontrado: Corinthians x {adversario} em {data_jogo}")
 
-            jogo_id = get_or_create_jogo(cur, data_jogo, adversario, eh_mandante)
+            if eh_mandante:
+                mandante_nome, visitante_nome = "Corinthians", adversario
+                mandante_oddspapi_id, visitante_oddspapi_id = PARTICIPANT_ID, adversario_oddspapi_id
+            else:
+                mandante_nome, visitante_nome = adversario, "Corinthians"
+                mandante_oddspapi_id, visitante_oddspapi_id = adversario_oddspapi_id, PARTICIPANT_ID
+
+            jogo_id = get_or_create_jogo(
+                cur, data_jogo, adversario, eh_mandante,
+                mandante_nome, visitante_nome,
+                mandante_oddspapi_id, visitante_oddspapi_id,
+            )
             conn.commit()
 
             # NOVO: se a busca de odds falhar pra ESSE jogo específico (ex: 403,
