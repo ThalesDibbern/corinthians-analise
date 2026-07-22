@@ -227,6 +227,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
         chave = (jogo_id, casa)
         grupos.setdefault(chave, []).append({
             "jogador_id": jogador_id,
+            "tipo_padrao": tipo_padrao,
             "descricao": descricao,
             "odd": float(odd),
             "probabilidade": float(prob) / 100,
@@ -240,8 +241,18 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
             if len(pernas) < tamanho:
                 continue
             for combo in combinations(pernas, tamanho):
-                jogadores = [p["jogador_id"] for p in combo if p["jogador_id"] is not None]
-                if len(jogadores) != len(set(jogadores)):
+                # NOVO: antes só verificava se o mesmo JOGADOR aparecia duas
+                # vezes na múltipla. Isso não pegava o caso de duas pernas do
+                # mesmo mercado de TIME (ex: duas linhas diferentes de
+                # escanteio do mesmo jogo) - que são fortemente
+                # correlacionadas (medem a mesma coisa em pontos de corte
+                # diferentes), violando a suposição de independência usada
+                # no cálculo de probabilidade/valor esperado combinado, e
+                # inflando o VE de forma artificial. Agora a checagem é pelo
+                # par (tipo_padrao, jogador_id), que cobre tanto jogador
+                # repetido quanto mercado de time repetido.
+                chaves_mercado = [(p["tipo_padrao"], p["jogador_id"]) for p in combo]
+                if len(chaves_mercado) != len(set(chaves_mercado)):
                     continue
 
                 odd_combinada = 1.0
