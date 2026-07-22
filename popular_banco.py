@@ -338,27 +338,83 @@ def salvar_estatisticas_jogadores(cur, jogo_id, dados_jogadores, home_team_id):
     return salvos
 
 
+def get_or_create_time(cur, api_football_team_id, nome):
+    """Garante que o time existe na tabela `times`, retorna o id.
+
+    Segue o mesmo padrão de identidade por id da API já usado em
+    get_or_create_jogador: procura primeiro pelo api_football_team_id (evita
+    duplicar/confundir times por nome); se não achar, procura pelo nome (pra
+    aproveitar times já cadastrados, ex: pelo backfill de migração ou por
+    atualizar_odds.py) e completa o id neles; só cria um registro novo se não
+    encontrar de nenhuma forma."""
+    if api_football_team_id is not None:
+        cur.execute("SELECT id FROM times WHERE api_football_team_id = %s", (api_football_team_id,))
+        row = cur.fetchone()
+        if row:
+            return row[0]
+
+        cur.execute("SELECT id, api_football_team_id FROM times WHERE nome = %s", (nome,))
+        row = cur.fetchone()
+        if row:
+            time_id, id_existente = row
+            if id_existente is None:
+                cur.execute(
+                    "UPDATE times SET api_football_team_id = %s WHERE id = %s",
+                    (api_football_team_id, time_id),
+                )
+            return time_id
+
+        cur.execute(
+            "INSERT INTO times (nome, api_football_team_id) VALUES (%s, %s) RETURNING id",
+            (nome, api_football_team_id),
+        )
+        return cur.fetchone()[0]
+
+    cur.execute("SELECT id FROM times WHERE nome = %s", (nome,))
+    row = cur.fetchone()
+    if row:
+        return row[0]
+    cur.execute("INSERT INTO times (nome) VALUES (%s) RETURNING id", (nome,))
+    return cur.fetchone()[0]
+
+
 def get_or_create_jogo(cur, fixture):
     """Garante que o jogo existe na tabela `jogos`, retorna o id.
     NOVO: também salva o árbitro (campo "referee" da API), tanto na criação
-    quanto num backfill pra jogos que já existiam no banco sem esse dado."""
+    quanto num backfill pra jogos que já existiam no banco sem esse dado.
+    NOVO (times): também preenche mandante_id/visitante_id, referenciando a
+    tabela `times` (em vez de só o texto solto em `adversario`) - com o
+    mesmo backfill automático pra jogos que já existiam sem esse dado."""
     fixture_id = fixture["fixture"]["id"]
     arbitro = fixture["fixture"].get("referee")  # pode vir None em alguns casos
 
-    cur.execute("SELECT id, arbitro FROM jogos WHERE id = %s", (fixture_id,))
+    mandante_nome = fixture["teams"]["home"]["name"]
+    visitante_nome = fixture["teams"]["away"]["name"]
+    mandante_api_id = fixture["teams"]["home"]["id"]
+    visitante_api_id = fixture["teams"]["away"]["id"]
+
+    cur.execute("SELECT id, arbitro, mandante_id, visitante_id FROM jogos WHERE id = %s", (fixture_id,))
     row = cur.fetchone()
     if row:
-        jogo_id, arbitro_salvo = row
+        jogo_id, arbitro_salvo, mandante_id_salvo, visitante_id_salvo = row
         # backfill: jogo já existia (de antes dessa funcionalidade) mas
         # está sem árbitro salvo, e agora a API nos deu esse dado - atualiza.
         if arbitro_salvo is None and arbitro:
             cur.execute("UPDATE jogos SET arbitro = %s WHERE id = %s", (arbitro, fixture_id))
+
+        # backfill: jogo já existia de antes da tabela `times` existir -
+        # completa mandante_id/visitante_id agora.
+        if mandante_id_salvo is None or visitante_id_salvo is None:
+            mandante_id = get_or_create_time(cur, mandante_api_id, mandante_nome)
+            visitante_id = get_or_create_time(cur, visitante_api_id, visitante_nome)
+            cur.execute(
+                "UPDATE jogos SET mandante_id = %s, visitante_id = %s WHERE id = %s",
+                (mandante_id, visitante_id, fixture_id),
+            )
         return jogo_id
 
     data_jogo = fixture["fixture"]["date"][:10]
-    mandante_nome = fixture["teams"]["home"]["name"]
-    visitante_nome = fixture["teams"]["away"]["name"]
-    eh_mandante = fixture["teams"]["home"]["id"] == TEAM_ID
+    eh_mandante = mandante_api_id == TEAM_ID
     adversario = visitante_nome if eh_mandante else mandante_nome
     placar_corinthians = (
         fixture["goals"]["home"] if eh_mandante else fixture["goals"]["away"]
@@ -367,11 +423,15 @@ def get_or_create_jogo(cur, fixture):
         fixture["goals"]["away"] if eh_mandante else fixture["goals"]["home"]
     )
 
+    mandante_id = get_or_create_time(cur, mandante_api_id, mandante_nome)
+    visitante_id = get_or_create_time(cur, visitante_api_id, visitante_nome)
+
     cur.execute(
         """
         INSERT INTO jogos (id, data_jogo, adversario, mandante, competicao,
-                            placar_corinthians, placar_adversario, arbitro)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            placar_corinthians, placar_adversario, arbitro,
+                            mandante_id, visitante_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             fixture_id,
@@ -382,6 +442,8 @@ def get_or_create_jogo(cur, fixture):
             placar_corinthians,
             placar_adversario,
             arbitro,
+            mandante_id,
+            visitante_id,
         ),
     )
     return fixture_id
