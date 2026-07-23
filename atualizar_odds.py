@@ -229,12 +229,43 @@ def buscar_fixture_api_football(data_jogo):
         return None
 
 
+def normalizar_nome_oddspapi(nome):
+    """NOVO: a OddsPapi retorna nome de jogador no formato "Sobrenome, Nome"
+    (ex: "Alberto, Yuri"), diferente da API-Football, que usa "Nome
+    Sobrenome" (ex: "Yuri Alberto"). Sem converter, o cadastro por nome
+    nunca batia com o jogador já criado pelo popular_banco.py - criava um
+    registro duplicado, sem api_football_id e sem nenhuma escalação
+    vinculada, mesmo o jogador sendo titular de verdade (foi assim que o
+    Yuri Alberto ficou marcado como "indisponível" por engano)."""
+    if "," in nome:
+        partes = [p.strip() for p in nome.split(",", 1)]
+        if len(partes) == 2 and partes[0] and partes[1]:
+            sobrenome, nome_proprio = partes
+            return f"{nome_proprio} {sobrenome}".strip()
+    return nome
+
+
 def get_or_create_jogador(cur, nome):
-    cur.execute("SELECT id FROM jogadores WHERE nome = %s", (nome,))
+    """NOVO: normaliza o nome (ver normalizar_nome_oddspapi) antes de
+    procurar/criar - assim, o jogador criado aqui casa com o mesmo registro
+    que o popular_banco.py usa (que vem no formato "Nome Sobrenome" da
+    API-Football)."""
+    nome_normalizado = normalizar_nome_oddspapi(nome)
+
+    cur.execute("SELECT id FROM jogadores WHERE nome = %s", (nome_normalizado,))
     row = cur.fetchone()
     if row:
         return row[0]
-    cur.execute("INSERT INTO jogadores (nome) VALUES (%s) RETURNING id", (nome,))
+
+    # rede de segurança: se por algum motivo já existir um registro com o
+    # nome no formato original (não normalizado), aproveita em vez de duplicar
+    if nome_normalizado != nome:
+        cur.execute("SELECT id FROM jogadores WHERE nome = %s", (nome,))
+        row = cur.fetchone()
+        if row:
+            return row[0]
+
+    cur.execute("INSERT INTO jogadores (nome) VALUES (%s) RETURNING id", (nome_normalizado,))
     return cur.fetchone()[0]
 
 
