@@ -1,3 +1,4 @@
+
 """
 Script que verifica se o Corinthians tem jogo nos próximos dias e, se tiver,
 busca as odds desse jogo (cartões de jogador + escanteios do time) na
@@ -86,6 +87,7 @@ def buscar_catalogo_mercados():
         catalogo[str(m["marketId"])] = {
             "nome": m["marketName"],
             "handicap": m.get("handicap"),
+            "tipo": m.get("marketType"),
             "outcomes": {str(o["outcomeId"]): o["outcomeName"] for o in m.get("outcomes", [])},
         }
     return catalogo
@@ -363,13 +365,41 @@ def montar_descricao_mercado(nome_mercado, linha, direcao, mandante, adversario,
     return descricao
 
 
+# NOVO: marketTypes que identificam mercados de TOTAL DO JOGO (mandante +
+# visitante somados), confirmados olhando o catálogo real da OddsPapi -
+# diferente dos mercados por time (teamtotals-corner-team1/team2, que temos
+# hoje) e dos mercados de handicap por time (spread-bookings, fora de
+# escopo). Mapeia pro nome final que queremos salvar, já sem ambiguidade
+# com o mercado por time.
+MARKET_TYPES_TOTAL_DO_JOGO = {
+    "totals-corner": "Escanteios Total do Jogo",
+    "totals-bookings": "Cartões Total do Jogo",
+}
+
+
+def mercado_de_tempo_parcial(nome_mercado):
+    """NOVO: a OddsPapi também retorna versões de Primeiro Tempo/Segundo
+    Tempo desses mesmos mercados (ex: "Cartões - Mais/Menos Primeiro
+    Tempo") - fora do escopo do projeto hoje (só olhamos o jogo completo).
+    "Tempo Completo" (usado no mercado de resultado final) não é excluído."""
+    nome = nome_mercado.lower()
+    if "tempo completo" in nome:
+        return False
+    return "primeiro tempo" in nome or "segundo tempo" in nome
+
+
 def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, adversario):
     """Percorre as odds de todas as casas/mercados retornados e salva só os
     mercados de interesse (cartão de jogador + escanteios do time), incluindo
     a linha (handicap) e a direção (Mais/Menos/Sim/Não) de cada odd.
 
     NOVO: a descrição agora é montada com montar_descricao_mercado, que
-    traduz o time e inclui linha + direção (ver docstring dela)."""
+    traduz o time e inclui linha + direção (ver docstring dela).
+    NOVO (mercados de total do jogo): mercados com marketType em
+    MARKET_TYPES_TOTAL_DO_JOGO (escanteios/cartões somando os dois times)
+    usam um nome fixo e inequívoco, em vez do nome genérico do catálogo -
+    evita confundir com o mercado por time (que também contém a palavra
+    "escanteio"/"cartão", mas se refere só a um lado)."""
     salvos = 0
     bookmaker_odds = dados_odds.get("bookmakerOdds", {})
 
@@ -383,7 +413,15 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, a
             if not info_mercado or not mercado_interessa(info_mercado["nome"]):
                 continue
 
-            nome_mercado = info_mercado["nome"]
+            if mercado_de_tempo_parcial(info_mercado["nome"]):
+                continue
+
+            tipo_mercado = info_mercado.get("tipo")
+            if tipo_mercado in MARKET_TYPES_TOTAL_DO_JOGO:
+                nome_mercado = MARKET_TYPES_TOTAL_DO_JOGO[tipo_mercado]
+            else:
+                nome_mercado = info_mercado["nome"]
+
             linha = info_mercado["handicap"]
 
             outcomes = market_info.get("outcomes", {})
