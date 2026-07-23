@@ -243,7 +243,16 @@ def calcular_recomendacoes(cur):
 
         elif tipo == "escanteio_time" and not jogador_id \
                 and direcao and direcao.lower() == "mais" and linha is not None:
-            frequencia = buscar_frequencia_escanteio_time(cur, linha)
+            # NOVO: o padrão de escanteio_time (padroes_time_escanteio) só é
+            # calculado com base nos jogos do Corinthians - não temos base
+            # histórica de outros times ainda. Sem essa checagem, o sistema
+            # aplicava por engano a frequência do Corinthians em mercados de
+            # escanteio do ADVERSÁRIO (ex: "Escanteios - Mais/Menos Clube do
+            # Remo PA"), gerando recomendação com probabilidade errada.
+            # Quando outros times tiverem padrão próprio calculado, trocar
+            # essa checagem fixa por uma busca dinâmica pelo time certo.
+            if "corinthians" in mercado.lower():
+                frequencia = buscar_frequencia_escanteio_time(cur, linha)
 
         elif tipo == "escanteio_total" and not jogador_id \
                 and direcao and direcao.lower() == "mais" and linha is not None:
