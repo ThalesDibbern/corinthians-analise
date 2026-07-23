@@ -195,12 +195,20 @@ def buscar_odds(fixture_id, bookmakers=None):
     return resp.json()
 
 
-def buscar_arbitro_api_football(data_jogo):
-    """NOVO: consulta a API-Football pra descobrir o árbitro escalado pro
-    jogo do Corinthians numa data específica. Retorna None se a chave não
-    estiver configurada, se a API ainda não tiver o árbitro definido, ou se
+def buscar_fixture_api_football(data_jogo):
+    """Consulta a API-Football pra encontrar o fixture do Corinthians numa
+    data específica. Retorna o fixture inteiro (dict) ou None se a chave não
+    estiver configurada, se a API ainda não tiver esse jogo cadastrado, ou se
     a consulta falhar por qualquer motivo (não deve travar o script todo -
-    o árbitro é um dado complementar, não essencial)."""
+    esse dado é complementar, não essencial).
+
+    NOVO: antes essa função só retornava o árbitro. Agora retorna o fixture
+    completo porque também precisamos do ID real do jogo na API-Football
+    (fixture["fixture"]["id"]) - usar esse mesmo ID como PK ao criar o jogo
+    aqui evita que esse script e o popular_banco.py criem dois registros
+    diferentes pro mesmo jogo (um com ID auto-incrementado, outro com o ID
+    real), o que deixaria odds e estatísticas/escalação "cegos" um pro
+    outro."""
     if not API_FOOTBALL_KEY:
         return None
 
@@ -215,9 +223,9 @@ def buscar_arbitro_api_football(data_jogo):
         jogos = dados.get("response", [])
         if not jogos:
             return None
-        return jogos[0]["fixture"].get("referee")
+        return jogos[0]
     except Exception as e:
-        print(f"  Aviso: não foi possível buscar o árbitro ({e}). Seguindo sem esse dado.")
+        print(f"  Aviso: não foi possível consultar a API-Football ({e}). Seguindo sem esse dado.")
         return None
 
 
@@ -281,7 +289,17 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
     e atualizar (a escalação pode ter sido confirmada entre uma execução e
     outra do cron, já que ambas rodam na mesma janela de 2 dias).
     NOVO (times): também preenche mandante_id/visitante_id (tabela `times`),
-    com o mesmo backfill automático pra jogos que já existiam sem esse dado."""
+    com o mesmo backfill automático pra jogos que já existiam sem esse dado.
+    NOVO (ID real da API-Football): ao criar um jogo novo, busca o fixture
+    correspondente na API-Football e usa o MESMO ID como chave primária.
+    Sem isso, esse script criava o jogo com um ID auto-incrementado do banco,
+    diferente do ID real que o popular_banco.py usaria mais tarde pro mesmo
+    jogo - resultando em DOIS registros duplicados pro mesmo jogo (um com as
+    odds, outro com estatísticas/escalação), cegos um pro outro. Se por
+    algum motivo o ID real já estiver em uso por outro registro (ex: nome do
+    adversário grafado de forma diferente entre as duas fontes), a inserção
+    com ID explícito falha com segurança (savepoint) e cai de volta pro
+    comportamento antigo (ID automático), sem travar o script."""
     cur.execute(
         "SELECT id, arbitro, mandante_id, visitante_id FROM jogos WHERE data_jogo = %s AND adversario = %s",
         (data_jogo, adversario),
@@ -290,7 +308,8 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
     if row:
         jogo_id, arbitro_salvo, mandante_id_salvo, visitante_id_salvo = row
         if arbitro_salvo is None:
-            arbitro = buscar_arbitro_api_football(data_jogo)
+            fixture = buscar_fixture_api_football(data_jogo)
+            arbitro = fixture["fixture"].get("referee") if fixture else None
             if arbitro:
                 cur.execute("UPDATE jogos SET arbitro = %s WHERE id = %s", (arbitro, jogo_id))
                 print(f"  Árbitro confirmado: {arbitro}")
@@ -306,12 +325,32 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
             )
         return jogo_id
 
-    arbitro = buscar_arbitro_api_football(data_jogo)
+    fixture = buscar_fixture_api_football(data_jogo)
+    arbitro = fixture["fixture"].get("referee") if fixture else None
+    fixture_id_real = fixture["fixture"]["id"] if fixture else None
     if arbitro:
         print(f"  Árbitro confirmado: {arbitro}")
 
     mandante_id = get_or_create_time(cur, mandante_oddspapi_id, mandante_nome)
     visitante_id = get_or_create_time(cur, visitante_oddspapi_id, visitante_nome)
+
+    if fixture_id_real is not None:
+        # tenta usar o ID real da API-Football, com uma rede de segurança
+        # (savepoint) caso esse ID já esteja em uso por outro caminho
+        cur.execute("SAVEPOINT antes_de_inserir_jogo")
+        try:
+            cur.execute(
+                """INSERT INTO jogos (id, data_jogo, adversario, mandante, competicao,
+                                       arbitro, mandante_id, visitante_id)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                (fixture_id_real, data_jogo, adversario, mandante, "Brasileirão Série A",
+                 arbitro, mandante_id, visitante_id),
+            )
+            return cur.fetchone()[0]
+        except Exception:
+            cur.execute("ROLLBACK TO SAVEPOINT antes_de_inserir_jogo")
+            print(f"  Aviso: ID real {fixture_id_real} já em uso por outro registro - "
+                  "criando esse jogo com ID automático (verificar depois se não duplicou).")
 
     cur.execute(
         """INSERT INTO jogos (data_jogo, adversario, mandante, competicao, arbitro,
