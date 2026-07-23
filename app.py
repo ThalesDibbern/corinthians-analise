@@ -3,8 +3,11 @@ Interface web do projeto - Análise Corinthians.
 
 Mostra um botão "Gerar recomendações da rodada" com um filtro de faixa de
 odd. Ao clicar, busca as recomendações individuais já calculadas (pelo
-motor_recomendacoes.py, que roda todo dia) e monta múltiplas (2-3 pernas)
-na hora, dentro da faixa de odd que o usuário escolheu.
+motor_recomendacoes.py, que roda todo dia) e monta apostas simples e
+múltiplas (1 a 5 pernas) na hora, dentro da faixa de odd que o usuário
+escolheu. NOVO: antes só considerava múltiplas (2+ pernas) - agora também
+mostra a aposta individual quando ela sozinha já cai dentro da faixa
+pedida, em vez de forçar sempre uma combinação.
 
 Não recalcula os padrões nem busca odds novas - isso já é feito pelos
 scripts automáticos. Essa interface só CONSULTA o que já está pronto no
@@ -237,7 +240,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
 
     resultado = []
     for (jogo_id, casa), pernas in grupos.items():
-        for tamanho in (2, 3, 4, 5):
+        for tamanho in (1, 2, 3, 4, 5):
             if len(pernas) < tamanho:
                 continue
             for combo in combinations(pernas, tamanho):
