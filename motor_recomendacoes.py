@@ -42,8 +42,18 @@ FATOR_ARBITRO_MAXIMO = 1.15
 
 def identificar_tipo_padrao(mercado):
     """Adivinha a que tipo de padrão um mercado se refere, a partir do nome
-    (em português, como vem da OddsPapi)."""
+    (em português, como vem da OddsPapi).
+
+    NOVO: os mercados de total do jogo (escanteios/cartões somando os dois
+    times) são checados ANTES dos mercados por time/jogador, porque o nome
+    deles ("Escanteios Total do Jogo", "Cartões Total do Jogo") também
+    contém as palavras "escanteio"/"cartão" - sem essa ordem, cairiam por
+    engano nos tipos genéricos (escanteio_time/cartao)."""
     nome = mercado.lower()
+    if "escanteio total do jogo" in nome:
+        return "escanteio_total"
+    if "cartão total do jogo" in nome or "cartao total do jogo" in nome:
+        return "cartao_total"
     if "cartão" in nome or "cartao" in nome or "card" in nome:
         return "cartao"
     if "falta" in nome:
@@ -107,6 +117,29 @@ def buscar_frequencia_simples_jogador(cur, jogador_id, tipo):
 def buscar_frequencia_escanteio_time(cur, linha):
     cur.execute(
         "SELECT frequencia FROM padroes_time_escanteio WHERE linha = %s",
+        (linha,),
+    )
+    row = cur.fetchone()
+    return float(row[0]) if row else None
+
+
+def buscar_frequencia_escanteio_total(cur, linha):
+    """NOVO: frequência de escanteios do jogo INTEIRO (mandante + visitante
+    somados) passar de uma linha - diferente de buscar_frequencia_escanteio_time,
+    que olha só o lado do Corinthians."""
+    cur.execute(
+        "SELECT frequencia FROM padroes_escanteio_total WHERE linha = %s",
+        (linha,),
+    )
+    row = cur.fetchone()
+    return float(row[0]) if row else None
+
+
+def buscar_frequencia_cartao_total(cur, linha):
+    """NOVO: frequência de cartões do jogo INTEIRO (mandante + visitante
+    somados) passar de uma linha."""
+    cur.execute(
+        "SELECT frequencia FROM padroes_cartao_total WHERE linha = %s",
         (linha,),
     )
     row = cur.fetchone()
@@ -211,6 +244,14 @@ def calcular_recomendacoes(cur):
         elif tipo == "escanteio_time" and not jogador_id \
                 and direcao and direcao.lower() == "mais" and linha is not None:
             frequencia = buscar_frequencia_escanteio_time(cur, linha)
+
+        elif tipo == "escanteio_total" and not jogador_id \
+                and direcao and direcao.lower() == "mais" and linha is not None:
+            frequencia = buscar_frequencia_escanteio_total(cur, linha)
+
+        elif tipo == "cartao_total" and not jogador_id \
+                and direcao and direcao.lower() == "mais" and linha is not None:
+            frequencia = buscar_frequencia_cartao_total(cur, linha)
 
         elif tipo == "resultado_final" and not jogador_id:
             resultado_cor = resultado_do_ponto_de_vista_corinthians(direcao, mandante)
