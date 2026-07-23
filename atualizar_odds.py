@@ -1,4 +1,3 @@
-
 """
 Script que verifica se o Corinthians tem jogo nos próximos dias e, se tiver,
 busca as odds desse jogo (cartões de jogador + escanteios do time) na
@@ -372,7 +371,7 @@ def montar_descricao_mercado(nome_mercado, linha, direcao, mandante, adversario,
 # escopo). Mapeia pro nome final que queremos salvar, já sem ambiguidade
 # com o mercado por time.
 MARKET_TYPES_TOTAL_DO_JOGO = {
-    "totals-corner": "Escanteios Total do Jogo",
+    "totals-corners": "Escanteios Total do Jogo",
     "totals-bookings": "Cartões Total do Jogo",
 }
 
