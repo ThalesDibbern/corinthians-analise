@@ -30,12 +30,20 @@ se não achar, procura pelo nome (pra aproveitar jogadores já cadastrados
 antes dessa mudança) e completa o id neles; só cria um registro novo se não
 encontrar de nenhuma forma.
 
+NOVO (escalação): também busca e salva a escalação de cada jogo (titulares e
+reservas de cada time, endpoint fixtures/lineups), na tabela `escalacoes`.
+Pra titulares que saíram durante o jogo, cruza com a tabela `substituicoes`
+(já populada pelos eventos) pra saber o minuto exato da saída. Serve de base
+pra, no futuro, considerar só jogos em que o jogador realmente esteve em
+campo (e por quanto tempo) ao calcular os padrões históricos dele - hoje
+ainda não filtra por isso, só coleta e guarda o dado.
+
 O plano atual da API-Football tem um limite de 7.500 requisições por dia.
-Cada jogo consome até 3 requisições (eventos + estatísticas do time +
-estatísticas por jogador). Com esse volume, o histórico completo (2022-2026)
-do Corinthians deve caber tranquilamente numa única execução, mas o script
-continua seguro pra rodar em mais de um dia se precisar - ele continua de
-onde parou.
+Cada jogo consome até 4 requisições (eventos + estatísticas do time +
+estatísticas por jogador + escalação). Com esse volume, o histórico completo
+(2022-2026) do Corinthians deve caber tranquilamente numa única execução,
+mas o script continua seguro pra rodar em mais de um dia se precisar - ele
+continua de onde parou.
 
 Variáveis de ambiente necessárias (configuradas no Railway, aba "Variables"):
   - API_FOOTBALL_KEY   -> sua chave da API-Football (api-sports.io)
@@ -154,6 +162,12 @@ def jogo_tem_estatisticas_jogador(cur, fixture_id):
     return cur.fetchone() is not None
 
 
+def jogo_tem_escalacao(cur, fixture_id):
+    """NOVO: verifica se esse jogo já tem a escalação (titulares/reservas) salva."""
+    cur.execute("SELECT 1 FROM escalacoes WHERE jogo_id = %s LIMIT 1", (fixture_id,))
+    return cur.fetchone() is not None
+
+
 def buscar_eventos(fixture_id):
     """Busca gols, cartões e substituições de um jogo específico."""
     dados = chamar_api("fixtures/events", {"fixture": fixture_id})
@@ -171,6 +185,12 @@ def buscar_estatisticas_jogadores(fixture_id):
     """Busca as estatísticas individuais de cada jogador que entrou em campo
     (faltas cometidas/sofridas, chutes, desarmes, impedimentos etc.)."""
     dados = chamar_api("fixtures/players", {"fixture": fixture_id})
+    return dados["response"]
+
+
+def buscar_escalacao(fixture_id):
+    """NOVO: busca a escalação do jogo (titulares e reservas de cada time)."""
+    dados = chamar_api("fixtures/lineups", {"fixture": fixture_id})
     return dados["response"]
 
 
@@ -510,6 +530,67 @@ def salvar_eventos(cur, jogo_id, eventos):
     return contagem
 
 
+def buscar_minuto_saida(cur, jogo_id, jogador_id):
+    """NOVO: cruza com a tabela `substituicoes` (já salva pelos eventos) pra
+    saber em que minuto esse jogador saiu do jogo, se saiu. Fica NULL se o
+    jogador jogou o jogo inteiro (titular que não foi substituído) ou se
+    entrou como reserva (não tem "saída" pra registrar)."""
+    cur.execute(
+        "SELECT minuto FROM substituicoes WHERE jogo_id = %s AND jogador_saiu_id = %s",
+        (jogo_id, jogador_id),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def salvar_escalacao(cur, jogo_id, dados_lineups):
+    """NOVO: salva a escalação do jogo (titulares e reservas dos dois times)
+    na tabela `escalacoes`. Pra titulares que saíram durante o jogo, cruza
+    com `substituicoes` pra preencher o minuto de saída - por isso esse
+    passo deve rodar DEPOIS de salvar_eventos, que é quem popula
+    `substituicoes` primeiro."""
+    salvos = 0
+
+    for bloco_time in dados_lineups:
+        titulares = bloco_time.get("startXI", [])
+        reservas = bloco_time.get("substitutes", [])
+
+        for entrada in titulares:
+            jogador_info = entrada.get("player") or {}
+            nome = jogador_info.get("name")
+            if not nome:
+                continue
+            api_id = jogador_info.get("id")
+            jogador_id = get_or_create_jogador(cur, api_id, nome)
+            minuto_saida = buscar_minuto_saida(cur, jogo_id, jogador_id)
+
+            cur.execute(
+                """INSERT INTO escalacoes (jogo_id, jogador_id, titular, minuto_saida)
+                   VALUES (%s, %s, %s, %s)""",
+                (jogo_id, jogador_id, True, minuto_saida),
+            )
+            salvos += 1
+
+        for entrada in reservas:
+            jogador_info = entrada.get("player") or {}
+            nome = jogador_info.get("name")
+            if not nome:
+                continue
+            api_id = jogador_info.get("id")
+            jogador_id = get_or_create_jogador(cur, api_id, nome)
+
+            # reserva não tem "minuto de saída" (ele entrou, não saiu) -
+            # fica NULL mesmo que ele tenha entrado e jogado o resto do jogo
+            cur.execute(
+                """INSERT INTO escalacoes (jogo_id, jogador_id, titular, minuto_saida)
+                   VALUES (%s, %s, %s, %s)""",
+                (jogo_id, jogador_id, False, None),
+            )
+            salvos += 1
+
+    return salvos
+
+
 def main():
     global requisicoes_usadas, _cursor_para_contador
 
@@ -535,6 +616,7 @@ def main():
                 falta_eventos = not jogo_ja_processado(cur, fixture_id)
                 falta_estatisticas = not jogo_tem_estatisticas(cur, fixture_id)
                 falta_estatisticas_jogador = not jogo_tem_estatisticas_jogador(cur, fixture_id)
+                falta_escalacao = not jogo_tem_escalacao(cur, fixture_id)
 
                 # NOVO: mesmo que o jogo já esteja completo, ainda passamos por
                 # get_or_create_jogo pra garantir o backfill do árbitro em jogos
@@ -542,7 +624,8 @@ def main():
                 jogo_id = get_or_create_jogo(cur, fixture)
                 conn.commit()
 
-                if not falta_eventos and not falta_estatisticas and not falta_estatisticas_jogador:
+                if not falta_eventos and not falta_estatisticas \
+                        and not falta_estatisticas_jogador and not falta_escalacao:
                     total_pulados += 1
                     continue
 
@@ -568,6 +651,16 @@ def main():
                     stats_jogadores = buscar_estatisticas_jogadores(fixture_id)
                     salvos = salvar_estatisticas_jogadores(cur, jogo_id, stats_jogadores, home_team_id)
                     print(f"  -> estatísticas individuais de {salvos} jogador(es) salvas.")
+                    conn.commit()
+                    time.sleep(7)
+
+                if falta_escalacao:
+                    # NOVO: roda depois de eventos, pois precisa que
+                    # `substituicoes` já esteja salva pra cruzar o minuto de
+                    # saída de cada titular substituído.
+                    lineups = buscar_escalacao(fixture_id)
+                    salvos = salvar_escalacao(cur, jogo_id, lineups)
+                    print(f"  -> escalação: {salvos} jogador(es) salvos (titulares + reservas).")
                     conn.commit()
                     time.sleep(7)
 
