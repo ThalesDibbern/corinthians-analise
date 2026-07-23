@@ -31,6 +31,16 @@ baixo. O ajuste é limitado a um intervalo estreito (0.85x a 1.15x) e NUNCA
 domina sobre o confronto direto ou a média geral - só "belisca" o número,
 igual já acontece com o ajuste de árbitro em cartão/falta.
 
+NOVO (disponibilidade de jogador): antes de gerar qualquer recomendação de
+mercado específico de jogador (cartão, falta, desarme, chute, impedimento),
+o sistema checa se ele provavelmente vai jogar. Prioridade 1: escalação
+CONFIRMADA da partida específica, se já capturada pelo popular_banco.py.
+Prioridade 2 (fallback, quando a escalação da partida ainda não saiu):
+olha se o jogador apareceu em pelo menos 1 dos últimos 3 jogos - se sumiu
+das 3 escalações seguidas, é sinal de lesão/suspensão/corte do time, e a
+recomendação é descartada. Evita recomendar aposta em jogador fora de
+campo.
+
 Fórmula usada (valor esperado por unidade apostada):
     VE = (probabilidade_historica * odd) - 1
 Se VE > 0, a aposta é estatisticamente favorável no longo prazo, segundo
@@ -64,6 +74,12 @@ FATOR_ARBITRO_MAXIMO = 1.15
 # sobre uma fonte mais específica (como o confronto direto).
 FATOR_FORMA_MINIMO = 0.85
 FATOR_FORMA_MAXIMO = 1.15
+
+# NOVO (disponibilidade de jogador): quantos jogos recentes olhar pra decidir
+# se um jogador "sumiu" da escalação (sinal de lesão/suspensão/corte do
+# time) - só usado quando ainda não temos a escalação confirmada da
+# partida específica (ver jogador_disponivel).
+JOGOS_JANELA_DISPONIBILIDADE = 3
 
 
 def identificar_tipo_padrao(mercado):
@@ -293,9 +309,69 @@ def resultado_do_ponto_de_vista_corinthians(direcao, mandante):
     return None
 
 
+def jogador_disponivel(cur, jogador_id, jogo_id):
+    """NOVO: evita recomendar aposta em jogador que provavelmente não vai
+    jogar (suspenso, lesionado, cortado do time).
+
+    Prioridade 1 - escalação CONFIRMADA da partida específica: a API-Football
+    normalmente libera isso só perto do jogo (às vezes só ~1h antes), então
+    nem sempre vai estar disponível quando esse script rodar. Se já tiver
+    sido capturada (jogo_tem_escalacao), essa é a fonte mais confiável -
+    usa ela e ignora qualquer outra coisa.
+
+    Prioridade 2 - fallback pros últimos 3 jogos: se ainda não temos a
+    escalação confirmada dessa partida específica, olha se o jogador
+    apareceu (titular OU reserva, não precisa ter entrado em campo) em pelo
+    menos 1 dos últimos 3 jogos concluídos. Se sumiu das 3 escalações
+    seguidas, é sinal razoável de lesão/suspensão/saída do time. Se só
+    ficou de fora uma vez (rotação normal), continua sendo tratado como
+    disponível.
+
+    Se não houver dado de escalação suficiente pra decidir (pipeline ainda
+    não processou, ou jogador muito novo no banco), NÃO bloqueia - dado
+    insuficiente não deve descartar uma recomendação que poderia ser boa."""
+    cur.execute("SELECT COUNT(*) FROM escalacoes WHERE jogo_id = %s", (jogo_id,))
+    tem_escalacao_confirmada = cur.fetchone()[0] > 0
+
+    if tem_escalacao_confirmada:
+        cur.execute(
+            "SELECT 1 FROM escalacoes WHERE jogo_id = %s AND jogador_id = %s",
+            (jogo_id, jogador_id),
+        )
+        return cur.fetchone() is not None
+
+    cur.execute(
+        """
+        SELECT COUNT(*) FROM escalacoes
+        WHERE jogo_id IN (
+            SELECT id FROM jogos WHERE data_jogo < CURRENT_DATE ORDER BY data_jogo DESC LIMIT %s
+        )
+        """,
+        (JOGOS_JANELA_DISPONIBILIDADE,),
+    )
+    tem_dado_recente_geral = cur.fetchone()[0] > 0
+
+    if not tem_dado_recente_geral:
+        return True  # sem dado suficiente pra decidir - não bloqueia
+
+    cur.execute(
+        """
+        SELECT COUNT(*) FROM escalacoes
+        WHERE jogador_id = %s
+          AND jogo_id IN (
+              SELECT id FROM jogos WHERE data_jogo < CURRENT_DATE ORDER BY data_jogo DESC LIMIT %s
+          )
+        """,
+        (jogador_id, JOGOS_JANELA_DISPONIBILIDADE),
+    )
+    apareceu_nos_recentes = cur.fetchone()[0]
+    return apareceu_nos_recentes > 0
+
+
 def calcular_recomendacoes(cur):
     odds = buscar_odds_futuras(cur)
     recomendacoes = []
+    jogadores_indisponiveis_pulados = 0
 
     # NOVO: calcula a média geral de cartões uma única vez, fora do loop
     media_geral_cartoes = buscar_media_geral_cartoes(cur)
@@ -310,6 +386,12 @@ def calcular_recomendacoes(cur):
 
         tipo = identificar_tipo_padrao(mercado)
         if tipo is None:
+            continue
+
+        # NOVO: pula qualquer mercado de jogador específico se ele
+        # provavelmente não vai jogar (ver docstring de jogador_disponivel).
+        if jogador_id and not jogador_disponivel(cur, jogador_id, jogo_id):
+            jogadores_indisponiveis_pulados += 1
             continue
 
         frequencia = None
@@ -468,6 +550,10 @@ def calcular_recomendacoes(cur):
                 "adversario": adversario,
                 "data_jogo": data_jogo,
             })
+
+    if jogadores_indisponiveis_pulados:
+        print(f"  ({jogadores_indisponiveis_pulados} odd(s) de jogador ignorada(s) por "
+              f"indisponibilidade - fora da escalação recente/confirmada.)")
 
     return recomendacoes
 
