@@ -1,3 +1,4 @@
+
 """
 Motor de padrões - Cartões, faltas, desarmes, chutes e impedimentos de
 jogador + Escanteios do time + perfil de cada árbitro + NOVO: escanteios e
@@ -656,20 +657,36 @@ def salvar_padrao_frequencia_jogador(cur, tipo, resultados):
 
 def calcular_padroes_resultado(cur):
     """Calcula a frequência histórica de vitória/empate/derrota do Corinthians,
-    separado por mandante e visitante."""
+    separado por mandante e visitante. NOVO: também calcula uma linha 'geral'
+    (sem filtrar por mandante/visitante) - usada como referência de base pra
+    comparar com a forma recente (ver calcular_forma_recente)."""
     resultados_finais = []
 
-    for lado_bool, lado_nome in [(True, "mandante"), (False, "visitante")]:
-        cur.execute(
-            """
-            SELECT placar_corinthians, placar_adversario
-            FROM jogos
-            WHERE mandante = %s AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
-            ORDER BY data_jogo DESC
-            LIMIT %s
-            """,
-            (lado_bool, JANELA_MAXIMA_DE_JOGOS),
-        )
+    combinacoes = [(True, "mandante"), (False, "visitante"), (None, "geral")]
+
+    for lado_bool, lado_nome in combinacoes:
+        if lado_bool is None:
+            cur.execute(
+                """
+                SELECT placar_corinthians, placar_adversario
+                FROM jogos
+                WHERE placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+                ORDER BY data_jogo DESC
+                LIMIT %s
+                """,
+                (JANELA_MAXIMA_DE_JOGOS,),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT placar_corinthians, placar_adversario
+                FROM jogos
+                WHERE mandante = %s AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+                ORDER BY data_jogo DESC
+                LIMIT %s
+                """,
+                (lado_bool, JANELA_MAXIMA_DE_JOGOS),
+            )
         jogos = cur.fetchall()
         total = len(jogos)
         if total < JOGOS_MINIMOS_PARA_ANALISAR:
@@ -706,6 +723,68 @@ def salvar_padroes_resultado(cur, resultados):
             (lado, resultado, total, ocorrencias, frequencia),
         )
         print(f"  {lado} - {resultado}: {ocorrencias}/{total} jogos ({frequencia}%)")
+
+
+# NOVO (forma recente): quantos jogos definem "recente" - janela bem mais
+# curta que o padrão geral (últimos 50), propositalmente, já que o objetivo
+# aqui é capturar o momento ATUAL do time, não uma média de longo prazo.
+JOGOS_FORMA_RECENTE = 5
+
+# piso mínimo pra calcular - só protege contra o caso raro de ainda não
+# existir jogo suficiente no banco (não deve acontecer na prática, já que
+# o Corinthians sempre tem mais de 5 jogos concluídos no histórico)
+JOGOS_MINIMOS_FORMA_RECENTE = 3
+
+
+def calcular_forma_recente(cur):
+    """NOVO: frequência de vitória/empate/derrota nos últimos
+    JOGOS_FORMA_RECENTE jogos do Corinthians, independente de mandante/
+    visitante ou adversário - captura o "momento atual" do time, separado
+    da média histórica geral."""
+    cur.execute(
+        """
+        SELECT placar_corinthians, placar_adversario
+        FROM jogos
+        WHERE data_jogo < CURRENT_DATE
+          AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+        ORDER BY data_jogo DESC
+        LIMIT %s
+        """,
+        (JOGOS_FORMA_RECENTE,),
+    )
+    jogos = cur.fetchall()
+    total = len(jogos)
+    if total < JOGOS_MINIMOS_FORMA_RECENTE:
+        return None, total
+
+    contagem = {"vitoria": 0, "empate": 0, "derrota": 0}
+    for placar_cor, placar_adv in jogos:
+        if placar_cor > placar_adv:
+            contagem["vitoria"] += 1
+        elif placar_cor == placar_adv:
+            contagem["empate"] += 1
+        else:
+            contagem["derrota"] += 1
+
+    return contagem, total
+
+
+def salvar_forma_recente(cur, contagem, total):
+    for resultado, ocorrencias in contagem.items():
+        frequencia = round(100 * ocorrencias / total, 2)
+        cur.execute(
+            """
+            INSERT INTO padroes_forma_recente (janela, resultado, jogos_analisados, ocorrencias, frequencia, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (janela, resultado) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                ocorrencias = EXCLUDED.ocorrencias,
+                frequencia = EXCLUDED.frequencia,
+                atualizado_em = NOW()
+            """,
+            (JOGOS_FORMA_RECENTE, resultado, total, ocorrencias, frequencia),
+        )
+        print(f"  Últimos {total} jogos - {resultado}: {ocorrencias}/{total} ({frequencia}%)")
 
 
 def calcular_padroes_arbitro(cur):
@@ -872,6 +951,15 @@ def main():
             conn.commit()
         else:
             print("  Dados insuficientes ainda para resultado final.")
+
+        print(f"\nCalculando forma recente (últimos {JOGOS_FORMA_RECENTE} jogos)...")
+        contagem_forma, jogos_analisados_forma = calcular_forma_recente(cur)
+        if contagem_forma:
+            salvar_forma_recente(cur, contagem_forma, jogos_analisados_forma)
+            conn.commit()
+        else:
+            print(f"  Dados insuficientes ainda pra forma recente ({jogos_analisados_forma} jogos "
+                  f"disponíveis, mínimo de {JOGOS_MINIMOS_FORMA_RECENTE}).")
 
         print("\nCalculando padrões de confronto direto (por adversário específico)...")
         total_confronto = calcular_padroes_confronto_direto(cur)
