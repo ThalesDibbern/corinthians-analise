@@ -22,6 +22,15 @@ historicamente mais truncado, ou um adversário que o Corinthians nunca perde
 em casa). Quando esse dado é usado, a descrição da recomendação ganha o sufixo
 "(confronto direto)".
 
+NOVO (forma recente): pro mercado de resultado final, depois de decidir a
+probabilidade principal (confronto direto ou média geral), o sistema aplica
+um pequeno ajuste baseado no "momento atual" do time (últimos 5 jogos,
+independente de adversário) - times em boa fase têm a probabilidade de
+vitória/empate levemente puxada pra cima, times em má fase levemente pra
+baixo. O ajuste é limitado a um intervalo estreito (0.85x a 1.15x) e NUNCA
+domina sobre o confronto direto ou a média geral - só "belisca" o número,
+igual já acontece com o ajuste de árbitro em cartão/falta.
+
 Fórmula usada (valor esperado por unidade apostada):
     VE = (probabilidade_historica * odd) - 1
 Se VE > 0, a aposta é estatisticamente favorável no longo prazo, segundo
@@ -49,6 +58,12 @@ VALOR_ESPERADO_MINIMO = 0.0  # só guarda recomendações com VE acima disso
 # distorça demais a probabilidade calculada a partir dos últimos 50 jogos do jogador
 FATOR_ARBITRO_MINIMO = 0.85
 FATOR_ARBITRO_MAXIMO = 1.15
+
+# NOVO (forma recente): mesma filosofia do ajuste de árbitro - o momento
+# atual do time só belisca a probabilidade de resultado final, nunca domina
+# sobre uma fonte mais específica (como o confronto direto).
+FATOR_FORMA_MINIMO = 0.85
+FATOR_FORMA_MAXIMO = 1.15
 
 
 def identificar_tipo_padrao(mercado):
@@ -199,6 +214,34 @@ def buscar_frequencia_confronto(cur, adversario_id, mandante_filtro, tipo_padrao
     return float(row[0]) if row else None
 
 
+def buscar_frequencia_forma_recente(cur, resultado):
+    """NOVO (forma recente): frequência de vitória/empate/derrota nos
+    últimos jogos do Corinthians (qualquer adversário/mando de campo)."""
+    cur.execute(
+        "SELECT frequencia FROM padroes_forma_recente WHERE resultado = %s ORDER BY janela DESC LIMIT 1",
+        (resultado,),
+    )
+    row = cur.fetchone()
+    return float(row[0]) if row else None
+
+
+def calcular_fator_forma_recente(cur, resultado_cor):
+    """NOVO (forma recente): retorna o multiplicador a aplicar em cima da
+    probabilidade de resultado final (vinda do confronto direto ou da média
+    geral), com base em quanto o momento atual do time (últimos jogos) se
+    desvia da referência de longo prazo pra esse mesmo resultado. Limitado
+    ao intervalo [FATOR_FORMA_MINIMO, FATOR_FORMA_MAXIMO] - mesma filosofia
+    do ajuste de árbitro: o momento recente BELISCA a probabilidade, nunca
+    domina sobre um dado mais específico (como o confronto direto)."""
+    baseline = buscar_frequencia_resultado(cur, "geral", resultado_cor)
+    recente = buscar_frequencia_forma_recente(cur, resultado_cor)
+    if baseline is None or recente is None or baseline == 0:
+        return None
+
+    fator = recente / baseline
+    return max(FATOR_FORMA_MINIMO, min(FATOR_FORMA_MAXIMO, fator))
+
+
 def buscar_media_geral_cartoes(cur):
     """NOVO: média geral de cartões por jogo, calculada a partir de todos os
     árbitros com perfil já calculado. Serve de linha de base pra saber se um
@@ -273,6 +316,7 @@ def calcular_recomendacoes(cur):
         resultado_cor = None
         fator_arbitro_aplicado = None
         veio_de_confronto_direto = False
+        fator_forma_aplicado = None
 
         # NOVO (confronto direto): identifica o adversário por ID (não por
         # texto - evita o problema de nomes grafados diferente entre
@@ -379,6 +423,17 @@ def calcular_recomendacoes(cur):
                     lado = "mandante" if mandante else "visitante"
                     frequencia = buscar_frequencia_resultado(cur, lado, resultado_cor)
 
+                # NOVO (forma recente): belisca a probabilidade (seja ela do
+                # confronto direto ou do padrão geral) com base no momento
+                # atual do time - nunca domina sobre a fonte principal, só
+                # ajusta dentro de um intervalo estreito (ver docstring de
+                # calcular_fator_forma_recente).
+                if frequencia is not None:
+                    fator_forma = calcular_fator_forma_recente(cur, resultado_cor)
+                    if fator_forma is not None:
+                        frequencia = min(round(frequencia * fator_forma, 2), 100.0)
+                        fator_forma_aplicado = fator_forma
+
         if frequencia is None:
             continue  # não temos padrão calculado pra cruzar com essa odd ainda
 
@@ -392,6 +447,9 @@ def calcular_recomendacoes(cur):
 
         if fator_arbitro_aplicado is not None:
             descricao_final += f" (ajustado pelo árbitro, fator {fator_arbitro_aplicado:.2f}x)"
+
+        if fator_forma_aplicado is not None:
+            descricao_final += f" (ajustado pela forma recente, fator {fator_forma_aplicado:.2f}x)"
 
         if veio_de_confronto_direto:
             descricao_final += " (confronto direto)"
