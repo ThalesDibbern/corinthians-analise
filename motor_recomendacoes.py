@@ -11,6 +11,17 @@ cartão que a média puxam a probabilidade pra cima, os que seguram mais o
 cartão puxam pra baixo. O ajuste é limitado a um intervalo (0.85x a 1.15x)
 pra não deixar uma amostra ainda pequena por árbitro dominar a conta.
 
+NOVO (confronto direto): pros mercados de escanteio total, cartão total e
+resultado final, o sistema tenta primeiro usar a frequência histórica
+ESPECÍFICA contra aquele adversário (ex: "cartões totais contra o Palmeiras,
+jogando em casa"), calculada pelo motor_padroes.py em padroes_confronto_direto.
+Só cai pra média geral do time (sem filtrar por adversário) se não houver
+confronto direto com amostra suficiente ainda. Isso captura rivalidades e
+mandos de campo específicos que a média geral não enxerga (ex: um confronto
+historicamente mais truncado, ou um adversário que o Corinthians nunca perde
+em casa). Quando esse dado é usado, a descrição da recomendação ganha o sufixo
+"(confronto direto)".
+
 Fórmula usada (valor esperado por unidade apostada):
     VE = (probabilidade_historica * odd) - 1
 Se VE > 0, a aposta é estatisticamente favorável no longo prazo, segundo
@@ -72,13 +83,18 @@ def identificar_tipo_padrao(mercado):
 
 
 def buscar_odds_futuras(cur):
-    """Busca odds de jogos que ainda não aconteceram. NOVO: também traz o
-    árbitro do jogo (j.arbitro), usado no ajuste de cartão/falta."""
+    """Busca odds de jogos que ainda não aconteceram. Traz também o árbitro
+    do jogo (j.arbitro), usado no ajuste de cartão/falta.
+
+    NOVO (confronto direto): também traz mandante_id/visitante_id, usados
+    pra identificar o time adversário por ID (não por texto - evita o
+    problema de nomes grafados diferente entre fontes) e cruzar com
+    padroes_confronto_direto."""
     cur.execute(
         """
         SELECT o.id, o.jogo_id, o.jogador_id, o.casa_aposta, o.mercado,
                o.valor_odd, o.linha, o.direcao, j.data_jogo, j.adversario,
-               j.mandante, j.arbitro
+               j.mandante, j.arbitro, j.mandante_id, j.visitante_id
         FROM odds o
         JOIN jogos j ON j.id = o.jogo_id
         WHERE j.data_jogo >= CURRENT_DATE
@@ -155,6 +171,34 @@ def buscar_frequencia_resultado(cur, lado, resultado):
     return float(row[0]) if row else None
 
 
+def buscar_id_corinthians(cur):
+    """NOVO (confronto direto): busca o id do Corinthians na tabela `times`,
+    usado pra identificar o adversário de cada jogo por ID (comparando com
+    mandante_id/visitante_id), em vez de por texto."""
+    cur.execute("SELECT id FROM times WHERE nome = %s", ("Corinthians",))
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def buscar_frequencia_confronto(cur, adversario_id, mandante_filtro, tipo_padrao, linha=0, resultado=""):
+    """NOVO (confronto direto): busca a frequência específica contra esse
+    adversário (ex: "cartões totais contra o Palmeiras, jogando em casa"),
+    se já tiver sido calculada com uma amostra que não seja pequena demais.
+    Retorna None se não houver dado suficiente - nesse caso, quem chamou
+    essa função deve cair de volta pro padrão geral (não filtrado por
+    adversário)."""
+    if adversario_id is None:
+        return None
+    cur.execute(
+        """SELECT frequencia FROM padroes_confronto_direto
+           WHERE adversario_id = %s AND mandante_filtro = %s AND tipo_padrao = %s
+             AND linha = %s AND resultado = %s AND amostra_pequena = FALSE""",
+        (adversario_id, mandante_filtro, tipo_padrao, linha, resultado),
+    )
+    row = cur.fetchone()
+    return float(row[0]) if row else None
+
+
 def buscar_media_geral_cartoes(cur):
     """NOVO: média geral de cartões por jogo, calculada a partir de todos os
     árbitros com perfil já calculado. Serve de linha de base pra saber se um
@@ -213,8 +257,13 @@ def calcular_recomendacoes(cur):
     # NOVO: calcula a média geral de cartões uma única vez, fora do loop
     media_geral_cartoes = buscar_media_geral_cartoes(cur)
 
+    # NOVO (confronto direto): id do Corinthians, calculado uma única vez,
+    # usado pra identificar o adversário de cada jogo por ID.
+    corinthians_id = buscar_id_corinthians(cur)
+
     for (odd_id, jogo_id, jogador_id, casa, mercado, valor_odd,
-         linha, direcao, data_jogo, adversario, mandante, arbitro) in odds:
+         linha, direcao, data_jogo, adversario, mandante, arbitro,
+         mandante_id, visitante_id) in odds:
 
         tipo = identificar_tipo_padrao(mercado)
         if tipo is None:
@@ -223,6 +272,17 @@ def calcular_recomendacoes(cur):
         frequencia = None
         resultado_cor = None
         fator_arbitro_aplicado = None
+        veio_de_confronto_direto = False
+
+        # NOVO (confronto direto): identifica o adversário por ID (não por
+        # texto - evita o problema de nomes grafados diferente entre
+        # fontes) e o filtro de mandante/visitante correspondente, usados
+        # pra tentar uma frequência específica contra esse adversário antes
+        # de cair pro padrão geral do time.
+        adversario_id = None
+        if corinthians_id is not None and mandante_id is not None and visitante_id is not None:
+            adversario_id = visitante_id if mandante_id == corinthians_id else mandante_id
+        mandante_filtro_atual = "mandante" if mandante else "visitante"
 
         # NOVO: suporte ao lado "Menos"/"Não" de cada mercado, além do "Mais"/
         # "Sim" que já existia. A tabela de padrão sempre guarda a frequência
@@ -274,21 +334,50 @@ def calcular_recomendacoes(cur):
 
         elif tipo == "escanteio_total" and not jogador_id \
                 and direcao_normalizada in ("mais", "menos") and linha is not None:
-            frequencia_bruta = buscar_frequencia_escanteio_total(cur, linha)
+            # NOVO (confronto direto): tenta primeiro a frequência específica
+            # contra esse adversário (ex: "escanteios totais contra o
+            # Palmeiras, jogando em casa"); só cai pro padrão geral do time
+            # se não houver confronto direto com amostra suficiente ainda.
+            frequencia_bruta = buscar_frequencia_confronto(
+                cur, adversario_id, mandante_filtro_atual, "escanteio_total", linha=linha
+            )
+            if frequencia_bruta is not None:
+                veio_de_confronto_direto = True
+            else:
+                frequencia_bruta = buscar_frequencia_escanteio_total(cur, linha)
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "cartao_total" and not jogador_id \
                 and direcao_normalizada in ("mais", "menos") and linha is not None:
-            frequencia_bruta = buscar_frequencia_cartao_total(cur, linha)
+            # NOVO (confronto direto): mesma lógica de prioridade do escanteio
+            # total acima.
+            frequencia_bruta = buscar_frequencia_confronto(
+                cur, adversario_id, mandante_filtro_atual, "cartao_total", linha=linha
+            )
+            if frequencia_bruta is not None:
+                veio_de_confronto_direto = True
+            else:
+                frequencia_bruta = buscar_frequencia_cartao_total(cur, linha)
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "resultado_final" and not jogador_id:
             resultado_cor = resultado_do_ponto_de_vista_corinthians(direcao, mandante)
             if resultado_cor:
-                lado = "mandante" if mandante else "visitante"
-                frequencia = buscar_frequencia_resultado(cur, lado, resultado_cor)
+                # NOVO (confronto direto): tenta primeiro o resultado
+                # específico contra esse adversário (ex: "Corinthians nunca
+                # perde pro São Paulo em casa"); só cai pro padrão geral por
+                # mandante/visitante se não houver confronto direto com
+                # amostra suficiente ainda.
+                frequencia = buscar_frequencia_confronto(
+                    cur, adversario_id, mandante_filtro_atual, "resultado_final", resultado=resultado_cor
+                )
+                if frequencia is not None:
+                    veio_de_confronto_direto = True
+                else:
+                    lado = "mandante" if mandante else "visitante"
+                    frequencia = buscar_frequencia_resultado(cur, lado, resultado_cor)
 
         if frequencia is None:
             continue  # não temos padrão calculado pra cruzar com essa odd ainda
@@ -303,6 +392,9 @@ def calcular_recomendacoes(cur):
 
         if fator_arbitro_aplicado is not None:
             descricao_final += f" (ajustado pelo árbitro, fator {fator_arbitro_aplicado:.2f}x)"
+
+        if veio_de_confronto_direto:
+            descricao_final += " (confronto direto)"
 
         if valor_esperado > VALOR_ESPERADO_MINIMO:
             recomendacoes.append({
