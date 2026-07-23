@@ -224,25 +224,41 @@ def calcular_recomendacoes(cur):
         resultado_cor = None
         fator_arbitro_aplicado = None
 
-        if tipo == "cartao" and jogador_id and direcao and direcao.lower() == "sim":
-            frequencia = buscar_frequencia_cartao(cur, jogador_id)
+        # NOVO: suporte ao lado "Menos"/"Não" de cada mercado, além do "Mais"/
+        # "Sim" que já existia. A tabela de padrão sempre guarda a frequência
+        # do lado "Mais"/"Sim" (ex: "frequência de passar de 7.5 escanteios");
+        # o lado oposto tem frequência complementar (100 - frequência), já
+        # que os dois lados juntos somam 100% dos jogos. Sem isso, o sistema
+        # deixava de considerar metade de cada mercado - e é comum o lado
+        # "Menos" ter Valor Esperado positivo mesmo quando o "Mais" não tem
+        # (a odd de cada lado é precificada separadamente pela casa).
+        direcao_normalizada = (direcao or "").strip().lower()
 
-            # NOVO: aplica o ajuste de árbitro, se disponível
-            if frequencia is not None:
+        if tipo == "cartao" and jogador_id and direcao_normalizada in ("sim", "não", "nao"):
+            frequencia_bruta = buscar_frequencia_cartao(cur, jogador_id)
+            if frequencia_bruta is not None:
+                # NOVO: aplica o ajuste de árbitro, se disponível - sempre em
+                # cima da frequência do lado "Sim", antes de inverter pro "Não"
                 fator = calcular_fator_arbitro(cur, arbitro, media_geral_cartoes)
                 if fator is not None:
-                    frequencia = min(round(frequencia * fator, 2), 100.0)
+                    frequencia_bruta = min(round(frequencia_bruta * fator, 2), 100.0)
                     fator_arbitro_aplicado = fator
 
-        elif tipo in ("falta_cometida", "desarme", "chute_no_gol") and jogador_id \
-                and direcao and direcao.lower() == "mais" and linha is not None:
-            frequencia = buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha)
+                frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
-        elif tipo == "impedimento" and jogador_id and direcao and direcao.lower() == "sim":
-            frequencia = buscar_frequencia_simples_jogador(cur, jogador_id, "impedimento")
+        elif tipo in ("falta_cometida", "desarme", "chute_no_gol") and jogador_id \
+                and direcao_normalizada in ("mais", "menos") and linha is not None:
+            frequencia_bruta = buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha)
+            if frequencia_bruta is not None:
+                frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
+
+        elif tipo == "impedimento" and jogador_id and direcao_normalizada in ("sim", "não", "nao"):
+            frequencia_bruta = buscar_frequencia_simples_jogador(cur, jogador_id, "impedimento")
+            if frequencia_bruta is not None:
+                frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "escanteio_time" and not jogador_id \
-                and direcao and direcao.lower() == "mais" and linha is not None:
+                and direcao_normalizada in ("mais", "menos") and linha is not None:
             # NOVO: o padrão de escanteio_time (padroes_time_escanteio) só é
             # calculado com base nos jogos do Corinthians - não temos base
             # histórica de outros times ainda. Sem essa checagem, o sistema
@@ -252,15 +268,21 @@ def calcular_recomendacoes(cur):
             # Quando outros times tiverem padrão próprio calculado, trocar
             # essa checagem fixa por uma busca dinâmica pelo time certo.
             if "corinthians" in mercado.lower():
-                frequencia = buscar_frequencia_escanteio_time(cur, linha)
+                frequencia_bruta = buscar_frequencia_escanteio_time(cur, linha)
+                if frequencia_bruta is not None:
+                    frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "escanteio_total" and not jogador_id \
-                and direcao and direcao.lower() == "mais" and linha is not None:
-            frequencia = buscar_frequencia_escanteio_total(cur, linha)
+                and direcao_normalizada in ("mais", "menos") and linha is not None:
+            frequencia_bruta = buscar_frequencia_escanteio_total(cur, linha)
+            if frequencia_bruta is not None:
+                frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "cartao_total" and not jogador_id \
-                and direcao and direcao.lower() == "mais" and linha is not None:
-            frequencia = buscar_frequencia_cartao_total(cur, linha)
+                and direcao_normalizada in ("mais", "menos") and linha is not None:
+            frequencia_bruta = buscar_frequencia_cartao_total(cur, linha)
+            if frequencia_bruta is not None:
+                frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "resultado_final" and not jogador_id:
             resultado_cor = resultado_do_ponto_de_vista_corinthians(direcao, mandante)
