@@ -43,6 +43,19 @@ LINHAS_ESCANTEIO_TOTAL = [7.5, 8.5, 9.5, 10.5, 11.5, 12.5]
 # somados)
 LINHAS_CARTAO_TOTAL = [2.5, 3.5, 4.5, 5.5]
 
+# NOVO (confronto direto): linhas testadas pra falta total do jogo (mandante
+# + visitante somados) e chutes no gol total do jogo (soma das estatísticas
+# individuais dos jogadores, já que não há total agregado por lado salvo)
+LINHAS_FALTA_TOTAL = [15.5, 18.5, 21.5, 24.5]
+LINHAS_CHUTE_TOTAL = [4.5, 6.5, 8.5, 10.5, 12.5]
+
+# NOVO (confronto direto): confronto direto naturalmente tem poucos jogos
+# disputados (2 a 4 por temporada, às vezes menos) - usamos um piso mais
+# permissivo que o geral (JOGOS_MINIMOS_PARA_ANALISAR=5), mas o resultado
+# fica marcado como "amostra pequena" quando ainda estiver abaixo do piso
+# geral, pra quem for usar esse dado saber que é uma estimativa mais frágil.
+JOGOS_MINIMOS_CONFRONTO = 3
+
 # novos padrões por jogador: nome do tipo -> (coluna no banco, linhas testadas)
 PADROES_LINHA_JOGADOR = {
     "falta_cometida": ("faltas_cometidas", [0.5, 1.5, 2.5]),
@@ -280,6 +293,264 @@ def salvar_padroes_cartao_total(cur, resultados):
             (linha, jogos_analisados, jogos_acima, frequencia, media),
         )
         print(f"  Mais de {linha} cartões (total do jogo): {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
+
+
+def buscar_id_time(cur, nome):
+    cur.execute("SELECT id FROM times WHERE nome = %s", (nome,))
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def buscar_adversarios_com_historico(cur, corinthians_id):
+    """NOVO (confronto direto): lista os adversários que já enfrentaram o
+    Corinthians pelo menos JOGOS_MINIMOS_CONFRONTO vezes, com jogo já
+    concluído e mandante_id/visitante_id preenchidos (dependem da migração
+    de times já aplicada)."""
+    cur.execute(
+        """
+        SELECT CASE WHEN mandante_id = %s THEN visitante_id ELSE mandante_id END AS adversario_id,
+               COUNT(*) AS total
+        FROM jogos
+        WHERE (mandante_id = %s OR visitante_id = %s)
+          AND mandante_id IS NOT NULL AND visitante_id IS NOT NULL
+          AND data_jogo < CURRENT_DATE
+        GROUP BY adversario_id
+        HAVING COUNT(*) >= %s
+        """,
+        (corinthians_id, corinthians_id, corinthians_id, JOGOS_MINIMOS_CONFRONTO),
+    )
+    return cur.fetchall()
+
+
+def condicao_confronto(mandante_filtro):
+    """NOVO (confronto direto): monta a condição SQL que filtra os jogos
+    contra um adversário específico, considerando o lado (geral, só como
+    mandante, ou só como visitante)."""
+    if mandante_filtro == "mandante":
+        return "j.mandante_id = %(corinthians_id)s AND j.visitante_id = %(adversario_id)s"
+    if mandante_filtro == "visitante":
+        return "j.mandante_id = %(adversario_id)s AND j.visitante_id = %(corinthians_id)s"
+    return ("((j.mandante_id = %(corinthians_id)s AND j.visitante_id = %(adversario_id)s) "
+            "OR (j.mandante_id = %(adversario_id)s AND j.visitante_id = %(corinthians_id)s))")
+
+
+def buscar_totais_escanteio_confronto(cur, corinthians_id, adversario_id, mandante_filtro):
+    condicao = condicao_confronto(mandante_filtro)
+    cur.execute(
+        f"""
+        SELECT totais.total_escanteios
+        FROM (
+            SELECT eg.jogo_id, SUM(eg.escanteios) AS total_escanteios,
+                   COUNT(DISTINCT eg.lado) AS lados
+            FROM estatisticas_jogo eg
+            JOIN jogos j ON j.id = eg.jogo_id
+            WHERE {condicao} AND j.data_jogo < CURRENT_DATE AND eg.escanteios IS NOT NULL
+            GROUP BY eg.jogo_id
+        ) totais
+        WHERE totais.lados = 2
+        """,
+        {"corinthians_id": corinthians_id, "adversario_id": adversario_id},
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
+def buscar_totais_cartao_confronto(cur, corinthians_id, adversario_id, mandante_filtro):
+    condicao = condicao_confronto(mandante_filtro)
+    cur.execute(
+        f"""
+        SELECT contagem.total_cartoes
+        FROM (
+            SELECT j.id AS jogo_id, COUNT(c.id) AS total_cartoes,
+                   COUNT(DISTINCT eg.lado) AS lados
+            FROM jogos j
+            JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
+            LEFT JOIN cartoes c ON c.jogo_id = j.id
+            WHERE {condicao} AND j.data_jogo < CURRENT_DATE
+            GROUP BY j.id
+        ) contagem
+        WHERE contagem.lados = 2
+        """,
+        {"corinthians_id": corinthians_id, "adversario_id": adversario_id},
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
+def buscar_totais_falta_confronto(cur, corinthians_id, adversario_id, mandante_filtro):
+    condicao = condicao_confronto(mandante_filtro)
+    cur.execute(
+        f"""
+        SELECT totais.total_faltas
+        FROM (
+            SELECT eg.jogo_id, SUM(eg.faltas) AS total_faltas,
+                   COUNT(DISTINCT eg.lado) AS lados
+            FROM estatisticas_jogo eg
+            JOIN jogos j ON j.id = eg.jogo_id
+            WHERE {condicao} AND j.data_jogo < CURRENT_DATE AND eg.faltas IS NOT NULL
+            GROUP BY eg.jogo_id
+        ) totais
+        WHERE totais.lados = 2
+        """,
+        {"corinthians_id": corinthians_id, "adversario_id": adversario_id},
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
+def buscar_totais_chute_confronto(cur, corinthians_id, adversario_id, mandante_filtro):
+    """Chutes no gol (ambos os times, somados) - vem da soma das
+    estatísticas individuais dos jogadores no jogo, já que não existe um
+    total agregado por lado salvo em estatisticas_jogo pra essa métrica."""
+    condicao = condicao_confronto(mandante_filtro)
+    cur.execute(
+        f"""
+        SELECT SUM(jeg.chutes_no_gol)
+        FROM jogador_estatisticas_jogo jeg
+        JOIN jogos j ON j.id = jeg.jogo_id
+        WHERE {condicao} AND j.data_jogo < CURRENT_DATE AND jeg.chutes_no_gol IS NOT NULL
+        GROUP BY jeg.jogo_id
+        """,
+        {"corinthians_id": corinthians_id, "adversario_id": adversario_id},
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
+def calcular_frequencias_linha(valores, linhas_testadas):
+    jogos_analisados = len(valores)
+    resultados = []
+    for linha in linhas_testadas:
+        jogos_acima = sum(1 for v in valores if float(v) > linha)
+        frequencia = round(100 * jogos_acima / jogos_analisados, 2) if jogos_analisados else 0.0
+        resultados.append((linha, jogos_acima, frequencia))
+    return resultados
+
+
+def salvar_padrao_confronto_linha(cur, adversario_id, mandante_filtro, tipo_padrao, jogos_analisados, resultados):
+    amostra_pequena = jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR
+    for linha, ocorrencias, frequencia in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_confronto_direto
+                (adversario_id, mandante_filtro, tipo_padrao, linha, resultado,
+                 jogos_analisados, ocorrencias, frequencia, amostra_pequena, atualizado_em)
+            VALUES (%s, %s, %s, %s, '', %s, %s, %s, %s, NOW())
+            ON CONFLICT (adversario_id, mandante_filtro, tipo_padrao, linha, resultado) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                ocorrencias = EXCLUDED.ocorrencias,
+                frequencia = EXCLUDED.frequencia,
+                amostra_pequena = EXCLUDED.amostra_pequena,
+                atualizado_em = NOW()
+            """,
+            (adversario_id, mandante_filtro, tipo_padrao, linha,
+             jogos_analisados, ocorrencias, frequencia, amostra_pequena),
+        )
+
+
+def calcular_resultado_confronto(cur, corinthians_id, adversario_id, mandante_filtro):
+    condicao = condicao_confronto(mandante_filtro)
+    cur.execute(
+        f"""
+        SELECT j.placar_corinthians, j.placar_adversario
+        FROM jogos j
+        WHERE {condicao} AND j.data_jogo < CURRENT_DATE
+          AND j.placar_corinthians IS NOT NULL AND j.placar_adversario IS NOT NULL
+        """,
+        {"corinthians_id": corinthians_id, "adversario_id": adversario_id},
+    )
+    jogos = cur.fetchall()
+    total = len(jogos)
+    if total == 0:
+        return None, 0
+
+    contagem = {"vitoria": 0, "empate": 0, "derrota": 0}
+    for placar_cor, placar_adv in jogos:
+        if placar_cor > placar_adv:
+            contagem["vitoria"] += 1
+        elif placar_cor == placar_adv:
+            contagem["empate"] += 1
+        else:
+            contagem["derrota"] += 1
+    return contagem, total
+
+
+def salvar_padrao_confronto_resultado(cur, adversario_id, mandante_filtro, contagem, total):
+    amostra_pequena = total < JOGOS_MINIMOS_PARA_ANALISAR
+    for resultado, ocorrencias in contagem.items():
+        frequencia = round(100 * ocorrencias / total, 2)
+        cur.execute(
+            """
+            INSERT INTO padroes_confronto_direto
+                (adversario_id, mandante_filtro, tipo_padrao, linha, resultado,
+                 jogos_analisados, ocorrencias, frequencia, amostra_pequena, atualizado_em)
+            VALUES (%s, %s, 'resultado_final', 0, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (adversario_id, mandante_filtro, tipo_padrao, linha, resultado) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                ocorrencias = EXCLUDED.ocorrencias,
+                frequencia = EXCLUDED.frequencia,
+                amostra_pequena = EXCLUDED.amostra_pequena,
+                atualizado_em = NOW()
+            """,
+            (adversario_id, mandante_filtro, resultado, total, ocorrencias, frequencia, amostra_pequena),
+        )
+
+
+def calcular_padroes_confronto_direto(cur):
+    """NOVO: calcula padrões específicos por adversário (não só a média
+    geral por mandante/visitante) - escanteio total, cartão total, falta
+    total, chutes no gol total e resultado, cada um separado em três
+    visões: 'geral' (os dois lados juntos), 'mandante' (só quando o
+    Corinthians manda esse confronto) e 'visitante' (só quando visita).
+    Isso permite capturar rivalidades específicas (ex: jogo sempre mais
+    truncado/com mais falta contra um adversário em particular) e mandos de
+    campo muito marcantes contra um time específico (ex: anos sem perder
+    em casa pra um rival), que a média geral do time inteiro não enxerga."""
+    corinthians_id = buscar_id_time(cur, "Corinthians")
+    if not corinthians_id:
+        print("  Aviso: time 'Corinthians' não encontrado na tabela `times` - pulando confronto direto.")
+        return 0
+
+    adversarios = buscar_adversarios_com_historico(cur, corinthians_id)
+    if not adversarios:
+        print(f"  Nenhum adversário com pelo menos {JOGOS_MINIMOS_CONFRONTO} jogos analisados ainda.")
+        return 0
+
+    total_calculado = 0
+    for adversario_id, total_jogos in adversarios:
+        cur.execute("SELECT nome FROM times WHERE id = %s", (adversario_id,))
+        row = cur.fetchone()
+        nome_adversario = row[0] if row else f"time #{adversario_id}"
+
+        for mandante_filtro in ("geral", "mandante", "visitante"):
+            valores = buscar_totais_escanteio_confronto(cur, corinthians_id, adversario_id, mandante_filtro)
+            if len(valores) >= JOGOS_MINIMOS_CONFRONTO:
+                resultados = calcular_frequencias_linha(valores, LINHAS_ESCANTEIO_TOTAL)
+                salvar_padrao_confronto_linha(cur, adversario_id, mandante_filtro, "escanteio_total", len(valores), resultados)
+                total_calculado += 1
+
+            valores = buscar_totais_cartao_confronto(cur, corinthians_id, adversario_id, mandante_filtro)
+            if len(valores) >= JOGOS_MINIMOS_CONFRONTO:
+                resultados = calcular_frequencias_linha(valores, LINHAS_CARTAO_TOTAL)
+                salvar_padrao_confronto_linha(cur, adversario_id, mandante_filtro, "cartao_total", len(valores), resultados)
+                total_calculado += 1
+
+            valores = buscar_totais_falta_confronto(cur, corinthians_id, adversario_id, mandante_filtro)
+            if len(valores) >= JOGOS_MINIMOS_CONFRONTO:
+                resultados = calcular_frequencias_linha(valores, LINHAS_FALTA_TOTAL)
+                salvar_padrao_confronto_linha(cur, adversario_id, mandante_filtro, "falta_total", len(valores), resultados)
+                total_calculado += 1
+
+            valores = buscar_totais_chute_confronto(cur, corinthians_id, adversario_id, mandante_filtro)
+            if len(valores) >= JOGOS_MINIMOS_CONFRONTO:
+                resultados = calcular_frequencias_linha(valores, LINHAS_CHUTE_TOTAL)
+                salvar_padrao_confronto_linha(cur, adversario_id, mandante_filtro, "chute_total", len(valores), resultados)
+                total_calculado += 1
+
+            contagem, total = calcular_resultado_confronto(cur, corinthians_id, adversario_id, mandante_filtro)
+            if contagem and total >= JOGOS_MINIMOS_CONFRONTO:
+                salvar_padrao_confronto_resultado(cur, adversario_id, mandante_filtro, contagem, total)
+                total_calculado += 1
+
+        print(f"  {nome_adversario}: {total_jogos} confronto(s) direto(s) no histórico.")
+
+    return total_calculado
 
 
 def calcular_padrao_linha_jogador(cur, coluna, linhas_testadas):
@@ -601,6 +872,14 @@ def main():
             conn.commit()
         else:
             print("  Dados insuficientes ainda para resultado final.")
+
+        print("\nCalculando padrões de confronto direto (por adversário específico)...")
+        total_confronto = calcular_padroes_confronto_direto(cur)
+        conn.commit()
+        if total_confronto:
+            print(f"Concluído! {total_confronto} padrão(ões) de confronto direto calculados.")
+        else:
+            print(f"  Nenhum adversário com pelo menos {JOGOS_MINIMOS_CONFRONTO} jogos analisados ainda.")
 
         print("\nCalculando perfil de árbitros (cartões e faltas por jogo apitado)...")
         resultados_arbitro = calcular_padroes_arbitro(cur)
