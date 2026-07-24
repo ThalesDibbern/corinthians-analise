@@ -413,10 +413,13 @@ def get_or_create_jogo(cur, fixture):
     mandante_api_id = fixture["teams"]["home"]["id"]
     visitante_api_id = fixture["teams"]["away"]["id"]
 
-    cur.execute("SELECT id, arbitro, mandante_id, visitante_id FROM jogos WHERE id = %s", (fixture_id,))
+    cur.execute(
+        "SELECT id, arbitro, mandante_id, visitante_id, datahora_jogo FROM jogos WHERE id = %s",
+        (fixture_id,),
+    )
     row = cur.fetchone()
     if row:
-        jogo_id, arbitro_salvo, mandante_id_salvo, visitante_id_salvo = row
+        jogo_id, arbitro_salvo, mandante_id_salvo, visitante_id_salvo, datahora_salva = row
         # backfill: jogo já existia (de antes dessa funcionalidade) mas
         # está sem árbitro salvo, e agora a API nos deu esse dado - atualiza.
         if arbitro_salvo is None and arbitro:
@@ -431,9 +434,17 @@ def get_or_create_jogo(cur, fixture):
                 "UPDATE jogos SET mandante_id = %s, visitante_id = %s WHERE id = %s",
                 (mandante_id, visitante_id, fixture_id),
             )
+
+        # NOVO: backfill de datahora_jogo (jogo criado antes dessa coluna existir)
+        if datahora_salva is None:
+            cur.execute(
+                "UPDATE jogos SET datahora_jogo = %s WHERE id = %s",
+                (fixture["fixture"]["date"], fixture_id),
+            )
         return jogo_id
 
     data_jogo = fixture["fixture"]["date"][:10]
+    datahora_jogo = fixture["fixture"]["date"]  # NOVO: timestamp completo, não só a data
     eh_mandante = mandante_api_id == TEAM_ID
     adversario = visitante_nome if eh_mandante else mandante_nome
     placar_corinthians = (
@@ -448,14 +459,15 @@ def get_or_create_jogo(cur, fixture):
 
     cur.execute(
         """
-        INSERT INTO jogos (id, data_jogo, adversario, mandante, competicao,
+        INSERT INTO jogos (id, data_jogo, datahora_jogo, adversario, mandante, competicao,
                             placar_corinthians, placar_adversario, arbitro,
                             mandante_id, visitante_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             fixture_id,
             data_jogo,
+            datahora_jogo,
             adversario,
             eh_mandante,
             "Brasileirão Série A",
