@@ -23,6 +23,10 @@ NOVO: também cobre os mercados de escanteio total e cartão total do jogo
 (mandante + visitante somados), que a versão anterior nunca avaliava.
 NOVO: reavalia recomendações que ficaram "pendente" em execuções passadas,
 assim que o dado real do jogo chegar (antes ficavam pendentes pra sempre).
+NOVO: usa datahora_jogo (data + hora) em vez de só data_jogo pra decidir se
+um jogo já é "passado" - antes, um jogo de hoje já encerrado só era
+considerado passado depois da meia-noite, deixando o histórico vazio por
+horas mesmo depois do jogo terminar.
 
 Variáveis de ambiente:
   - DATABASE_URL -> a URL de conexão do Postgres (mesma usada nos outros scripts)
@@ -168,12 +172,15 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, d
 
 def buscar_jogos_recentes_a_manter(cur):
     """Os N jogos mais recentes já disputados ficam com odds detalhadas
-    (não arquivadas ainda)."""
+    (não arquivadas ainda). NOVO: usa datahora_jogo (com fallback pra data)
+    pra decidir se um jogo já é "passado" - antes, um jogo de hoje já
+    encerrado só virava "passado" depois da meia-noite."""
     cur.execute(
         """
         SELECT DISTINCT j.id FROM jogos j
         JOIN recomendacoes r ON r.jogo_id = j.id
-        WHERE j.data_jogo < CURRENT_DATE
+        WHERE (j.datahora_jogo IS NOT NULL AND j.datahora_jogo < NOW())
+           OR (j.datahora_jogo IS NULL AND j.data_jogo < CURRENT_DATE)
         ORDER BY j.id DESC
         LIMIT %s
         """,
@@ -190,7 +197,8 @@ def buscar_recomendacoes_para_arquivar(cur, jogos_a_manter):
                r.direcao, j.data_jogo
         FROM recomendacoes r
         JOIN jogos j ON j.id = r.jogo_id
-        WHERE j.data_jogo < CURRENT_DATE
+        WHERE (j.datahora_jogo IS NOT NULL AND j.datahora_jogo < NOW())
+           OR (j.datahora_jogo IS NULL AND j.data_jogo < CURRENT_DATE)
         """
     )
     todas = cur.fetchall()
