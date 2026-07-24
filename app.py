@@ -1086,6 +1086,18 @@ PAGINA_JOGADORES = """
     <h1>📈 Estatísticas de Jogadores</h1>
     <p class="subtitulo">Frequência histórica de cada jogador, direto dos padrões calculados - sem depender de odd disponível na casa de apostas.</p>
 
+    {% if ultima_escalacao %}
+    <div class="cartao">
+        <div class="nome-jogador">🟢 Última escalação titular</div>
+        <div class="bloco-titulo">{{ ultima_escalacao.data_jogo }} · Corinthians x {{ ultima_escalacao.adversario }}</div>
+        <div class="linhas-grid">
+            {% for nome in ultima_escalacao.titulares %}
+            <div class="linha-item">{{ nome }}</div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <input type="text" class="busca" id="busca" placeholder="Buscar jogador..." onkeyup="filtrar()">
 
     <div id="lista">
@@ -1218,17 +1230,58 @@ def buscar_estatisticas_jogadores(cur):
     return lista
 
 
+def buscar_ultima_escalacao_titular(cur):
+    """NOVO: busca os titulares do último jogo já concluído do Corinthians,
+    cruzando escalacoes com jogador_estatisticas_jogo.lado (pra saber se
+    aquele titular jogava pelo Corinthians ou pelo adversário naquele
+    jogo específico) e jogos.mandante (pra saber qual lado é o do
+    Corinthians nesse jogo)."""
+    cur.execute(
+        """
+        SELECT id, data_jogo, adversario FROM jogos
+        WHERE (datahora_jogo IS NOT NULL AND datahora_jogo < NOW())
+           OR (datahora_jogo IS NULL AND data_jogo < CURRENT_DATE)
+        ORDER BY COALESCE(datahora_jogo, data_jogo::timestamp) DESC
+        LIMIT 1
+        """
+    )
+    ultimo_jogo = cur.fetchone()
+    if not ultimo_jogo:
+        return None
+
+    jogo_id, data_jogo, adversario = ultimo_jogo
+
+    cur.execute(
+        """
+        SELECT j.nome
+        FROM escalacoes e
+        JOIN jogador_estatisticas_jogo jeg ON jeg.jogo_id = e.jogo_id AND jeg.jogador_id = e.jogador_id
+        JOIN jogos jg ON jg.id = e.jogo_id
+        JOIN jogadores j ON j.id = e.jogador_id
+        WHERE e.jogo_id = %s AND e.titular = TRUE
+          AND ((jeg.lado = 'mandante' AND jg.mandante = TRUE)
+            OR (jeg.lado = 'visitante' AND jg.mandante = FALSE))
+        ORDER BY j.nome
+        """,
+        (jogo_id,),
+    )
+    titulares = [row[0] for row in cur.fetchall()]
+
+    return {"data_jogo": data_jogo, "adversario": adversario, "titulares": titulares}
+
+
 @app.route("/jogadores")
 def jogadores():
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
         lista = buscar_estatisticas_jogadores(cur)
+        ultima_escalacao = buscar_ultima_escalacao_titular(cur)
         cur.close()
     finally:
         conn.close()
 
-    return render_template_string(PAGINA_JOGADORES, jogadores=lista)
+    return render_template_string(PAGINA_JOGADORES, jogadores=lista, ultima_escalacao=ultima_escalacao)
 
 
 @app.route("/")
