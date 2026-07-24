@@ -22,8 +22,9 @@ import os
 import json
 from itertools import combinations
 
+import requests
 import psycopg2
-from flask import Flask, render_template_string, request, redirect
+from flask import Flask, render_template_string, request, redirect, Response
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -1298,14 +1299,36 @@ NOMES_TIPO_LINHA = {
 
 def buscar_escudo_url(cur, nome_time):
     """NOVO: usa o api_football_team_id já salvo em `times` pra montar a URL
-    do escudo oficial, hospedado pela própria API-Football/API-Sports - não
-    precisa baixar nem guardar nenhuma imagem no nosso banco, só referenciar
-    o link público deles. Retorna None se o time não tiver esse id ainda."""
+    do escudo. Aponta pra ROTA DE PROXY LOCAL (/escudo/<id>.png), não direto
+    pra media.api-sports.io - a CDN deles parece bloquear pedido vindo de
+    fora do domínio deles (hotlink), então o navegador buscando direto não
+    funcionava. Com o proxy, é o nosso próprio servidor que busca a imagem
+    (pedido servidor-a-servidor, sem esse bloqueio), e devolve pro
+    navegador."""
     cur.execute("SELECT api_football_team_id FROM times WHERE nome = %s", (nome_time,))
     row = cur.fetchone()
     if not row or not row[0]:
         return None
-    return f"https://media.api-sports.io/football/teams/{row[0]}.png"
+    return f"/escudo/{row[0]}.png"
+
+
+@app.route("/escudo/<int:team_id>.png")
+def escudo(team_id):
+    """NOVO: busca a imagem do escudo no servidor (não no navegador do
+    usuário) e repassa pro cliente - evita bloqueio de hotlink da CDN da
+    API-Football, que parece exigir que o pedido não pareça vir de um site
+    externo."""
+    try:
+        resp = requests.get(
+            f"https://media.api-sports.io/football/teams/{team_id}.png",
+            timeout=5,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if resp.status_code == 200:
+            return Response(resp.content, mimetype="image/png")
+    except Exception:
+        pass
+    return "", 404
 
 
 def buscar_estatisticas_jogadores(cur):
