@@ -1,4 +1,3 @@
-
 """
 Motor de padrões - Cartões, faltas, desarmes, chutes e impedimentos de
 jogador + Escanteios do time + perfil de cada árbitro + NOVO: escanteios e
@@ -77,7 +76,14 @@ FATOR_ARBITRO_MAXIMO = 1.15
 
 
 def calcular_padroes_cartao(cur):
-    """Para cada jogador, olha seus últimos jogos e calcula a frequência de cartão."""
+    """Para cada jogador, olha seus últimos jogos e calcula a frequência de cartão.
+
+    NOVO: filtra só os jogos em que o jogador estava jogando PELO Corinthians
+    (lado dele bate com o lado do Corinthians naquele jogo específico) - sem
+    isso, um jogador que trocou de time (ex: era adversário do Corinthians
+    numa temporada, depois se tornou jogador do Corinthians) tinha os dois
+    períodos misturados na mesma frequência, distorcendo o padrão real dele
+    hoje jogando pelo Corinthians."""
     cur.execute("SELECT id, nome FROM jogadores")
     jogadores = cur.fetchall()
 
@@ -90,6 +96,8 @@ def calcular_padroes_cartao(cur):
             FROM jogador_estatisticas_jogo jeg
             JOIN jogos j ON j.id = jeg.jogo_id
             WHERE jeg.jogador_id = %s
+              AND ((jeg.lado = 'mandante' AND j.mandante = TRUE)
+                OR (jeg.lado = 'visitante' AND j.mandante = FALSE))
             ORDER BY j.data_jogo DESC
             LIMIT %s
             """,
@@ -556,7 +564,10 @@ def calcular_padroes_confronto_direto(cur):
 
 def calcular_padrao_linha_jogador(cur, coluna, linhas_testadas):
     """Função genérica: para cada jogador, testa várias linhas (0.5, 1.5, ...)
-    numa coluna numérica da tabela jogador_estatisticas_jogo (ex: desarmes)."""
+    numa coluna numérica da tabela jogador_estatisticas_jogo (ex: desarmes).
+
+    NOVO: mesmo filtro de lado usado em calcular_padroes_cartao - só conta
+    jogos em que o jogador estava jogando pelo Corinthians."""
     cur.execute("SELECT id, nome FROM jogadores")
     jogadores = cur.fetchall()
 
@@ -569,6 +580,8 @@ def calcular_padrao_linha_jogador(cur, coluna, linhas_testadas):
             FROM jogador_estatisticas_jogo jeg
             JOIN jogos j ON j.id = jeg.jogo_id
             WHERE jeg.jogador_id = %s AND jeg.{coluna} IS NOT NULL
+              AND ((jeg.lado = 'mandante' AND j.mandante = TRUE)
+                OR (jeg.lado = 'visitante' AND j.mandante = FALSE))
             ORDER BY j.data_jogo DESC
             LIMIT %s
             """,
@@ -607,7 +620,10 @@ def salvar_padrao_linha_jogador(cur, tipo, resultados):
 
 def calcular_padrao_frequencia_jogador(cur, coluna):
     """Função genérica: para cada jogador, calcula a frequência de ter tido
-    pelo menos 1 ocorrência (ex: pelo menos 1 impedimento no jogo)."""
+    pelo menos 1 ocorrência (ex: pelo menos 1 impedimento no jogo).
+
+    NOVO: mesmo filtro de lado usado em calcular_padroes_cartao - só conta
+    jogos em que o jogador estava jogando pelo Corinthians."""
     cur.execute("SELECT id, nome FROM jogadores")
     jogadores = cur.fetchall()
 
@@ -620,6 +636,8 @@ def calcular_padrao_frequencia_jogador(cur, coluna):
             FROM jogador_estatisticas_jogo jeg
             JOIN jogos j ON j.id = jeg.jogo_id
             WHERE jeg.jogador_id = %s AND jeg.{coluna} IS NOT NULL
+              AND ((jeg.lado = 'mandante' AND j.mandante = TRUE)
+                OR (jeg.lado = 'visitante' AND j.mandante = FALSE))
             ORDER BY j.data_jogo DESC
             LIMIT %s
             """,
