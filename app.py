@@ -1176,7 +1176,7 @@ def buscar_estatisticas_jogadores(cur):
         """
         SELECT j.id, j.nome, p.jogos_analisados, p.frequencia
         FROM padroes_jogador_cartao p
-        JOIN jogadores j ON j.id = p.jogador_id
+        JOIN jogadores j ON j.id = p.jogador_id AND j.ativo = TRUE
         """
     )
     for jogador_id, nome, jogos_analisados, frequencia in cur.fetchall():
@@ -1189,7 +1189,7 @@ def buscar_estatisticas_jogadores(cur):
         """
         SELECT j.id, j.nome, p.tipo, p.linha, p.jogos_analisados, p.frequencia
         FROM padroes_jogador_linha p
-        JOIN jogadores j ON j.id = p.jogador_id
+        JOIN jogadores j ON j.id = p.jogador_id AND j.ativo = TRUE
         ORDER BY p.linha
         """
     )
@@ -1203,7 +1203,7 @@ def buscar_estatisticas_jogadores(cur):
         """
         SELECT j.id, j.nome, p.jogos_analisados, p.frequencia
         FROM padroes_jogador_frequencia p
-        JOIN jogadores j ON j.id = p.jogador_id
+        JOIN jogadores j ON j.id = p.jogador_id AND j.ativo = TRUE
         WHERE p.tipo = 'impedimento'
         """
     )
