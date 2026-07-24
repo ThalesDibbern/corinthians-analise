@@ -1,18 +1,17 @@
 """
 Avaliação e arquivamento de recomendações.
 
-Para jogos que já aconteceram (data_jogo < hoje), tenta avaliar se cada
+Para jogos que já aconteceram (já passou o horário do jogo), avalia se cada
 recomendação "acertou" ou "errou", comparando com o resultado real do jogo
-(se já estiver disponível no banco). Move as recomendações de jogos além
-das 5 rodadas mais recentes já disputadas para a tabela de histórico
-(resumida), liberando a tabela `recomendacoes` para focar só no que ainda
-é relevante (jogos futuros e as últimas rodadas jogadas).
+(se já estiver disponível no banco), e move pra tabela de histórico. Isso
+libera a tabela `recomendacoes` para focar só no que ainda é relevante
+(jogos futuros).
 
 IMPORTANTE: a avaliação de acerto/erro só funciona se já tivermos os dados
 reais daquele jogo no banco (tabelas cartoes, jogador_estatisticas_jogo,
 estatisticas_jogo). Até lá, o resultado fica marcado como "pendente", e a
 estrutura já está pronta pra funcionar automaticamente assim que os dados
-reais chegarem.
+reais chegarem (ver reavaliar_pendentes_ja_arquivadas).
 
 NOVO: corrige um bug em que a avaliação só sabia conferir o lado "Mais"/
 "Sim" de cada mercado - uma recomendação de "Menos" que tivesse acertado
@@ -27,6 +26,12 @@ NOVO: usa datahora_jogo (data + hora) em vez de só data_jogo pra decidir se
 um jogo já é "passado" - antes, um jogo de hoje já encerrado só era
 considerado passado depois da meia-noite, deixando o histórico vazio por
 horas mesmo depois do jogo terminar.
+NOVO: removida a regra de "manter as últimas 5 rodadas detalhadas sem
+arquivar" - ela fazia sentido antes de existir a página /historico no
+site, mas depois passou a esconder justamente os resultados mais recentes
+(os que o usuário mais quer ver) da página de histórico. Agora qualquer
+jogo já passado é arquivado assim que esse script roda, não importa há
+quanto tempo terminou.
 
 Variáveis de ambiente:
   - DATABASE_URL -> a URL de conexão do Postgres (mesma usada nos outros scripts)
@@ -36,7 +41,6 @@ import os
 import psycopg2
 
 DATABASE_URL = os.environ["DATABASE_URL"]
-RODADAS_A_MANTER_DETALHADAS = 5
 
 
 def normalizar(direcao):
@@ -170,26 +174,9 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, d
     return "pendente"
 
 
-def buscar_jogos_recentes_a_manter(cur):
-    """Os N jogos mais recentes já disputados ficam com odds detalhadas
-    (não arquivadas ainda). NOVO: usa datahora_jogo (com fallback pra data)
-    pra decidir se um jogo já é "passado" - antes, um jogo de hoje já
-    encerrado só virava "passado" depois da meia-noite."""
-    cur.execute(
-        """
-        SELECT DISTINCT j.id FROM jogos j
-        JOIN recomendacoes r ON r.jogo_id = j.id
-        WHERE (j.datahora_jogo IS NOT NULL AND j.datahora_jogo < NOW())
-           OR (j.datahora_jogo IS NULL AND j.data_jogo < CURRENT_DATE)
-        ORDER BY j.id DESC
-        LIMIT %s
-        """,
-        (RODADAS_A_MANTER_DETALHADAS,),
-    )
-    return {row[0] for row in cur.fetchall()}
-
-
-def buscar_recomendacoes_para_arquivar(cur, jogos_a_manter):
+def buscar_recomendacoes_para_arquivar(cur):
+    """NOVO: arquiva TODO jogo já passado, sem exceção de "últimas rodadas
+    mantidas detalhadas" (ver nota no topo do arquivo)."""
     cur.execute(
         """
         SELECT r.id, r.jogo_id, r.jogador_id, r.tipo_padrao, r.descricao, r.casa_aposta,
@@ -201,8 +188,7 @@ def buscar_recomendacoes_para_arquivar(cur, jogos_a_manter):
            OR (j.datahora_jogo IS NULL AND j.data_jogo < CURRENT_DATE)
         """
     )
-    todas = cur.fetchall()
-    return [r for r in todas if r[1] not in jogos_a_manter]
+    return cur.fetchall()
 
 
 def arquivar(cur, recomendacoes):
@@ -272,12 +258,10 @@ def main():
     cur = conn.cursor()
 
     try:
-        jogos_a_manter = buscar_jogos_recentes_a_manter(cur)
-        recomendacoes = buscar_recomendacoes_para_arquivar(cur, jogos_a_manter)
+        recomendacoes = buscar_recomendacoes_para_arquivar(cur)
 
         if not recomendacoes:
-            print("Nada para arquivar no momento "
-                  f"(mantendo detalhado as últimas {RODADAS_A_MANTER_DETALHADAS} rodadas jogadas).")
+            print("Nada para arquivar no momento (nenhum jogo passado com recomendação pendente).")
         else:
             contagem = arquivar(cur, recomendacoes)
             print(f"Arquivadas {len(recomendacoes)} recomendação(ões): "
