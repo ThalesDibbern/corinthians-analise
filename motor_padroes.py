@@ -125,18 +125,19 @@ def calcular_jogadores_ativos(cur):
     cur.execute("SELECT id, ativo FROM jogadores")
     todos = cur.fetchall()
 
-    marcados_ativos = 0
-    marcados_inativos = 0
     for jogador_id, ativo_atual in todos:
         deve_estar_ativo = jogador_id in ativos_ids
         if deve_estar_ativo != ativo_atual:
             cur.execute("UPDATE jogadores SET ativo = %s WHERE id = %s", (deve_estar_ativo, jogador_id))
-            if deve_estar_ativo:
-                marcados_ativos += 1
-            else:
-                marcados_inativos += 1
 
-    return marcados_ativos, marcados_inativos
+    # NOVO: reporta a contagem final de verdade (quantos ESTÃO ativos/inativos
+    # agora), não só quantos mudaram de estado nessa execução - contar só a
+    # mudança é enganoso, porque a maioria já estava correta desde a última
+    # vez e nunca aparecia no log, mesmo estando tudo certo.
+    total_ativos = len(ativos_ids)
+    total_inativos = len(todos) - total_ativos
+
+    return total_ativos, total_inativos
 
 
 def calcular_padroes_cartao(cur):
@@ -962,10 +963,10 @@ def main():
     try:
         print("Atualizando quais jogadores estão ativos (apareceram nos "
               f"últimos {JANELA_ATIVIDADE_JOGADOR} jogos do Corinthians)...")
-        marcados_ativos, marcados_inativos = calcular_jogadores_ativos(cur)
+        total_ativos, total_inativos = calcular_jogadores_ativos(cur)
         conn.commit()
-        print(f"Concluído! {marcados_ativos} jogador(es) marcados como ativos, "
-              f"{marcados_inativos} marcados como inativos nessa execução.")
+        print(f"Concluído! {total_ativos} jogador(es) ativo(s) agora, "
+              f"{total_inativos} inativo(s).")
 
         print("\nCalculando padrões de cartão por jogador...")
         resultados_cartao = calcular_padroes_cartao(cur)
