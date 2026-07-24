@@ -378,8 +378,11 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
     for c in resultado:
         c["pernas_json"] = json.dumps(c["pernas"], ensure_ascii=False)
 
-    resultado.sort(key=lambda c: c["valor_esperado"], reverse=True)
-    return resultado[:10]
+    # NOVO: ordena por probabilidade histórica (maior primeiro), não mais
+    # por valor esperado - ajuda visualmente, sem precisar procurar a
+    # aposta mais confiável no meio da lista.
+    resultado.sort(key=lambda c: c["probabilidade_combinada"], reverse=True)
+    return resultado
 
 
 def descobrir_motivo(cur):
@@ -623,7 +626,10 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
 
     resultado_final = []
     for (jogo_id, casa), pernas in grupos.items():
-        for tamanho in (1, 2, 3, 4, 5):
+        # NOVO: só combinações de 2+ pernas aqui - tamanho=1 seria a mesma
+        # aposta individual já mostrada na lista principal do histórico,
+        # gerando entrada duplicada.
+        for tamanho in (2, 3, 4, 5):
             if len(pernas) < tamanho:
                 continue
             for combo in combinations(pernas, tamanho):
