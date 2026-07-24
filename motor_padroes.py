@@ -31,6 +31,14 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 JOGOS_MINIMOS_PARA_ANALISAR = 5   # não vale a pena calcular padrão com poucos jogos
 JANELA_MAXIMA_DE_JOGOS = 50       # olha no máximo os últimos 50 jogos
 
+# NOVO: quantos jogos recentes do Corinthians olhar pra decidir se um
+# jogador ainda está no elenco - se ele não aparecer (nem titular, nem
+# reserva) jogando pelo Corinthians em nenhum desses jogos, é marcado como
+# inativo (ver calcular_jogadores_ativos). 15 jogos é ~4-5 meses de
+# ausência - bem mais que qualquer lesão comum, então é um sinal
+# confiável de saída do time (transferência, empréstimo).
+JANELA_ATIVIDADE_JOGADOR = 15
+
 # linhas de escanteio testadas, no mesmo padrão que as casas de aposta usam
 # (mercados "mais de X.5 escanteios")
 LINHAS_ESCANTEIO = [3.5, 4.5, 5.5, 6.5, 7.5]
@@ -75,6 +83,62 @@ FATOR_ARBITRO_MINIMO = 0.85
 FATOR_ARBITRO_MAXIMO = 1.15
 
 
+def calcular_jogadores_ativos(cur):
+    """NOVO: marca cada jogador como ativo/inativo, olhando se ele apareceu
+    (titular ou reserva) jogando PELO Corinthians em pelo menos 1 dos
+    últimos JANELA_ATIVIDADE_JOGADOR jogos concluídos. Quem não aparece em
+    nenhum deles é marcado inativo - normalmente jogador que foi
+    transferido/emprestado pra fora, ou (efeito colateral útil) jogador de
+    time adversário que só está na tabela `jogadores` por ter aparecido
+    como oponente em algum jogo do Corinthians.
+
+    Totalmente reversível: se o jogador voltar a aparecer numa escalação
+    do Corinthians, volta pra ativo sozinho na próxima execução."""
+    cur.execute(
+        """
+        SELECT id FROM jogos
+        WHERE (datahora_jogo IS NOT NULL AND datahora_jogo < NOW())
+           OR (datahora_jogo IS NULL AND data_jogo < CURRENT_DATE)
+        ORDER BY COALESCE(datahora_jogo, data_jogo::timestamp) DESC
+        LIMIT %s
+        """,
+        (JANELA_ATIVIDADE_JOGADOR,),
+    )
+    jogos_recentes = [row[0] for row in cur.fetchall()]
+    if not jogos_recentes:
+        return 0, 0
+
+    cur.execute(
+        """
+        SELECT DISTINCT e.jogador_id
+        FROM escalacoes e
+        JOIN jogador_estatisticas_jogo jeg ON jeg.jogo_id = e.jogo_id AND jeg.jogador_id = e.jogador_id
+        JOIN jogos jg ON jg.id = e.jogo_id
+        WHERE e.jogo_id = ANY(%s)
+          AND ((jeg.lado = 'mandante' AND jg.mandante = TRUE)
+            OR (jeg.lado = 'visitante' AND jg.mandante = FALSE))
+        """,
+        (jogos_recentes,),
+    )
+    ativos_ids = {row[0] for row in cur.fetchall()}
+
+    cur.execute("SELECT id, ativo FROM jogadores")
+    todos = cur.fetchall()
+
+    marcados_ativos = 0
+    marcados_inativos = 0
+    for jogador_id, ativo_atual in todos:
+        deve_estar_ativo = jogador_id in ativos_ids
+        if deve_estar_ativo != ativo_atual:
+            cur.execute("UPDATE jogadores SET ativo = %s WHERE id = %s", (deve_estar_ativo, jogador_id))
+            if deve_estar_ativo:
+                marcados_ativos += 1
+            else:
+                marcados_inativos += 1
+
+    return marcados_ativos, marcados_inativos
+
+
 def calcular_padroes_cartao(cur):
     """Para cada jogador, olha seus últimos jogos e calcula a frequência de cartão.
 
@@ -84,7 +148,7 @@ def calcular_padroes_cartao(cur):
     numa temporada, depois se tornou jogador do Corinthians) tinha os dois
     períodos misturados na mesma frequência, distorcendo o padrão real dele
     hoje jogando pelo Corinthians."""
-    cur.execute("SELECT id, nome FROM jogadores")
+    cur.execute("SELECT id, nome FROM jogadores WHERE ativo = TRUE")
     jogadores = cur.fetchall()
 
     resultados = []
@@ -568,7 +632,7 @@ def calcular_padrao_linha_jogador(cur, coluna, linhas_testadas):
 
     NOVO: mesmo filtro de lado usado em calcular_padroes_cartao - só conta
     jogos em que o jogador estava jogando pelo Corinthians."""
-    cur.execute("SELECT id, nome FROM jogadores")
+    cur.execute("SELECT id, nome FROM jogadores WHERE ativo = TRUE")
     jogadores = cur.fetchall()
 
     resultados = []
@@ -624,7 +688,7 @@ def calcular_padrao_frequencia_jogador(cur, coluna):
 
     NOVO: mesmo filtro de lado usado em calcular_padroes_cartao - só conta
     jogos em que o jogador estava jogando pelo Corinthians."""
-    cur.execute("SELECT id, nome FROM jogadores")
+    cur.execute("SELECT id, nome FROM jogadores WHERE ativo = TRUE")
     jogadores = cur.fetchall()
 
     resultados = []
@@ -896,7 +960,14 @@ def main():
     cur = conn.cursor()
 
     try:
-        print("Calculando padrões de cartão por jogador...")
+        print("Atualizando quais jogadores estão ativos (apareceram nos "
+              f"últimos {JANELA_ATIVIDADE_JOGADOR} jogos do Corinthians)...")
+        marcados_ativos, marcados_inativos = calcular_jogadores_ativos(cur)
+        conn.commit()
+        print(f"Concluído! {marcados_ativos} jogador(es) marcados como ativos, "
+              f"{marcados_inativos} marcados como inativos nessa execução.")
+
+        print("\nCalculando padrões de cartão por jogador...")
         resultados_cartao = calcular_padroes_cartao(cur)
 
         if not resultados_cartao:
