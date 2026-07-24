@@ -314,37 +314,57 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
                         mandante_nome, visitante_nome,
                         mandante_oddspapi_id, visitante_oddspapi_id,
                         datahora_jogo=None):
-    """Encontra (ou cria) o jogo pela combinação data + adversário - assim
-    esse script funciona independente do jogo já existir vindo do outro
-    script (API-Football) ou ser inteiramente novo (jogo futuro).
+    """Encontra (ou cria) o jogo, retorna o id.
     NOVO: se o jogo já existe mas ainda não tem árbitro salvo, tenta buscar
     e atualizar (a escalação pode ter sido confirmada entre uma execução e
     outra do cron, já que ambas rodam na mesma janela de 2 dias).
-    NOVO (times): também preenche mandante_id/visitante_id (tabela `times`),
-    com o mesmo backfill automático pra jogos que já existiam sem esse dado.
     NOVO (ID real da API-Football): ao criar um jogo novo, busca o fixture
     correspondente na API-Football e usa o MESMO ID como chave primária.
     Sem isso, esse script criava o jogo com um ID auto-incrementado do banco,
     diferente do ID real que o popular_banco.py usaria mais tarde pro mesmo
     jogo - resultando em DOIS registros duplicados pro mesmo jogo (um com as
     odds, outro com estatísticas/escalação), cegos um pro outro. Se por
-    algum motivo o ID real já estiver em uso por outro registro (ex: nome do
-    adversário grafado de forma diferente entre as duas fontes), a inserção
+    algum motivo o ID real já estiver em uso por outro registro, a inserção
     com ID explícito falha com segurança (savepoint) e cai de volta pro
     comportamento antigo (ID automático), sem travar o script.
     NOVO (datahora_jogo): a OddsPapi já manda o horário completo do jogo
     (jogo["startTime"]) - salvamos ele também, não só a data, porque sem
     hora o sistema não conseguia saber se um jogo "de hoje" já tinha
     terminado ou ainda ia acontecer (continuava sugerindo odds de um jogo
-    já encerrado até a virada do dia)."""
+    já encerrado até a virada do dia).
+    NOVO (busca por ID de time, não por texto): antes, o jogo era procurado
+    por "data + nome do adversário" (texto). Como a OddsPapi e a API-Football
+    às vezes grafam o mesmo time de forma diferente (ex: "Remo" vs "Clube
+    do Remo PA"), isso criava jogo DUPLICADO sempre que o nome divergia -
+    e o Brasileirão tem vários times com nomes parecidos (vários "Atlético",
+    por exemplo), o que tornava esse risco frequente, não raro. Agora a
+    busca usa mandante_id/visitante_id (já resolvidos de forma confiável
+    via api_football_team_id/oddspapi_participant_id) - o texto só entra
+    como fallback de segurança pra jogos bem antigos que ainda não tenham
+    esses ids preenchidos."""
+    mandante_id = get_or_create_time(cur, mandante_oddspapi_id, mandante_nome)
+    visitante_id = get_or_create_time(cur, visitante_oddspapi_id, visitante_nome)
+
     cur.execute(
-        "SELECT id, arbitro, mandante_id, visitante_id, datahora_jogo "
-        "FROM jogos WHERE data_jogo = %s AND adversario = %s",
-        (data_jogo, adversario),
+        "SELECT id, arbitro, datahora_jogo FROM jogos "
+        "WHERE data_jogo = %s AND mandante_id = %s AND visitante_id = %s",
+        (data_jogo, mandante_id, visitante_id),
     )
     row = cur.fetchone()
+
+    if not row:
+        # fallback de segurança: jogo antigo que ainda não tem mandante_id/
+        # visitante_id preenchido (não deveria mais acontecer, mas evita
+        # duplicar um jogo legítimo enquanto algum registro assim existir)
+        cur.execute(
+            "SELECT id, arbitro, datahora_jogo FROM jogos "
+            "WHERE data_jogo = %s AND adversario = %s AND (mandante_id IS NULL OR visitante_id IS NULL)",
+            (data_jogo, adversario),
+        )
+        row = cur.fetchone()
+
     if row:
-        jogo_id, arbitro_salvo, mandante_id_salvo, visitante_id_salvo, datahora_salva = row
+        jogo_id, arbitro_salvo, datahora_salva = row
         if arbitro_salvo is None:
             fixture = buscar_fixture_api_football(data_jogo)
             arbitro = fixture["fixture"].get("referee") if fixture else None
@@ -352,15 +372,13 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
                 cur.execute("UPDATE jogos SET arbitro = %s WHERE id = %s", (arbitro, jogo_id))
                 print(f"  Árbitro confirmado: {arbitro}")
 
-        # backfill: jogo já existia de antes da tabela `times` existir -
-        # completa mandante_id/visitante_id agora.
-        if mandante_id_salvo is None or visitante_id_salvo is None:
-            mandante_id = get_or_create_time(cur, mandante_oddspapi_id, mandante_nome)
-            visitante_id = get_or_create_time(cur, visitante_oddspapi_id, visitante_nome)
-            cur.execute(
-                "UPDATE jogos SET mandante_id = %s, visitante_id = %s WHERE id = %s",
-                (mandante_id, visitante_id, jogo_id),
-            )
+        # backfill: jogo achado pelo fallback de texto - garante que fica
+        # com mandante_id/visitante_id preenchido daqui pra frente
+        cur.execute(
+            "UPDATE jogos SET mandante_id = %s, visitante_id = %s WHERE id = %s "
+            "AND (mandante_id IS NULL OR visitante_id IS NULL)",
+            (mandante_id, visitante_id, jogo_id),
+        )
 
         # NOVO: backfill de datahora_jogo (jogo criado antes dessa coluna existir)
         if datahora_salva is None and datahora_jogo is not None:
@@ -375,9 +393,6 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
     fixture_id_real = fixture["fixture"]["id"] if fixture else None
     if arbitro:
         print(f"  Árbitro confirmado: {arbitro}")
-
-    mandante_id = get_or_create_time(cur, mandante_oddspapi_id, mandante_nome)
-    visitante_id = get_or_create_time(cur, visitante_oddspapi_id, visitante_nome)
 
     if fixture_id_real is not None:
         # tenta usar o ID real da API-Football, com uma rede de segurança
