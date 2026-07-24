@@ -312,7 +312,8 @@ def get_or_create_time(cur, oddspapi_participant_id, nome):
 
 def get_or_create_jogo(cur, data_jogo, adversario, mandante,
                         mandante_nome, visitante_nome,
-                        mandante_oddspapi_id, visitante_oddspapi_id):
+                        mandante_oddspapi_id, visitante_oddspapi_id,
+                        datahora_jogo=None):
     """Encontra (ou cria) o jogo pela combinação data + adversário - assim
     esse script funciona independente do jogo já existir vindo do outro
     script (API-Football) ou ser inteiramente novo (jogo futuro).
@@ -330,14 +331,20 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
     algum motivo o ID real já estiver em uso por outro registro (ex: nome do
     adversário grafado de forma diferente entre as duas fontes), a inserção
     com ID explícito falha com segurança (savepoint) e cai de volta pro
-    comportamento antigo (ID automático), sem travar o script."""
+    comportamento antigo (ID automático), sem travar o script.
+    NOVO (datahora_jogo): a OddsPapi já manda o horário completo do jogo
+    (jogo["startTime"]) - salvamos ele também, não só a data, porque sem
+    hora o sistema não conseguia saber se um jogo "de hoje" já tinha
+    terminado ou ainda ia acontecer (continuava sugerindo odds de um jogo
+    já encerrado até a virada do dia)."""
     cur.execute(
-        "SELECT id, arbitro, mandante_id, visitante_id FROM jogos WHERE data_jogo = %s AND adversario = %s",
+        "SELECT id, arbitro, mandante_id, visitante_id, datahora_jogo "
+        "FROM jogos WHERE data_jogo = %s AND adversario = %s",
         (data_jogo, adversario),
     )
     row = cur.fetchone()
     if row:
-        jogo_id, arbitro_salvo, mandante_id_salvo, visitante_id_salvo = row
+        jogo_id, arbitro_salvo, mandante_id_salvo, visitante_id_salvo, datahora_salva = row
         if arbitro_salvo is None:
             fixture = buscar_fixture_api_football(data_jogo)
             arbitro = fixture["fixture"].get("referee") if fixture else None
@@ -353,6 +360,13 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
             cur.execute(
                 "UPDATE jogos SET mandante_id = %s, visitante_id = %s WHERE id = %s",
                 (mandante_id, visitante_id, jogo_id),
+            )
+
+        # NOVO: backfill de datahora_jogo (jogo criado antes dessa coluna existir)
+        if datahora_salva is None and datahora_jogo is not None:
+            cur.execute(
+                "UPDATE jogos SET datahora_jogo = %s WHERE id = %s",
+                (datahora_jogo, jogo_id),
             )
         return jogo_id
 
@@ -371,10 +385,10 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
         cur.execute("SAVEPOINT antes_de_inserir_jogo")
         try:
             cur.execute(
-                """INSERT INTO jogos (id, data_jogo, adversario, mandante, competicao,
+                """INSERT INTO jogos (id, data_jogo, datahora_jogo, adversario, mandante, competicao,
                                        arbitro, mandante_id, visitante_id)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-                (fixture_id_real, data_jogo, adversario, mandante, "Brasileirão Série A",
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                (fixture_id_real, data_jogo, datahora_jogo, adversario, mandante, "Brasileirão Série A",
                  arbitro, mandante_id, visitante_id),
             )
             return cur.fetchone()[0]
@@ -384,10 +398,10 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
                   "criando esse jogo com ID automático (verificar depois se não duplicou).")
 
     cur.execute(
-        """INSERT INTO jogos (data_jogo, adversario, mandante, competicao, arbitro,
+        """INSERT INTO jogos (data_jogo, datahora_jogo, adversario, mandante, competicao, arbitro,
                                mandante_id, visitante_id)
-           VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-        (data_jogo, adversario, mandante, "Brasileirão Série A", arbitro,
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+        (data_jogo, datahora_jogo, adversario, mandante, "Brasileirão Série A", arbitro,
          mandante_id, visitante_id),
     )
     return cur.fetchone()[0]
@@ -550,6 +564,7 @@ def main():
             adversario = jogo["participant2Name"] if eh_mandante else jogo["participant1Name"]
             adversario_oddspapi_id = jogo.get("participant2Id") if eh_mandante else jogo.get("participant1Id")
             data_jogo = jogo["startTime"][:10]
+            datahora_jogo = jogo["startTime"]  # NOVO: timestamp completo, não só a data
 
             print(f"\nJogo encontrado: Corinthians x {adversario} em {data_jogo}")
 
@@ -564,6 +579,7 @@ def main():
                 cur, data_jogo, adversario, eh_mandante,
                 mandante_nome, visitante_nome,
                 mandante_oddspapi_id, visitante_oddspapi_id,
+                datahora_jogo=datahora_jogo,
             )
             conn.commit()
 
