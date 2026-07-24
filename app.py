@@ -1083,7 +1083,7 @@ PAGINA_JOGADORES = """
         .clube-selo {
             width: 40px; height: 40px; border-radius: 50%;
             background: linear-gradient(135deg, #333 50%, #eee 50%);
-            flex-shrink: 0;
+            flex-shrink: 0; object-fit: contain;
         }
         .clube-nome { font-weight: 700; font-size: 1rem; }
         .clube-sub { color: #8b949e; font-size: 0.78rem; }
@@ -1095,7 +1095,11 @@ PAGINA_JOGADORES = """
     <p class="subtitulo">Frequência histórica de cada jogador, direto dos padrões calculados - sem depender de odd disponível na casa de apostas.</p>
 
     <a href="/clube/corinthians" class="clube-btn">
+        {% if escudo_url %}
+        <img src="{{ escudo_url }}" alt="Corinthians" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
+        {% else %}
         <div class="clube-selo"></div>
+        {% endif %}
         <div>
             <div class="clube-nome">Corinthians</div>
             <div class="clube-sub">Ver elenco e última escalação →</div>
@@ -1175,7 +1179,7 @@ PAGINA_CLUBE = """
         .selo-titulo {
             width: 34px; height: 34px; border-radius: 50%;
             background: linear-gradient(135deg, #333 50%, #eee 50%);
-            flex-shrink: 0;
+            flex-shrink: 0; object-fit: contain;
         }
         .subtitulo { color: #8b949e; margin: 0 0 20px; font-size: 0.88rem; }
         .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
@@ -1209,7 +1213,14 @@ PAGINA_CLUBE = """
 </head>
 <body>
     <a href="/jogadores" class="link-voltar">← Voltar</a>
-    <h1><span class="selo-titulo"></span> {{ nome_clube }}</h1>
+    <h1>
+        {% if escudo_url %}
+        <img src="{{ escudo_url }}" alt="{{ nome_clube }}" class="selo-titulo" onerror="this.outerHTML='<span class=&quot;selo-titulo&quot;></span>'">
+        {% else %}
+        <span class="selo-titulo"></span>
+        {% endif %}
+        {{ nome_clube }}
+    </h1>
     <p class="subtitulo">Elenco completo e última escalação titular confirmada.</p>
 
     {% if ultima_escalacao %}
@@ -1283,6 +1294,18 @@ NOMES_TIPO_LINHA = {
     "desarme": "Desarmes",
     "chute_no_gol": "Chutes no gol",
 }
+
+
+def buscar_escudo_url(cur, nome_time):
+    """NOVO: usa o api_football_team_id já salvo em `times` pra montar a URL
+    do escudo oficial, hospedado pela própria API-Football/API-Sports - não
+    precisa baixar nem guardar nenhuma imagem no nosso banco, só referenciar
+    o link público deles. Retorna None se o time não tiver esse id ainda."""
+    cur.execute("SELECT api_football_team_id FROM times WHERE nome = %s", (nome_time,))
+    row = cur.fetchone()
+    if not row or not row[0]:
+        return None
+    return f"https://media.api-sports.io/football/teams/{row[0]}.png"
 
 
 def buscar_estatisticas_jogadores(cur):
@@ -1401,11 +1424,12 @@ def jogadores():
     try:
         cur = conn.cursor()
         lista = buscar_estatisticas_jogadores(cur)
+        escudo_url = buscar_escudo_url(cur, "Corinthians")
         cur.close()
     finally:
         conn.close()
 
-    return render_template_string(PAGINA_JOGADORES, jogadores=lista)
+    return render_template_string(PAGINA_JOGADORES, jogadores=lista, escudo_url=escudo_url)
 
 
 @app.route("/clube/corinthians")
@@ -1419,13 +1443,14 @@ def clube_corinthians():
         cur = conn.cursor()
         lista = buscar_estatisticas_jogadores(cur)
         ultima_escalacao = buscar_ultima_escalacao_titular(cur)
+        escudo_url = buscar_escudo_url(cur, "Corinthians")
         cur.close()
     finally:
         conn.close()
 
     return render_template_string(
         PAGINA_CLUBE, jogadores=lista, ultima_escalacao=ultima_escalacao,
-        nome_clube="Corinthians",
+        nome_clube="Corinthians", escudo_url=escudo_url,
     )
 
 
