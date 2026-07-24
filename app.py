@@ -19,10 +19,11 @@ Variáveis de ambiente necessárias:
 """
 
 import os
+import json
 from itertools import combinations
 
 import psycopg2
-from flask import Flask, render_template_string, request
+from flask import Flask, render_template_string, request, redirect
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -155,6 +156,30 @@ PAGINA = """
             font-size: 0.88rem;
         }
         .link-historico:hover { text-decoration: underline; }
+        .salvar-linha {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #21262d;
+        }
+        .salvar-linha input[type=number] {
+            width: 110px;
+            padding: 7px 10px;
+            font-size: 0.85rem;
+        }
+        .btn-salvar {
+            background: #1f6feb;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-salvar:hover { background: #388bfd; }
         .link-voltar {
             color: #8b949e;
             text-decoration: none;
@@ -194,7 +219,11 @@ PAGINA = """
 <body>
     <h1>⚫⚪ Análise de Apostas</h1>
     <p class="subtitulo">Recomendações de múltiplas do Corinthians baseadas em padrões históricos</p>
-    <p><a href="/historico" class="link-historico">📊 Ver histórico de acertos e erros</a></p>
+    <p>
+        <a href="/historico" class="link-historico">📊 Ver histórico de acertos e erros</a>
+        &nbsp;·&nbsp;
+        <a href="/minhas-apostas" class="link-historico">💰 Minhas apostas (ROI)</a>
+    </p>
 
     <div class="aviso">
         ⚠️ Base de dados histórica ainda cobre 2022-2024. As recomendações abaixo
@@ -232,6 +261,16 @@ PAGINA = """
                     <span>Probabilidade histórica: <b>{{ c.probabilidade_combinada }}%</b></span>
                     <span>Valor esperado: <b>{{ c.valor_esperado }}</b></span>
                 </div>
+                <form method="POST" action="/salvar-aposta" class="salvar-linha">
+                    <input type="hidden" name="descricao" value="{{ c.descricao }}">
+                    <input type="hidden" name="casa_aposta" value="{{ c.casa_aposta }}">
+                    <input type="hidden" name="odd_combinada" value="{{ c.odd_combinada }}">
+                    <input type="hidden" name="probabilidade_combinada" value="{{ c.probabilidade_combinada }}">
+                    <input type="hidden" name="pernas" value='{{ c.pernas_json }}'>
+                    <input type="hidden" name="voltar" value="/?odd_min={{ odd_min }}&odd_max={{ odd_max }}">
+                    <input type="number" step="0.01" min="0.01" name="valor_apostado" placeholder="Valor (R$)" required>
+                    <button type="submit" class="btn-salvar">💾 Salvar</button>
+                </form>
             </div>
             {% endfor %}
         {% else %}
@@ -310,6 +349,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
 
                 valor_esperado = round((prob_combinada * odd_combinada) - 1, 3)
                 resultado.append({
+                    "jogo_id": jogo_id,
                     "casa_aposta": casa,
                     "descricao": " + ".join(p["descricao"] for p in combo),
                     "odd_combinada": round(odd_combinada, 2),
@@ -317,7 +357,18 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                     "valor_esperado": valor_esperado,
                     "adversario": combo[0]["adversario"],
                     "data_jogo": combo[0]["data_jogo"],
+                    "pernas": [
+                        {
+                            "jogo_id": jogo_id,
+                            "jogador_id": p["jogador_id"],
+                            "tipo_padrao": p["tipo_padrao"],
+                            "descricao": p["descricao"],
+                        }
+                        for p in combo
+                    ],
                 })
+    for c in resultado:
+        c["pernas_json"] = json.dumps(c["pernas"], ensure_ascii=False)
 
     resultado.sort(key=lambda c: c["valor_esperado"], reverse=True)
     return resultado[:10]
@@ -395,6 +446,27 @@ PAGINA_HISTORICO = """
             text-align: center; color: #8b949e; padding: 32px 24px;
             background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
         }
+        .secao-titulo { font-size: 1.05rem; margin: 32px 0 4px; }
+        .secao-subtitulo { color: #8b949e; font-size: 0.82rem; margin: 0 0 16px; }
+        .salvar-linha {
+            display: flex; gap: 8px; align-items: center; margin-top: 10px;
+            padding-top: 10px; border-top: 1px solid #21262d;
+        }
+        .salvar-linha input[type=number] { width: 110px; padding: 7px 10px; font-size: 0.85rem;
+            background: #0d1117; border: 1px solid #30363d; color: #e6edf3; border-radius: 8px; }
+        .btn-salvar {
+            background: #1f6feb; color: white; border: none; border-radius: 8px;
+            padding: 8px 16px; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+        }
+        .btn-salvar:hover { background: #388bfd; }
+        .odd-tag {
+            background: #23863622; color: #3fb950; font-weight: 700; font-size: 1rem;
+            padding: 3px 12px; border-radius: 8px;
+        }
+        .casa {
+            background: #1f6feb22; color: #58a6ff; font-size: 0.72rem; padding: 3px 10px;
+            border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em;
+        }
     </style>
 </head>
 <body>
@@ -441,6 +513,41 @@ PAGINA_HISTORICO = """
         <div class="vazio">Ainda não há recomendações avaliadas - isso acontece automaticamente
         depois que um jogo termina e o script de arquivamento processa o resultado.</div>
     {% endif %}
+
+    <h2 class="secao-titulo">⭐ Múltiplas em destaque</h2>
+    <p class="secao-subtitulo">Combinações geradas agora com probabilidade histórica de {{ piso }}% ou mais
+        - só pra referência, não precisa ter apostado nelas. Se quiser registrar uma pra acompanhar no
+        ROI, salva com o valor apostado.</p>
+
+    {% if multiplas_destaque %}
+        {% for c in multiplas_destaque %}
+        <div class="cartao">
+            <div class="cartao-topo">
+                <span class="jogo">{{ c.data_jogo }} · Corinthians x {{ c.adversario }}</span>
+                <span class="casa">{{ c.casa_aposta }}</span>
+                <span class="odd-tag">ODD {{ c.odd_combinada }}</span>
+            </div>
+            <div class="descricao">{{ c.descricao }}</div>
+            <div class="metricas">
+                <span>Probabilidade histórica: <b>{{ c.probabilidade_combinada }}%</b></span>
+                <span>Valor esperado: <b>{{ c.valor_esperado }}</b></span>
+            </div>
+            <form method="POST" action="/salvar-aposta" class="salvar-linha">
+                <input type="hidden" name="descricao" value="{{ c.descricao }}">
+                <input type="hidden" name="casa_aposta" value="{{ c.casa_aposta }}">
+                <input type="hidden" name="odd_combinada" value="{{ c.odd_combinada }}">
+                <input type="hidden" name="probabilidade_combinada" value="{{ c.probabilidade_combinada }}">
+                <input type="hidden" name="pernas" value='{{ c.pernas_json }}'>
+                <input type="hidden" name="voltar" value="/historico">
+                <input type="number" step="0.01" min="0.01" name="valor_apostado" placeholder="Valor (R$)" required>
+                <button type="submit" class="btn-salvar">💾 Salvar</button>
+            </form>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="vazio">Nenhuma múltipla com {{ piso }}% ou mais de probabilidade histórica
+        no momento.</div>
+    {% endif %}
 </body>
 </html>
 """
@@ -474,6 +581,27 @@ def buscar_resumo_historico(cur):
     return {"acertou": acertou, "errou": errou, "pendente": pendente, "taxa": taxa}
 
 
+# NOVO: piso de probabilidade histórica pra uma múltipla aparecer na lista
+# de "múltiplas em destaque" do /historico. Só controla ESSA lista - não
+# afeta a página principal (onde as odds são geradas, sem piso nenhum) nem
+# o botão de salvar aposta (que funciona em qualquer probabilidade). Existe
+# só pra evitar que combinações de chance muito baixa (que erram na maioria
+# das vezes só por natureza estatística, mesmo estando matematicamente
+# corretas) dominem essa lista de referência.
+PISO_PROBABILIDADE_MULTIPLAS_DESTAQUE = 40
+
+
+def buscar_multiplas_destaque(cur):
+    """NOVO: gera múltiplas ao vivo (mesma lógica da página principal), sem
+    filtro de odd, e filtra só as que têm probabilidade histórica >= piso -
+    lista de referência, sem relação nenhuma com dinheiro/ROI."""
+    recomendacoes = buscar_recomendacoes(cur)
+    combinacoes = montar_combinacoes(recomendacoes, odd_min=1.0, odd_max=100000)
+    destaque = [c for c in combinacoes if c["probabilidade_combinada"] >= PISO_PROBABILIDADE_MULTIPLAS_DESTAQUE]
+    destaque.sort(key=lambda c: c["probabilidade_combinada"], reverse=True)
+    return destaque[:15]
+
+
 @app.route("/historico")
 def historico():
     conn = psycopg2.connect(DATABASE_URL)
@@ -481,11 +609,296 @@ def historico():
         cur = conn.cursor()
         itens = buscar_historico(cur)
         resumo = buscar_resumo_historico(cur)
+        multiplas_destaque = buscar_multiplas_destaque(cur)
         cur.close()
     finally:
         conn.close()
 
-    return render_template_string(PAGINA_HISTORICO, itens=itens, resumo=resumo)
+    return render_template_string(
+        PAGINA_HISTORICO, itens=itens, resumo=resumo,
+        multiplas_destaque=multiplas_destaque,
+        piso=PISO_PROBABILIDADE_MULTIPLAS_DESTAQUE,
+    )
+
+
+@app.route("/salvar-aposta", methods=["POST"])
+def salvar_aposta():
+    """NOVO: salva uma aposta (individual ou múltipla) que o usuário decidiu
+    apostar de verdade, com o valor apostado - alimenta a página de ROI
+    (/minhas-apostas). Sem piso de probabilidade nenhum aqui - o usuário
+    pode salvar qualquer odd/múltipla mostrada em qualquer parte do site."""
+    descricao = request.form["descricao"]
+    casa_aposta = request.form.get("casa_aposta", "")
+    odd_combinada = float(request.form["odd_combinada"])
+    probabilidade_combinada = request.form.get("probabilidade_combinada")
+    valor_apostado = float(request.form["valor_apostado"])
+    pernas_json = request.form["pernas"]
+    voltar = request.form.get("voltar", "/")
+
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO apostas_salvas
+               (descricao, casa_aposta, odd_combinada, probabilidade_combinada,
+                valor_apostado, pernas)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            (descricao, casa_aposta, odd_combinada, probabilidade_combinada,
+             valor_apostado, pernas_json),
+        )
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+    return redirect(voltar)
+
+
+PAGINA_ROI = """
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minhas Apostas - Análise de Apostas</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+            background: #0d1117; color: #e6edf3; max-width: 900px;
+            margin: 0 auto; padding: 32px 20px 80px;
+        }
+        h1 { font-size: 1.5rem; margin: 0 0 4px; }
+        .subtitulo { color: #8b949e; margin: 0 0 20px; }
+        .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
+        .link-voltar:hover { text-decoration: underline; }
+        .resumo-grid { display: flex; gap: 14px; margin: 20px 0 28px; flex-wrap: wrap; }
+        .resumo-card {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 16px 22px; flex: 1; min-width: 130px; text-align: center;
+        }
+        .resumo-numero { font-size: 1.5rem; font-weight: 700; }
+        .resumo-label { color: #8b949e; font-size: 0.78rem; margin-top: 4px; }
+        .grafico-box {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 18px; margin-bottom: 28px;
+        }
+        .grafico-titulo { font-size: 0.85rem; color: #8b949e; margin-bottom: 10px; }
+        .cartao {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 16px 20px; margin-bottom: 12px;
+        }
+        .cartao-topo {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 8px; flex-wrap: wrap; gap: 8px;
+        }
+        .descricao { color: #c9d1d9; font-size: 0.88rem; margin-bottom: 8px; line-height: 1.5; }
+        .metricas { display: flex; gap: 18px; font-size: 0.78rem; color: #8b949e; flex-wrap: wrap; }
+        .metricas b { color: #e6edf3; }
+        .badge {
+            font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+            text-transform: uppercase; letter-spacing: 0.03em;
+        }
+        .badge-acertou { background: #23863622; color: #3fb950; }
+        .badge-errou { background: #f8514922; color: #f85149; }
+        .badge-pendente { background: #8b949e22; color: #8b949e; }
+        .retorno-positivo { color: #3fb950; }
+        .retorno-negativo { color: #f85149; }
+        .vazio {
+            text-align: center; color: #8b949e; padding: 32px 24px;
+            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <a href="/" class="link-voltar">← Voltar</a>
+    <h1>💰 Minhas Apostas</h1>
+    <p class="subtitulo">Só o que você salvou com valor apostado - não inclui recomendações não salvas</p>
+
+    <div class="resumo-grid">
+        <div class="resumo-card">
+            <div class="resumo-numero">R$ {{ resumo.total_apostado }}</div>
+            <div class="resumo-label">Total apostado</div>
+        </div>
+        <div class="resumo-card">
+            <div class="resumo-numero {{ 'retorno-positivo' if resumo.retorno_total >= 0 else 'retorno-negativo' }}">
+                R$ {{ resumo.retorno_total }}
+            </div>
+            <div class="resumo-label">Retorno (lucro/prejuízo)</div>
+        </div>
+        <div class="resumo-card">
+            <div class="resumo-numero {{ 'retorno-positivo' if resumo.roi >= 0 else 'retorno-negativo' }}">
+                {{ resumo.roi }}%
+            </div>
+            <div class="resumo-label">ROI</div>
+        </div>
+        <div class="resumo-card">
+            <div class="resumo-numero">{{ resumo.taxa_acerto }}%</div>
+            <div class="resumo-label">Taxa de acerto</div>
+        </div>
+        <div class="resumo-card">
+            <div class="resumo-numero">{{ resumo.total_apostas }}</div>
+            <div class="resumo-label">Apostas salvas</div>
+        </div>
+    </div>
+
+    {% if pontos_grafico|length > 1 %}
+    <div class="grafico-box">
+        <div class="grafico-titulo">Retorno acumulado ao longo do tempo</div>
+        {{ svg_grafico|safe }}
+    </div>
+    {% endif %}
+
+    {% if apostas %}
+        {% for a in apostas %}
+        <div class="cartao">
+            <div class="cartao-topo">
+                <span>{{ a.criado_em }}</span>
+                <span class="badge badge-{{ a.resultado }}">{{ a.resultado }}</span>
+            </div>
+            <div class="descricao">{{ a.descricao }}</div>
+            <div class="metricas">
+                <span>{{ a.casa_aposta }}</span>
+                <span>Odd: <b>{{ a.odd_combinada }}</b></span>
+                <span>Apostado: <b>R$ {{ a.valor_apostado }}</b></span>
+                {% if a.retorno is not none %}
+                <span>Retorno: <b class="{{ 'retorno-positivo' if a.retorno >= 0 else 'retorno-negativo' }}">
+                    R$ {{ a.retorno }}</b></span>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="vazio">Você ainda não salvou nenhuma aposta. Use o botão "💾 Salvar" nas
+        recomendações da página principal ou do histórico pra começar a acompanhar seu ROI.</div>
+    {% endif %}
+</body>
+</html>
+"""
+
+
+def resolver_apostas_pendentes(cur):
+    """NOVO: pra cada aposta salva ainda 'pendente', confere se TODAS as
+    pernas dela já têm resultado em historico_recomendacoes - só resolve
+    (acertou/errou) quando não sobrar nenhuma perna pendente, já que uma
+    múltipla só acerta se todas as pernas acertarem."""
+    cur.execute("SELECT id, pernas, odd_combinada, valor_apostado FROM apostas_salvas WHERE resultado = 'pendente'")
+    pendentes = cur.fetchall()
+
+    for aposta_id, pernas_json, odd_combinada, valor_apostado in pendentes:
+        pernas = pernas_json if isinstance(pernas_json, list) else json.loads(pernas_json)
+
+        resultados_pernas = []
+        for perna in pernas:
+            cur.execute(
+                """SELECT resultado FROM historico_recomendacoes
+                   WHERE jogo_id = %s AND descricao = %s
+                     AND jogador_id IS NOT DISTINCT FROM %s
+                   ORDER BY id DESC LIMIT 1""",
+                (perna["jogo_id"], perna["descricao"], perna.get("jogador_id")),
+            )
+            row = cur.fetchone()
+            resultados_pernas.append(row[0] if row else "pendente")
+
+        if any(r == "errou" for r in resultados_pernas):
+            resultado_final = "errou"
+        elif all(r == "acertou" for r in resultados_pernas):
+            resultado_final = "acertou"
+        else:
+            continue  # ainda tem perna pendente - não resolve ainda
+
+        if resultado_final == "acertou":
+            retorno = round(float(valor_apostado) * (float(odd_combinada) - 1), 2)
+        else:
+            retorno = round(-float(valor_apostado), 2)
+
+        cur.execute(
+            "UPDATE apostas_salvas SET resultado = %s, retorno = %s, resolvido_em = NOW() WHERE id = %s",
+            (resultado_final, retorno, aposta_id),
+        )
+
+
+def buscar_apostas_salvas(cur):
+    cur.execute(
+        """
+        SELECT descricao, casa_aposta, odd_combinada, valor_apostado, resultado, retorno, criado_em
+        FROM apostas_salvas
+        ORDER BY criado_em DESC
+        """
+    )
+    colunas = ["descricao", "casa_aposta", "odd_combinada", "valor_apostado", "resultado", "retorno", "criado_em"]
+    return [dict(zip(colunas, row)) for row in cur.fetchall()]
+
+
+def montar_svg_grafico(pontos):
+    """Gráfico de linha simples (SVG puro, sem biblioteca externa) do
+    retorno acumulado ao longo do tempo."""
+    largura, altura = 820, 180
+    margem = 20
+
+    valores = [p[1] for p in pontos]
+    minimo, maximo = min(valores + [0]), max(valores + [0])
+    faixa = (maximo - minimo) or 1
+
+    def coord_x(i):
+        return margem + i * (largura - 2 * margem) / max(len(pontos) - 1, 1)
+
+    def coord_y(v):
+        return altura - margem - (v - minimo) * (altura - 2 * margem) / faixa
+
+    linha_zero_y = coord_y(0)
+    pontos_svg = " ".join(f"{coord_x(i):.1f},{coord_y(v):.1f}" for i, (_, v) in enumerate(pontos))
+    cor = "#3fb950" if valores[-1] >= 0 else "#f85149"
+
+    return f'''<svg viewBox="0 0 {largura} {altura}" style="width:100%; height:auto;">
+        <line x1="{margem}" y1="{linha_zero_y:.1f}" x2="{largura - margem}" y2="{linha_zero_y:.1f}"
+              stroke="#30363d" stroke-width="1" stroke-dasharray="4,4" />
+        <polyline points="{pontos_svg}" fill="none" stroke="{cor}" stroke-width="2.5" />
+    </svg>'''
+
+
+@app.route("/minhas-apostas")
+def minhas_apostas():
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        resolver_apostas_pendentes(cur)
+        conn.commit()
+
+        apostas = buscar_apostas_salvas(cur)
+        cur.close()
+    finally:
+        conn.close()
+
+    resolvidas = [a for a in apostas if a["resultado"] != "pendente"]
+    total_apostado_resolvidas = sum(float(a["valor_apostado"]) for a in resolvidas)
+    retorno_total = sum(float(a["retorno"]) for a in resolvidas) if resolvidas else 0
+    roi = round(100 * retorno_total / total_apostado_resolvidas, 2) if total_apostado_resolvidas else 0
+    acertos = sum(1 for a in resolvidas if a["resultado"] == "acertou")
+    taxa_acerto = round(100 * acertos / len(resolvidas), 1) if resolvidas else 0
+
+    resumo = {
+        "total_apostado": round(sum(float(a["valor_apostado"]) for a in apostas), 2),
+        "retorno_total": round(retorno_total, 2),
+        "roi": roi,
+        "taxa_acerto": taxa_acerto,
+        "total_apostas": len(apostas),
+    }
+
+    # pontos do gráfico: retorno acumulado, em ordem cronológica (mais antiga primeiro)
+    resolvidas_ordem_cronologica = sorted(resolvidas, key=lambda a: a["criado_em"])
+    pontos_grafico = []
+    acumulado = 0
+    for a in resolvidas_ordem_cronologica:
+        acumulado += float(a["retorno"])
+        pontos_grafico.append((a["criado_em"], round(acumulado, 2)))
+
+    svg_grafico = montar_svg_grafico(pontos_grafico) if len(pontos_grafico) > 1 else ""
+
+    return render_template_string(
+        PAGINA_ROI, resumo=resumo, apostas=apostas,
+        pontos_grafico=pontos_grafico, svg_grafico=svg_grafico,
+    )
 
 
 @app.route("/")
