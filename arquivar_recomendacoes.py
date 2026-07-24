@@ -10,10 +10,19 @@ das 5 rodadas mais recentes já disputadas para a tabela de histórico
 
 IMPORTANTE: a avaliação de acerto/erro só funciona se já tivermos os dados
 reais daquele jogo no banco (tabelas cartoes, jogador_estatisticas_jogo,
-estatisticas_jogo). Isso depende de uma fonte de dados com cobertura da
-temporada atual (o histórico grátis da API-Football só vai até 2024) - até
-lá, o resultado fica marcado como "pendente", e a estrutura já está pronta
-pra funcionar automaticamente assim que os dados reais chegarem.
+estatisticas_jogo). Até lá, o resultado fica marcado como "pendente", e a
+estrutura já está pronta pra funcionar automaticamente assim que os dados
+reais chegarem.
+
+NOVO: corrige um bug em que a avaliação só sabia conferir o lado "Mais"/
+"Sim" de cada mercado - uma recomendação de "Menos" que tivesse acertado
+de verdade era marcada como "errou" por engano, porque a lógica antiga só
+comparava "> linha", nunca o lado oposto. Agora usa a coluna `direcao`
+(salva pelo motor_recomendacoes.py) pra conferir do jeito certo.
+NOVO: também cobre os mercados de escanteio total e cartão total do jogo
+(mandante + visitante somados), que a versão anterior nunca avaliava.
+NOVO: reavalia recomendações que ficaram "pendente" em execuções passadas,
+assim que o dado real do jogo chegar (antes ficavam pendentes pra sempre).
 
 Variáveis de ambiente:
   - DATABASE_URL -> a URL de conexão do Postgres (mesma usada nos outros scripts)
@@ -26,19 +35,50 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 RODADAS_A_MANTER_DETALHADAS = 5
 
 
-def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao):
+def normalizar(direcao):
+    return (direcao or "").strip().lower()
+
+
+def avaliar_linha(valor_real, linha, direcao):
+    """Confere um mercado de linha (Mais/Menos), usando a mesma definição de
+    fronteira usada no cálculo da frequência histórica: "mais" conta valores
+    ESTRITAMENTE acima da linha; "menos" é o complementar (valores até a
+    linha, inclusive) - os dois juntos cobrem 100% dos casos, sem sobra nem
+    lacuna."""
+    if direcao == "mais":
+        return "acertou" if valor_real > float(linha) else "errou"
+    if direcao == "menos":
+        return "acertou" if valor_real <= float(linha) else "errou"
+    return "pendente"  # direção desconhecida/não reconhecida - não arrisca avaliar
+
+
+def avaliar_binario(ocorreu, direcao):
+    """Confere um mercado binário (Sim/Não - ex: jogador recebeu cartão)."""
+    if direcao == "sim":
+        return "acertou" if ocorreu else "errou"
+    if direcao in ("não", "nao"):
+        return "acertou" if not ocorreu else "errou"
+    return "pendente"
+
+
+def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, direcao):
     """Compara a recomendação com o resultado real do jogo, se disponível.
     Retorna 'acertou', 'errou' ou 'pendente' (se ainda não temos o dado real)."""
+    d = normalizar(direcao)
 
     if tipo_padrao == "cartao":
         cur.execute("SELECT 1 FROM cartoes WHERE jogo_id = %s AND jogador_id = %s", (jogo_id, jogador_id))
-        if cur.fetchone():
-            return "acertou"
+        recebeu_cartao = cur.fetchone() is not None
+
         cur.execute(
             "SELECT 1 FROM jogador_estatisticas_jogo WHERE jogo_id = %s AND jogador_id = %s",
             (jogo_id, jogador_id),
         )
-        return "errou" if cur.fetchone() else "pendente"
+        jogador_tem_dado = cur.fetchone() is not None
+
+        if not recebeu_cartao and not jogador_tem_dado:
+            return "pendente"  # ainda não temos as estatísticas desse jogo
+        return avaliar_binario(recebeu_cartao, d)
 
     if tipo_padrao in ("falta_cometida", "desarme", "chute_no_gol"):
         coluna = {
@@ -53,7 +93,7 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao):
         row = cur.fetchone()
         if row is None or row[0] is None:
             return "pendente"
-        return "acertou" if float(row[0]) > float(linha) else "errou"
+        return avaliar_linha(float(row[0]), linha, d)
 
     if tipo_padrao == "impedimento":
         cur.execute(
@@ -63,7 +103,7 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao):
         row = cur.fetchone()
         if row is None or row[0] is None:
             return "pendente"
-        return "acertou" if row[0] > 0 else "errou"
+        return avaliar_binario(row[0] > 0, d)
 
     if tipo_padrao == "escanteio_time":
         cur.execute("SELECT mandante FROM jogos WHERE id = %s", (jogo_id,))
@@ -78,7 +118,32 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao):
         row = cur.fetchone()
         if row is None or row[0] is None:
             return "pendente"
-        return "acertou" if float(row[0]) > float(linha) else "errou"
+        return avaliar_linha(float(row[0]), linha, d)
+
+    if tipo_padrao == "escanteio_total":
+        cur.execute(
+            """
+            SELECT SUM(escanteios), COUNT(DISTINCT lado)
+            FROM estatisticas_jogo WHERE jogo_id = %s AND escanteios IS NOT NULL
+            """,
+            (jogo_id,),
+        )
+        row = cur.fetchone()
+        if row is None or row[0] is None or row[1] != 2:
+            return "pendente"  # falta o dado de algum dos dois lados ainda
+        return avaliar_linha(float(row[0]), linha, d)
+
+    if tipo_padrao == "cartao_total":
+        cur.execute(
+            "SELECT COUNT(DISTINCT lado) FROM estatisticas_jogo WHERE jogo_id = %s",
+            (jogo_id,),
+        )
+        row = cur.fetchone()
+        if row is None or row[0] != 2:
+            return "pendente"  # jogo ainda não totalmente processado
+        cur.execute("SELECT COUNT(*) FROM cartoes WHERE jogo_id = %s", (jogo_id,))
+        total_cartoes = cur.fetchone()[0]
+        return avaliar_linha(float(total_cartoes), linha, d)
 
     if tipo_padrao == "resultado_final":
         cur.execute(
@@ -121,7 +186,8 @@ def buscar_recomendacoes_para_arquivar(cur, jogos_a_manter):
     cur.execute(
         """
         SELECT r.id, r.jogo_id, r.jogador_id, r.tipo_padrao, r.descricao, r.casa_aposta,
-               r.odd_oferecida, r.probabilidade_historica, r.valor_esperado, r.linha, j.data_jogo
+               r.odd_oferecida, r.probabilidade_historica, r.valor_esperado, r.linha,
+               r.direcao, j.data_jogo
         FROM recomendacoes r
         JOIN jogos j ON j.id = r.jogo_id
         WHERE j.data_jogo < CURRENT_DATE
@@ -135,23 +201,52 @@ def arquivar(cur, recomendacoes):
     contagem = {"acertou": 0, "errou": 0, "pendente": 0}
 
     for (rec_id, jogo_id, jogador_id, tipo_padrao, descricao, casa,
-         odd, prob, ve, linha, data_jogo) in recomendacoes:
+         odd, prob, ve, linha, direcao, data_jogo) in recomendacoes:
 
-        resultado = avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao)
+        resultado = avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, direcao)
         contagem[resultado] += 1
 
         cur.execute(
             """INSERT INTO historico_recomendacoes
                (jogo_id, jogador_id, tipo_padrao, descricao, casa_aposta,
                 odd_oferecida, probabilidade_historica, valor_esperado, linha,
-                resultado, data_jogo)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                direcao, resultado, data_jogo)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (jogo_id, jogador_id, tipo_padrao, descricao, casa, odd, prob, ve,
-             linha, resultado, data_jogo),
+             linha, direcao, resultado, data_jogo),
         )
         cur.execute("DELETE FROM recomendacoes WHERE id = %s", (rec_id,))
 
     return contagem
+
+
+def reavaliar_pendentes_ja_arquivadas(cur):
+    """NOVO: recomendações que já foram arquivadas como 'pendente' (porque na
+    época ainda não tínhamos o dado real do jogo) podem ser reavaliadas mais
+    tarde, assim que o dado chegar - sem isso, uma recomendação ficaria
+    "pendente" pra sempre mesmo depois do jogo ser totalmente processado."""
+    cur.execute(
+        """
+        SELECT id, jogo_id, jogador_id, tipo_padrao, descricao, linha, direcao
+        FROM historico_recomendacoes
+        WHERE resultado = 'pendente'
+        """
+    )
+    pendentes = cur.fetchall()
+    if not pendentes:
+        return 0
+
+    reavaliadas = 0
+    for rec_id, jogo_id, jogador_id, tipo_padrao, descricao, linha, direcao in pendentes:
+        novo_resultado = avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, direcao)
+        if novo_resultado != "pendente":
+            cur.execute(
+                "UPDATE historico_recomendacoes SET resultado = %s WHERE id = %s",
+                (novo_resultado, rec_id),
+            )
+            reavaliadas += 1
+
+    return reavaliadas
 
 
 def resumo_geral(cur):
@@ -181,6 +276,12 @@ def main():
                   f"{contagem['acertou']} acertou, {contagem['errou']} errou, "
                   f"{contagem['pendente']} ainda pendente (aguardando dados reais do jogo).")
 
+        conn.commit()
+
+        reavaliadas = reavaliar_pendentes_ja_arquivadas(cur)
+        if reavaliadas:
+            print(f"\n{reavaliadas} recomendação(ões) que estavam pendentes foram "
+                  f"reavaliadas agora que o dado real do jogo chegou.")
         conn.commit()
 
         resumo = resumo_geral(cur)
