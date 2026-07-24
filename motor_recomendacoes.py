@@ -120,7 +120,13 @@ def buscar_odds_futuras(cur):
     NOVO (confronto direto): também traz mandante_id/visitante_id, usados
     pra identificar o time adversário por ID (não por texto - evita o
     problema de nomes grafados diferente entre fontes) e cruzar com
-    padroes_confronto_direto."""
+    padroes_confronto_direto.
+
+    NOVO (datahora_jogo): antes comparava só a DATA (j.data_jogo >=
+    CURRENT_DATE), então um jogo de hoje já encerrado continuava sendo
+    tratado como "futuro" até a virada do dia. Agora usa o horário completo
+    (datahora_jogo >= NOW()) quando disponível, com fallback pra data
+    (jogos antigos que ainda não têm esse dado preenchido)."""
     cur.execute(
         """
         SELECT o.id, o.jogo_id, o.jogador_id, o.casa_aposta, o.mercado,
@@ -128,7 +134,8 @@ def buscar_odds_futuras(cur):
                j.mandante, j.arbitro, j.mandante_id, j.visitante_id
         FROM odds o
         JOIN jogos j ON j.id = o.jogo_id
-        WHERE j.data_jogo >= CURRENT_DATE
+        WHERE (j.datahora_jogo IS NOT NULL AND j.datahora_jogo >= NOW())
+           OR (j.datahora_jogo IS NULL AND j.data_jogo >= CURRENT_DATE)
         """
     )
     return cur.fetchall()
@@ -564,7 +571,11 @@ def salvar_recomendacoes(cur, recomendacoes):
     # (as de jogos já ocorridos ficam intactas até o script de arquivamento
     # processá-las - senão perderíamos o histórico antes de avaliar acerto/erro)
     cur.execute(
-        "DELETE FROM recomendacoes WHERE jogo_id IN (SELECT id FROM jogos WHERE data_jogo >= CURRENT_DATE)"
+        "DELETE FROM recomendacoes WHERE jogo_id IN ("
+        "  SELECT id FROM jogos WHERE "
+        "  (datahora_jogo IS NOT NULL AND datahora_jogo >= NOW()) "
+        "  OR (datahora_jogo IS NULL AND data_jogo >= CURRENT_DATE)"
+        ")"
     )
 
     for r in recomendacoes:
