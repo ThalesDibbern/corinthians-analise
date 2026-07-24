@@ -180,6 +180,11 @@ PAGINA = """
             cursor: pointer;
         }
         .btn-salvar:hover { background: #388bfd; }
+        .ja-apostado {
+            color: #d29922;
+            font-size: 0.78rem;
+            margin-top: 8px;
+        }
         .link-voltar {
             color: #8b949e;
             text-decoration: none;
@@ -261,6 +266,9 @@ PAGINA = """
                     <span>Probabilidade histórica: <b>{{ c.probabilidade_combinada }}%</b></span>
                     <span>Valor esperado: <b>{{ c.valor_esperado }}</b></span>
                 </div>
+                {% if c.ja_apostado %}
+                <div class="ja-apostado">💰 R$ {{ "%.2f"|format(c.ja_apostado) }} já apostado nessa odd</div>
+                {% endif %}
                 <form method="POST" action="/salvar-aposta" class="salvar-linha">
                     <input type="hidden" name="descricao" value="{{ c.descricao }}">
                     <input type="hidden" name="casa_aposta" value="{{ c.casa_aposta }}">
@@ -459,6 +467,7 @@ PAGINA_HISTORICO = """
             padding: 8px 16px; font-size: 0.82rem; font-weight: 600; cursor: pointer;
         }
         .btn-salvar:hover { background: #388bfd; }
+        .ja-apostado { color: #d29922; font-size: 0.78rem; margin-top: 8px; }
         .odd-tag {
             background: #23863622; color: #3fb950; font-weight: 700; font-size: 1rem;
             padding: 3px 12px; border-radius: 8px;
@@ -514,13 +523,7 @@ PAGINA_HISTORICO = """
         depois que um jogo termina e o script de arquivamento processa o resultado.</div>
     {% endif %}
 
-    <h2 class="secao-titulo">⭐ Múltiplas em destaque</h2>
-    <p class="secao-subtitulo">Combinações geradas agora com probabilidade histórica de {{ piso }}% ou mais
-        - só pra referência, não precisa ter apostado nelas. Se quiser registrar uma pra acompanhar no
-        ROI, salva com o valor apostado.</p>
-
-    {% if multiplas_destaque %}
-        {% for c in multiplas_destaque %}
+    {% for c in multiplas_destaque %}
         <div class="cartao">
             <div class="cartao-topo">
                 <span class="jogo">{{ c.data_jogo }} · Corinthians x {{ c.adversario }}</span>
@@ -532,6 +535,9 @@ PAGINA_HISTORICO = """
                 <span>Probabilidade histórica: <b>{{ c.probabilidade_combinada }}%</b></span>
                 <span>Valor esperado: <b>{{ c.valor_esperado }}</b></span>
             </div>
+            {% if c.ja_apostado %}
+            <div class="ja-apostado">💰 R$ {{ "%.2f"|format(c.ja_apostado) }} já apostado nessa odd</div>
+            {% endif %}
             <form method="POST" action="/salvar-aposta" class="salvar-linha">
                 <input type="hidden" name="descricao" value="{{ c.descricao }}">
                 <input type="hidden" name="casa_aposta" value="{{ c.casa_aposta }}">
@@ -544,10 +550,6 @@ PAGINA_HISTORICO = """
             </form>
         </div>
         {% endfor %}
-    {% else %}
-        <div class="vazio">Nenhuma múltipla com {{ piso }}% ou mais de probabilidade histórica
-        no momento.</div>
-    {% endif %}
 </body>
 </html>
 """
@@ -610,6 +612,7 @@ def historico():
         itens = buscar_historico(cur)
         resumo = buscar_resumo_historico(cur)
         multiplas_destaque = buscar_multiplas_destaque(cur)
+        aplicar_totais_apostados(multiplas_destaque, buscar_totais_apostados(cur))
         cur.close()
     finally:
         conn.close()
@@ -652,6 +655,25 @@ def salvar_aposta():
         conn.close()
 
     return redirect(voltar)
+
+
+@app.route("/cancelar-aposta", methods=["POST"])
+def cancelar_aposta():
+    """NOVO: cancela (apaga) uma aposta salva, só se ela ainda estiver
+    'pendente' - não deixa cancelar uma aposta que já foi resolvida
+    (acertou/errou), já que isso já aconteceu de verdade."""
+    aposta_id = request.form["aposta_id"]
+
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM apostas_salvas WHERE id = %s AND resultado = 'pendente'", (aposta_id,))
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+    return redirect("/minhas-apostas")
 
 
 PAGINA_ROI = """
@@ -704,6 +726,21 @@ PAGINA_ROI = """
         .badge-pendente { background: #8b949e22; color: #8b949e; }
         .retorno-positivo { color: #3fb950; }
         .retorno-negativo { color: #f85149; }
+        .salvar-linha {
+            display: flex; gap: 8px; align-items: center; margin-top: 10px;
+            padding-top: 10px; border-top: 1px solid #21262d;
+        }
+        .btn-cancelar {
+            background: transparent;
+            color: #f85149;
+            border: 1px solid #f85149;
+            border-radius: 8px;
+            padding: 7px 14px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-cancelar:hover { background: #f8514922; }
         .vazio {
             text-align: center; color: #8b949e; padding: 32px 24px;
             background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
@@ -766,6 +803,12 @@ PAGINA_ROI = """
                     R$ {{ a.retorno }}</b></span>
                 {% endif %}
             </div>
+            {% if a.resultado == 'pendente' %}
+            <form method="POST" action="/cancelar-aposta" class="salvar-linha">
+                <input type="hidden" name="aposta_id" value="{{ a.id }}">
+                <button type="submit" class="btn-cancelar">❌ Cancelar aposta</button>
+            </form>
+            {% endif %}
         </div>
         {% endfor %}
     {% else %}
@@ -821,12 +864,13 @@ def resolver_apostas_pendentes(cur):
 def buscar_apostas_salvas(cur):
     cur.execute(
         """
-        SELECT descricao, casa_aposta, odd_combinada, valor_apostado, resultado, retorno, criado_em
+        SELECT id, descricao, casa_aposta, odd_combinada, valor_apostado, resultado, retorno, criado_em
         FROM apostas_salvas
         ORDER BY criado_em DESC
         """
     )
-    colunas = ["descricao", "casa_aposta", "odd_combinada", "valor_apostado", "resultado", "retorno", "criado_em"]
+    colunas = ["id", "descricao", "casa_aposta", "odd_combinada", "valor_apostado",
+               "resultado", "retorno", "criado_em"]
     return [dict(zip(colunas, row)) for row in cur.fetchall()]
 
 
@@ -901,6 +945,19 @@ def minhas_apostas():
     )
 
 
+def buscar_totais_apostados(cur):
+    """NOVO: soma o valor já apostado por (descricao, casa_aposta), pra
+    mostrar um aviso tipo "R$ X já apostado nessa odd" - não impede apostar
+    de novo na mesma odd, é só informativo."""
+    cur.execute("SELECT descricao, casa_aposta, SUM(valor_apostado) FROM apostas_salvas GROUP BY descricao, casa_aposta")
+    return {(row[0], row[1]): float(row[2]) for row in cur.fetchall()}
+
+
+def aplicar_totais_apostados(combinacoes, totais_apostados):
+    for c in combinacoes:
+        c["ja_apostado"] = totais_apostados.get((c["descricao"], c["casa_aposta"]))
+
+
 @app.route("/")
 def index():
     odd_min = request.args.get("odd_min", "1.5")
@@ -915,6 +972,7 @@ def index():
             cur = conn.cursor()
             recomendacoes = buscar_recomendacoes(cur)
             combinacoes = montar_combinacoes(recomendacoes, float(odd_min), float(odd_max))
+            aplicar_totais_apostados(combinacoes, buscar_totais_apostados(cur))
             if not combinacoes:
                 motivo = descobrir_motivo(cur)
             cur.close()
