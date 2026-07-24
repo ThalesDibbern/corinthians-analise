@@ -547,6 +547,7 @@ def calcular_recomendacoes(cur):
                 "probabilidade_historica": round(probabilidade * 100, 2),
                 "valor_esperado": valor_esperado,
                 "linha": linha,
+                "direcao": direcao_normalizada,
                 "adversario": adversario,
                 "data_jogo": data_jogo,
             })
@@ -570,12 +571,12 @@ def salvar_recomendacoes(cur, recomendacoes):
         cur.execute(
             """INSERT INTO recomendacoes
                (jogo_id, jogador_id, tipo_padrao, descricao, casa_aposta,
-                odd_oferecida, probabilidade_historica, valor_esperado, linha)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                odd_oferecida, probabilidade_historica, valor_esperado, linha, direcao)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 r["jogo_id"], r["jogador_id"], r["tipo_padrao"], r["descricao"],
                 r["casa_aposta"], r["odd_oferecida"], r["probabilidade_historica"],
-                r["valor_esperado"], r.get("linha"),
+                r["valor_esperado"], r.get("linha"), r.get("direcao"),
             ),
         )
         print(f"  [{r['data_jogo']} vs {r['adversario']}] {r['descricao']} "
