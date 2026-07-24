@@ -228,6 +228,8 @@ PAGINA = """
         <a href="/historico" class="link-historico">📊 Ver histórico de acertos e erros</a>
         &nbsp;·&nbsp;
         <a href="/minhas-apostas" class="link-historico">💰 Minhas apostas (ROI)</a>
+        &nbsp;·&nbsp;
+        <a href="/jogadores" class="link-historico">📈 Estatísticas de jogadores</a>
     </p>
 
     <div class="aviso">
@@ -1032,6 +1034,201 @@ def buscar_totais_apostados(cur):
 def aplicar_totais_apostados(combinacoes, totais_apostados):
     for c in combinacoes:
         c["ja_apostado"] = totais_apostados.get((c["descricao"], c["casa_aposta"]))
+
+
+PAGINA_JOGADORES = """
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estatísticas de Jogadores - Análise de Apostas</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+            background: #0d1117; color: #e6edf3; max-width: 900px;
+            margin: 0 auto; padding: 32px 20px 80px;
+        }
+        h1 { font-size: 1.5rem; margin: 0 0 4px; }
+        .subtitulo { color: #8b949e; margin: 0 0 20px; font-size: 0.88rem; }
+        .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
+        .link-voltar:hover { text-decoration: underline; }
+        .busca {
+            width: 100%; padding: 10px 14px; margin: 16px 0 24px;
+            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+            border-radius: 8px; font-size: 0.9rem;
+        }
+        .cartao {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 16px 20px; margin-bottom: 12px;
+        }
+        .nome-jogador { font-weight: 700; font-size: 1rem; margin-bottom: 10px; }
+        .bloco { margin-bottom: 10px; }
+        .bloco-titulo { color: #8b949e; font-size: 0.78rem; text-transform: uppercase;
+            letter-spacing: 0.03em; margin-bottom: 6px; }
+        .linhas-grid { display: flex; gap: 10px; flex-wrap: wrap; }
+        .linha-item {
+            background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
+            padding: 6px 12px; font-size: 0.82rem;
+        }
+        .linha-item b { color: #3fb950; }
+        .binario-texto { font-size: 0.88rem; color: #c9d1d9; }
+        .binario-texto b { color: #3fb950; }
+        .vazio {
+            text-align: center; color: #8b949e; padding: 32px 24px;
+            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <a href="/" class="link-voltar">← Voltar</a>
+    <h1>📈 Estatísticas de Jogadores</h1>
+    <p class="subtitulo">Frequência histórica de cada jogador, direto dos padrões calculados - sem depender de odd disponível na casa de apostas.</p>
+
+    <input type="text" class="busca" id="busca" placeholder="Buscar jogador..." onkeyup="filtrar()">
+
+    <div id="lista">
+    {% if jogadores %}
+        {% for j in jogadores %}
+        <div class="cartao jogador-card">
+            <div class="nome-jogador">{{ j.nome }}</div>
+
+            {% if j.cartao %}
+            <div class="bloco">
+                <div class="bloco-titulo">Cartão</div>
+                <div class="binario-texto">Recebeu cartão em <b>{{ j.cartao.frequencia }}%</b> dos últimos
+                    {{ j.cartao.jogos_analisados }} jogos</div>
+            </div>
+            {% endif %}
+
+            {% for bloco in j.blocos_linha %}
+            <div class="bloco">
+                <div class="bloco-titulo">{{ bloco.titulo }}</div>
+                <div class="linhas-grid">
+                    {% for item in bloco.itens %}
+                    <div class="linha-item">+{{ item.linha }}: <b>{{ item.frequencia }}%</b></div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+
+            {% if j.impedimento %}
+            <div class="bloco">
+                <div class="bloco-titulo">Impedimento</div>
+                <div class="binario-texto">Ficou em impedimento em <b>{{ j.impedimento.frequencia }}%</b> dos
+                    últimos {{ j.impedimento.jogos_analisados }} jogos</div>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="vazio">Ainda não há padrões calculados pra nenhum jogador (o motor_padroes.py
+        precisa de pelo menos alguns jogos analisados por jogador).</div>
+    {% endif %}
+    </div>
+
+    <script>
+        function filtrar() {
+            const termo = document.getElementById('busca').value.toLowerCase();
+            document.querySelectorAll('.jogador-card').forEach(function(card) {
+                const nome = card.querySelector('.nome-jogador').textContent.toLowerCase();
+                card.style.display = nome.includes(termo) ? '' : 'none';
+            });
+        }
+    </script>
+</body>
+</html>
+"""
+
+NOMES_TIPO_LINHA = {
+    "falta_cometida": "Faltas cometidas",
+    "desarme": "Desarmes",
+    "chute_no_gol": "Chutes no gol",
+}
+
+
+def buscar_estatisticas_jogadores(cur):
+    """NOVO: monta a frequência histórica de cada jogador (cartão, faltas,
+    desarmes, chutes no gol, impedimento), lendo direto das tabelas de
+    padrão já calculadas pelo motor_padroes.py - não depende de nenhuma
+    odd estar disponível na casa de apostas."""
+    jogadores_dict = {}
+
+    def garantir(jogador_id, nome):
+        jogadores_dict.setdefault(jogador_id, {
+            "nome": nome, "cartao": None, "linhas": {}, "impedimento": None,
+        })
+
+    cur.execute(
+        """
+        SELECT j.id, j.nome, p.jogos_analisados, p.frequencia
+        FROM padroes_jogador_cartao p
+        JOIN jogadores j ON j.id = p.jogador_id
+        """
+    )
+    for jogador_id, nome, jogos_analisados, frequencia in cur.fetchall():
+        garantir(jogador_id, nome)
+        jogadores_dict[jogador_id]["cartao"] = {
+            "jogos_analisados": jogos_analisados, "frequencia": float(frequencia),
+        }
+
+    cur.execute(
+        """
+        SELECT j.id, j.nome, p.tipo, p.linha, p.jogos_analisados, p.frequencia
+        FROM padroes_jogador_linha p
+        JOIN jogadores j ON j.id = p.jogador_id
+        ORDER BY p.linha
+        """
+    )
+    for jogador_id, nome, tipo, linha, jogos_analisados, frequencia in cur.fetchall():
+        garantir(jogador_id, nome)
+        jogadores_dict[jogador_id]["linhas"].setdefault(tipo, []).append({
+            "linha": float(linha), "frequencia": float(frequencia),
+        })
+
+    cur.execute(
+        """
+        SELECT j.id, j.nome, p.jogos_analisados, p.frequencia
+        FROM padroes_jogador_frequencia p
+        JOIN jogadores j ON j.id = p.jogador_id
+        WHERE p.tipo = 'impedimento'
+        """
+    )
+    for jogador_id, nome, jogos_analisados, frequencia in cur.fetchall():
+        garantir(jogador_id, nome)
+        jogadores_dict[jogador_id]["impedimento"] = {
+            "jogos_analisados": jogos_analisados, "frequencia": float(frequencia),
+        }
+
+    lista = []
+    for dados in jogadores_dict.values():
+        blocos_linha = [
+            {"titulo": NOMES_TIPO_LINHA.get(tipo, tipo), "itens": itens}
+            for tipo, itens in dados["linhas"].items()
+        ]
+        lista.append({
+            "nome": dados["nome"],
+            "cartao": dados["cartao"],
+            "impedimento": dados["impedimento"],
+            "blocos_linha": blocos_linha,
+        })
+
+    lista.sort(key=lambda p: p["nome"])
+    return lista
+
+
+@app.route("/jogadores")
+def jogadores():
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        lista = buscar_estatisticas_jogadores(cur)
+        cur.close()
+    finally:
+        conn.close()
+
+    return render_template_string(PAGINA_JOGADORES, jogadores=lista)
 
 
 @app.route("/")
