@@ -232,12 +232,6 @@ PAGINA = """
         <a href="/jogadores" class="link-historico">📈 Estatísticas de jogadores</a>
     </p>
 
-    <div class="aviso">
-        ⚠️ Base de dados histórica ainda cobre 2022-2024. As recomendações abaixo
-        servem para validar o sistema - use com cautela até os dados serem
-        atualizados para a temporada atual.
-    </div>
-
     <div class="painel">
         <form method="GET" action="/">
             <div class="linha-filtro">
@@ -1079,6 +1073,20 @@ PAGINA_JOGADORES = """
             text-align: center; color: #8b949e; padding: 32px 24px;
             background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
         }
+        .clube-btn {
+            display: flex; align-items: center; gap: 12px;
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 14px 20px; margin-bottom: 24px; text-decoration: none;
+            color: #e6edf3; transition: border-color 0.15s;
+        }
+        .clube-btn:hover { border-color: #58a6ff; }
+        .clube-selo {
+            width: 40px; height: 40px; border-radius: 50%;
+            background: linear-gradient(135deg, #333 50%, #eee 50%);
+            flex-shrink: 0;
+        }
+        .clube-nome { font-weight: 700; font-size: 1rem; }
+        .clube-sub { color: #8b949e; font-size: 0.78rem; }
     </style>
 </head>
 <body>
@@ -1086,10 +1094,128 @@ PAGINA_JOGADORES = """
     <h1>📈 Estatísticas de Jogadores</h1>
     <p class="subtitulo">Frequência histórica de cada jogador, direto dos padrões calculados - sem depender de odd disponível na casa de apostas.</p>
 
+    <a href="/clube/corinthians" class="clube-btn">
+        <div class="clube-selo"></div>
+        <div>
+            <div class="clube-nome">Corinthians</div>
+            <div class="clube-sub">Ver elenco e última escalação →</div>
+        </div>
+    </a>
+
+    <input type="text" class="busca" id="busca" placeholder="Buscar jogador..." onkeyup="filtrar()">
+
+    <div id="lista">
+    {% if jogadores %}
+        {% for j in jogadores %}
+        <div class="cartao jogador-card">
+            <div class="nome-jogador">{{ j.nome }}</div>
+
+            {% if j.cartao %}
+            <div class="bloco">
+                <div class="bloco-titulo">Cartão</div>
+                <div class="binario-texto">Recebeu cartão em <b>{{ j.cartao.frequencia }}%</b> dos últimos
+                    {{ j.cartao.jogos_analisados }} jogos</div>
+            </div>
+            {% endif %}
+
+            {% for bloco in j.blocos_linha %}
+            <div class="bloco">
+                <div class="bloco-titulo">{{ bloco.titulo }}</div>
+                <div class="linhas-grid">
+                    {% for item in bloco.itens %}
+                    <div class="linha-item">+{{ item.linha }}: <b>{{ item.frequencia }}%</b></div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+
+            {% if j.impedimento %}
+            <div class="bloco">
+                <div class="bloco-titulo">Impedimento</div>
+                <div class="binario-texto">Ficou em impedimento em <b>{{ j.impedimento.frequencia }}%</b> dos
+                    últimos {{ j.impedimento.jogos_analisados }} jogos</div>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="vazio">Ainda não há padrões calculados pra nenhum jogador (o motor_padroes.py
+        precisa de pelo menos alguns jogos analisados por jogador).</div>
+    {% endif %}
+    </div>
+
+    <script>
+        function filtrar() {
+            const termo = document.getElementById('busca').value.toLowerCase();
+            document.querySelectorAll('.jogador-card').forEach(function(card) {
+                const nome = card.querySelector('.nome-jogador').textContent.toLowerCase();
+                card.style.display = nome.includes(termo) ? '' : 'none';
+            });
+        }
+    </script>
+</body>
+</html>
+"""
+
+PAGINA_CLUBE = """
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ nome_clube }} - Análise de Apostas</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+            background: #0d1117; color: #e6edf3; max-width: 900px;
+            margin: 0 auto; padding: 32px 20px 80px;
+        }
+        h1 { font-size: 1.5rem; margin: 0 0 4px; display: flex; align-items: center; gap: 12px; }
+        .selo-titulo {
+            width: 34px; height: 34px; border-radius: 50%;
+            background: linear-gradient(135deg, #333 50%, #eee 50%);
+            flex-shrink: 0;
+        }
+        .subtitulo { color: #8b949e; margin: 0 0 20px; font-size: 0.88rem; }
+        .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
+        .link-voltar:hover { text-decoration: underline; }
+        .busca {
+            width: 100%; padding: 10px 14px; margin: 16px 0 24px;
+            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+            border-radius: 8px; font-size: 0.9rem;
+        }
+        .cartao {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 16px 20px; margin-bottom: 12px;
+        }
+        .nome-jogador { font-weight: 700; font-size: 1rem; margin-bottom: 10px; }
+        .bloco { margin-bottom: 10px; }
+        .bloco-titulo { color: #8b949e; font-size: 0.78rem; text-transform: uppercase;
+            letter-spacing: 0.03em; margin-bottom: 6px; }
+        .linhas-grid { display: flex; gap: 10px; flex-wrap: wrap; }
+        .linha-item {
+            background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
+            padding: 6px 12px; font-size: 0.82rem;
+        }
+        .linha-item b { color: #3fb950; }
+        .binario-texto { font-size: 0.88rem; color: #c9d1d9; }
+        .binario-texto b { color: #3fb950; }
+        .vazio {
+            text-align: center; color: #8b949e; padding: 32px 24px;
+            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <a href="/jogadores" class="link-voltar">← Voltar</a>
+    <h1><span class="selo-titulo"></span> {{ nome_clube }}</h1>
+    <p class="subtitulo">Elenco completo e última escalação titular confirmada.</p>
+
     {% if ultima_escalacao %}
     <div class="cartao">
         <div class="nome-jogador">🟢 Última escalação titular</div>
-        <div class="bloco-titulo">{{ ultima_escalacao.data_jogo }} · Corinthians x {{ ultima_escalacao.adversario }}</div>
+        <div class="bloco-titulo">{{ ultima_escalacao.data_jogo }} · {{ nome_clube }} x {{ ultima_escalacao.adversario }}</div>
         <div class="linhas-grid">
             {% for nome in ultima_escalacao.titulares %}
             <div class="linha-item">{{ nome }}</div>
@@ -1135,8 +1261,7 @@ PAGINA_JOGADORES = """
         </div>
         {% endfor %}
     {% else %}
-        <div class="vazio">Ainda não há padrões calculados pra nenhum jogador (o motor_padroes.py
-        precisa de pelo menos alguns jogos analisados por jogador).</div>
+        <div class="vazio">Ainda não há padrões calculados pra nenhum jogador desse clube.</div>
     {% endif %}
     </div>
 
@@ -1276,12 +1401,32 @@ def jogadores():
     try:
         cur = conn.cursor()
         lista = buscar_estatisticas_jogadores(cur)
+        cur.close()
+    finally:
+        conn.close()
+
+    return render_template_string(PAGINA_JOGADORES, jogadores=lista)
+
+
+@app.route("/clube/corinthians")
+def clube_corinthians():
+    """NOVO: página específica do clube - hoje só existe o Corinthians, mas
+    a estrutura já fica pronta pra quando outros clubes forem adicionados
+    (cada um com sua própria rota /clube/<slug>). Mostra todos os
+    jogadores ativos do clube + a última escalação titular confirmada."""
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        lista = buscar_estatisticas_jogadores(cur)
         ultima_escalacao = buscar_ultima_escalacao_titular(cur)
         cur.close()
     finally:
         conn.close()
 
-    return render_template_string(PAGINA_JOGADORES, jogadores=lista, ultima_escalacao=ultima_escalacao)
+    return render_template_string(
+        PAGINA_CLUBE, jogadores=lista, ultima_escalacao=ultima_escalacao,
+        nome_clube="Corinthians",
+    )
 
 
 @app.route("/")
