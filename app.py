@@ -149,11 +149,52 @@ PAGINA = """
             font-size: 0.82rem;
             margin-bottom: 24px;
         }
+        .link-historico {
+            color: #58a6ff;
+            text-decoration: none;
+            font-size: 0.88rem;
+        }
+        .link-historico:hover { text-decoration: underline; }
+        .link-voltar {
+            color: #8b949e;
+            text-decoration: none;
+            font-size: 0.85rem;
+        }
+        .link-voltar:hover { text-decoration: underline; }
+        .resumo-grid {
+            display: flex;
+            gap: 14px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+        .resumo-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 16px 22px;
+            flex: 1;
+            min-width: 130px;
+            text-align: center;
+        }
+        .resumo-numero { font-size: 1.6rem; font-weight: 700; }
+        .resumo-label { color: #8b949e; font-size: 0.78rem; margin-top: 4px; }
+        .badge {
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 999px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .badge-acertou { background: #23863622; color: #3fb950; }
+        .badge-errou { background: #f8514922; color: #f85149; }
+        .badge-pendente { background: #8b949e22; color: #8b949e; }
     </style>
 </head>
 <body>
     <h1>⚫⚪ Análise de Apostas</h1>
     <p class="subtitulo">Recomendações de múltiplas do Corinthians baseadas em padrões históricos</p>
+    <p><a href="/historico" class="link-historico">📊 Ver histórico de acertos e erros</a></p>
 
     <div class="aviso">
         ⚠️ Base de dados histórica ainda cobre 2022-2024. As recomendações abaixo
@@ -301,6 +342,150 @@ def descobrir_motivo(cur):
 
     return ("Tem jogo e odds coletadas, mas nenhum padrão histórico correspondente "
             "foi encontrado ainda para os mercados disponíveis.")
+
+
+PAGINA_HISTORICO = """
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Histórico - Análise de Apostas</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+            background: #0d1117;
+            color: #e6edf3;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 32px 20px 80px;
+        }
+        h1 { font-size: 1.5rem; margin: 0 0 4px; }
+        .subtitulo { color: #8b949e; margin: 0 0 20px; }
+        .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
+        .link-voltar:hover { text-decoration: underline; }
+        .resumo-grid { display: flex; gap: 14px; margin: 20px 0 28px; flex-wrap: wrap; }
+        .resumo-card {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 16px 22px; flex: 1; min-width: 130px; text-align: center;
+        }
+        .resumo-numero { font-size: 1.6rem; font-weight: 700; }
+        .resumo-label { color: #8b949e; font-size: 0.78rem; margin-top: 4px; }
+        .cartao {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 16px 20px; margin-bottom: 12px;
+        }
+        .cartao-topo {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 8px; flex-wrap: wrap; gap: 8px;
+        }
+        .jogo { font-weight: 600; font-size: 0.88rem; }
+        .descricao { color: #c9d1d9; font-size: 0.88rem; margin-bottom: 8px; line-height: 1.5; }
+        .metricas { display: flex; gap: 18px; font-size: 0.78rem; color: #8b949e; flex-wrap: wrap; }
+        .metricas b { color: #e6edf3; }
+        .badge {
+            font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+            text-transform: uppercase; letter-spacing: 0.03em;
+        }
+        .badge-acertou { background: #23863622; color: #3fb950; }
+        .badge-errou { background: #f8514922; color: #f85149; }
+        .badge-pendente { background: #8b949e22; color: #8b949e; }
+        .vazio {
+            text-align: center; color: #8b949e; padding: 32px 24px;
+            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <a href="/" class="link-voltar">← Voltar</a>
+    <h1>📊 Histórico de Acertos e Erros</h1>
+    <p class="subtitulo">Recomendações já avaliadas contra o resultado real dos jogos</p>
+
+    <div class="resumo-grid">
+        <div class="resumo-card">
+            <div class="resumo-numero" style="color:#3fb950">{{ resumo.acertou }}</div>
+            <div class="resumo-label">Acertou</div>
+        </div>
+        <div class="resumo-card">
+            <div class="resumo-numero" style="color:#f85149">{{ resumo.errou }}</div>
+            <div class="resumo-label">Errou</div>
+        </div>
+        <div class="resumo-card">
+            <div class="resumo-numero" style="color:#8b949e">{{ resumo.pendente }}</div>
+            <div class="resumo-label">Pendente</div>
+        </div>
+        <div class="resumo-card">
+            <div class="resumo-numero">{{ resumo.taxa }}%</div>
+            <div class="resumo-label">Taxa de acerto (avaliadas)</div>
+        </div>
+    </div>
+
+    {% if itens %}
+        {% for i in itens %}
+        <div class="cartao">
+            <div class="cartao-topo">
+                <span class="jogo">{{ i.data_jogo }} · Corinthians x {{ i.adversario }}</span>
+                <span class="badge badge-{{ i.resultado }}">{{ i.resultado }}</span>
+            </div>
+            <div class="descricao">{{ i.descricao }}</div>
+            <div class="metricas">
+                <span>{{ i.casa_aposta }}</span>
+                <span>Odd: <b>{{ i.odd_oferecida }}</b></span>
+                <span>Probabilidade: <b>{{ i.probabilidade_historica }}%</b></span>
+                <span>VE: <b>{{ i.valor_esperado }}</b></span>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="vazio">Ainda não há recomendações avaliadas - isso acontece automaticamente
+        depois que um jogo termina e o script de arquivamento processa o resultado.</div>
+    {% endif %}
+</body>
+</html>
+"""
+
+
+def buscar_historico(cur, limite=100):
+    cur.execute(
+        """
+        SELECT h.data_jogo, j.adversario, h.descricao, h.casa_aposta,
+               h.odd_oferecida, h.probabilidade_historica, h.valor_esperado, h.resultado
+        FROM historico_recomendacoes h
+        JOIN jogos j ON j.id = h.jogo_id
+        ORDER BY h.data_jogo DESC, h.id DESC
+        LIMIT %s
+        """,
+        (limite,),
+    )
+    colunas = ["data_jogo", "adversario", "descricao", "casa_aposta",
+               "odd_oferecida", "probabilidade_historica", "valor_esperado", "resultado"]
+    return [dict(zip(colunas, row)) for row in cur.fetchall()]
+
+
+def buscar_resumo_historico(cur):
+    cur.execute("SELECT resultado, COUNT(*) FROM historico_recomendacoes GROUP BY resultado")
+    contagem = dict(cur.fetchall())
+    acertou = contagem.get("acertou", 0)
+    errou = contagem.get("errou", 0)
+    pendente = contagem.get("pendente", 0)
+    total_avaliado = acertou + errou
+    taxa = round(100 * acertou / total_avaliado, 1) if total_avaliado else 0
+    return {"acertou": acertou, "errou": errou, "pendente": pendente, "taxa": taxa}
+
+
+@app.route("/historico")
+def historico():
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        itens = buscar_historico(cur)
+        resumo = buscar_resumo_historico(cur)
+        cur.close()
+    finally:
+        conn.close()
+
+    return render_template_string(PAGINA_HISTORICO, itens=itens, resumo=resumo)
 
 
 @app.route("/")
