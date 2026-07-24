@@ -527,27 +527,15 @@ PAGINA_HISTORICO = """
         <div class="cartao">
             <div class="cartao-topo">
                 <span class="jogo">{{ c.data_jogo }} · Corinthians x {{ c.adversario }}</span>
-                <span class="casa">{{ c.casa_aposta }}</span>
-                <span class="odd-tag">ODD {{ c.odd_combinada }}</span>
+                <span class="badge badge-{{ c.resultado }}">{{ c.resultado }}</span>
             </div>
             <div class="descricao">{{ c.descricao }}</div>
             <div class="metricas">
+                <span>{{ c.casa_aposta }}</span>
+                <span>Odd: <b>{{ c.odd_combinada }}</b></span>
                 <span>Probabilidade histórica: <b>{{ c.probabilidade_combinada }}%</b></span>
                 <span>Valor esperado: <b>{{ c.valor_esperado }}</b></span>
             </div>
-            {% if c.ja_apostado %}
-            <div class="ja-apostado">💰 R$ {{ "%.2f"|format(c.ja_apostado) }} já apostado nessa odd</div>
-            {% endif %}
-            <form method="POST" action="/salvar-aposta" class="salvar-linha">
-                <input type="hidden" name="descricao" value="{{ c.descricao }}">
-                <input type="hidden" name="casa_aposta" value="{{ c.casa_aposta }}">
-                <input type="hidden" name="odd_combinada" value="{{ c.odd_combinada }}">
-                <input type="hidden" name="probabilidade_combinada" value="{{ c.probabilidade_combinada }}">
-                <input type="hidden" name="pernas" value='{{ c.pernas_json }}'>
-                <input type="hidden" name="voltar" value="/historico">
-                <input type="number" step="0.01" min="0.01" name="valor_apostado" placeholder="Valor (R$)" required>
-                <button type="submit" class="btn-salvar">💾 Salvar</button>
-            </form>
         </div>
         {% endfor %}
 </body>
@@ -593,15 +581,98 @@ def buscar_resumo_historico(cur):
 PISO_PROBABILIDADE_MULTIPLAS_DESTAQUE = 40
 
 
+def buscar_recomendacoes_historico(cur):
+    """NOVO: mesma estrutura de buscar_recomendacoes, mas lendo de
+    historico_recomendacoes (jogos já concluídos) em vez de recomendacoes
+    (jogos futuros ainda ativos)."""
+    cur.execute(
+        """
+        SELECT h.jogo_id, h.jogador_id, h.descricao, h.casa_aposta,
+               h.odd_oferecida, h.probabilidade_historica, j.adversario, j.data_jogo,
+               h.tipo_padrao, h.resultado
+        FROM historico_recomendacoes h
+        JOIN jogos j ON j.id = h.jogo_id
+        """
+    )
+    return cur.fetchall()
+
+
+def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
+    """NOVO: monta combinações (1 a 5 pernas) a partir de recomendações JÁ
+    CONCLUÍDAS, calculando também o resultado real da combinação: só
+    'acertou' se TODAS as pernas acertaram; 'errou' se qualquer perna
+    errou; 'pendente' se sobrar alguma perna sem dado ainda. Filtra só as
+    combinações com probabilidade histórica >= piso, pra não poluir a lista
+    com combinações de chance muito baixa."""
+    grupos = {}
+    for rec in recomendacoes:
+        (jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo,
+         tipo_padrao, resultado_perna) = rec
+
+        chave = (jogo_id, casa)
+        grupos.setdefault(chave, []).append({
+            "jogador_id": jogador_id,
+            "tipo_padrao": tipo_padrao,
+            "descricao": descricao,
+            "odd": float(odd),
+            "probabilidade": float(prob) / 100,
+            "adversario": adversario,
+            "data_jogo": data_jogo,
+            "resultado": resultado_perna,
+        })
+
+    resultado_final = []
+    for (jogo_id, casa), pernas in grupos.items():
+        for tamanho in (1, 2, 3, 4, 5):
+            if len(pernas) < tamanho:
+                continue
+            for combo in combinations(pernas, tamanho):
+                chaves_mercado = [(p["tipo_padrao"], p["jogador_id"]) for p in combo]
+                if len(chaves_mercado) != len(set(chaves_mercado)):
+                    continue
+
+                odd_combinada = 1.0
+                prob_combinada = 1.0
+                for p in combo:
+                    odd_combinada *= p["odd"]
+                    prob_combinada *= p["probabilidade"]
+
+                prob_pct = round(prob_combinada * 100, 2)
+                if prob_pct < piso_probabilidade:
+                    continue
+
+                resultados_pernas = [p["resultado"] for p in combo]
+                if any(r == "errou" for r in resultados_pernas):
+                    resultado_combo = "errou"
+                elif all(r == "acertou" for r in resultados_pernas):
+                    resultado_combo = "acertou"
+                else:
+                    resultado_combo = "pendente"
+
+                valor_esperado = round((prob_combinada * odd_combinada) - 1, 3)
+                resultado_final.append({
+                    "casa_aposta": casa,
+                    "descricao": " + ".join(p["descricao"] for p in combo),
+                    "odd_combinada": round(odd_combinada, 2),
+                    "probabilidade_combinada": prob_pct,
+                    "valor_esperado": valor_esperado,
+                    "adversario": combo[0]["adversario"],
+                    "data_jogo": combo[0]["data_jogo"],
+                    "resultado": resultado_combo,
+                })
+
+    resultado_final.sort(key=lambda c: c["probabilidade_combinada"], reverse=True)
+    return resultado_final[:15]
+
+
 def buscar_multiplas_destaque(cur):
-    """NOVO: gera múltiplas ao vivo (mesma lógica da página principal), sem
-    filtro de odd, e filtra só as que têm probabilidade histórica >= piso -
-    lista de referência, sem relação nenhuma com dinheiro/ROI."""
-    recomendacoes = buscar_recomendacoes(cur)
-    combinacoes = montar_combinacoes(recomendacoes, odd_min=1.0, odd_max=100000)
-    destaque = [c for c in combinacoes if c["probabilidade_combinada"] >= PISO_PROBABILIDADE_MULTIPLAS_DESTAQUE]
-    destaque.sort(key=lambda c: c["probabilidade_combinada"], reverse=True)
-    return destaque[:15]
+    """NOVO: múltiplas de jogos JÁ CONCLUÍDOS (não jogos futuros ainda
+    ativos), com probabilidade histórica >= piso, mostrando o resultado
+    real de cada uma (acertou/errou/pendente) - lista de referência, sem
+    relação com dinheiro/ROI (não dá pra "apostar" num jogo que já
+    aconteceu, por isso essa lista não tem botão de salvar)."""
+    recomendacoes = buscar_recomendacoes_historico(cur)
+    return montar_combinacoes_historico(recomendacoes, PISO_PROBABILIDADE_MULTIPLAS_DESTAQUE)
 
 
 @app.route("/historico")
@@ -612,7 +683,6 @@ def historico():
         itens = buscar_historico(cur)
         resumo = buscar_resumo_historico(cur)
         multiplas_destaque = buscar_multiplas_destaque(cur)
-        aplicar_totais_apostados(multiplas_destaque, buscar_totais_apostados(cur))
         cur.close()
     finally:
         conn.close()
