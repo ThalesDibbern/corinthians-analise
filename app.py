@@ -431,6 +431,29 @@ PAGINA_HISTORICO = """
         }
         .resumo-numero { font-size: 1.6rem; font-weight: 700; }
         .resumo-label { color: #8b949e; font-size: 0.78rem; margin-top: 4px; }
+        .calibracao {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 14px 20px; margin-bottom: 24px; cursor: pointer; transition: border-color 0.15s;
+        }
+        .calibracao:hover { border-color: #58a6ff; }
+        .calibracao-titulo { font-size: 0.88rem; font-weight: 700; margin-bottom: 6px; }
+        .calibracao-nota { color: #8b949e; font-size: 0.75rem; }
+        .modal-fundo {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center;
+        }
+        .modal-caixa {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 20px 24px; max-width: 420px; width: 90%; max-height: 70vh; overflow-y: auto;
+        }
+        .modal-topo { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+        .modal-titulo { font-weight: 700; font-size: 0.95rem; }
+        .modal-fechar { cursor: pointer; color: #8b949e; font-size: 1.1rem; }
+        .modal-fechar:hover { color: #e6edf3; }
+        .modal-linha {
+            display: flex; justify-content: space-between; padding: 8px 0;
+            border-bottom: 1px solid #21262d; font-size: 0.85rem;
+        }
         .cartao {
             background: #161b22; border: 1px solid #30363d; border-radius: 12px;
             padding: 16px 20px; margin-bottom: 12px;
@@ -502,6 +525,33 @@ PAGINA_HISTORICO = """
         </div>
     </div>
 
+    {% if calibracao.melhor_faixa %}
+    <div class="calibracao" onclick="document.getElementById('modal-calibracao').style.display='flex'">
+        <div class="calibracao-titulo">📐 A maior taxa de acerto está entre {{ calibracao.melhor_faixa.inicio }}%
+            e {{ calibracao.melhor_faixa.fim }}% de probabilidade histórica</div>
+        <div class="calibracao-nota">{{ calibracao.melhor_faixa.taxa }}% de acerto nessa faixa
+            ({{ calibracao.melhor_faixa.total }} aposta(s) resolvida(s) nela) - clique pra ver o detalhamento
+            completo por probabilidade. Com poucas apostas resolvidas ainda, isso é instável - fica mais
+            confiável conforme o histórico crescer.</div>
+    </div>
+
+    <div id="modal-calibracao" class="modal-fundo" onclick="if(event.target===this) this.style.display='none'">
+        <div class="modal-caixa">
+            <div class="modal-topo">
+                <span class="modal-titulo">Acertos e erros por probabilidade histórica</span>
+                <span class="modal-fechar" onclick="document.getElementById('modal-calibracao').style.display='none'">✕</span>
+            </div>
+            {% for item in calibracao.detalhamento %}
+            <div class="modal-linha">
+                <span>{{ item.probabilidade }}%</span>
+                <span><b style="color:#f85149">{{ item.errou }}</b> erro(s) /
+                      <b style="color:#3fb950">{{ item.acertou }}</b> acerto(s)</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     {% if itens %}
         {% for i in itens %}
         <div class="cartao">
@@ -569,6 +619,58 @@ def buscar_resumo_historico(cur):
     total_avaliado = acertou + errou
     taxa = round(100 * acertou / total_avaliado, 1) if total_avaliado else 0
     return {"acertou": acertou, "errou": errou, "pendente": pendente, "taxa": taxa}
+
+
+def buscar_calibracao(cur):
+    """NOVO: checagem de calibração - mostra, pra cada valor EXATO de
+    probabilidade histórica já visto, quantas vezes acertou e quantas errou
+    (detalhamento, mostrado no pop-up), e identifica qual FAIXA de 20% em
+    20% (0-20%, 20-40%, ...) teve a maior taxa de acerto (frase de
+    destaque). Com poucas apostas resolvidas ainda, isso é instável - fica
+    mais confiável conforme o histórico crescer."""
+    cur.execute(
+        """
+        SELECT probabilidade_historica, resultado, COUNT(*)
+        FROM historico_recomendacoes
+        WHERE resultado IN ('acertou', 'errou')
+        GROUP BY probabilidade_historica, resultado
+        ORDER BY probabilidade_historica DESC
+        """
+    )
+    por_valor = {}
+    for prob, resultado, contagem in cur.fetchall():
+        prob_float = float(prob)
+        por_valor.setdefault(prob_float, {"acertou": 0, "errou": 0})
+        por_valor[prob_float][resultado] = contagem
+
+    detalhamento = [
+        {"probabilidade": prob, "acertou": dados["acertou"], "errou": dados["errou"]}
+        for prob, dados in sorted(por_valor.items(), reverse=True)
+    ]
+
+    # agrupa em faixas de 20% pra achar a de maior taxa de acerto
+    faixas = {}
+    for item in detalhamento:
+        inicio_faixa = int(item["probabilidade"] // 20) * 20
+        faixas.setdefault(inicio_faixa, {"acertou": 0, "errou": 0})
+        faixas[inicio_faixa]["acertou"] += item["acertou"]
+        faixas[inicio_faixa]["errou"] += item["errou"]
+
+    melhor_faixa = None
+    melhor_taxa = -1
+    for inicio_faixa, dados in faixas.items():
+        total = dados["acertou"] + dados["errou"]
+        if total == 0:
+            continue
+        taxa_faixa = dados["acertou"] / total
+        if taxa_faixa > melhor_taxa:
+            melhor_taxa = taxa_faixa
+            melhor_faixa = {
+                "inicio": inicio_faixa, "fim": inicio_faixa + 20,
+                "taxa": round(taxa_faixa * 100, 1), "total": total,
+            }
+
+    return {"detalhamento": detalhamento, "melhor_faixa": melhor_faixa}
 
 
 # NOVO: piso de probabilidade histórica pra uma múltipla aparecer na lista
@@ -685,13 +787,14 @@ def historico():
         cur = conn.cursor()
         itens = buscar_historico(cur)
         resumo = buscar_resumo_historico(cur)
+        calibracao = buscar_calibracao(cur)
         multiplas_destaque = buscar_multiplas_destaque(cur)
         cur.close()
     finally:
         conn.close()
 
     return render_template_string(
-        PAGINA_HISTORICO, itens=itens, resumo=resumo,
+        PAGINA_HISTORICO, itens=itens, resumo=resumo, calibracao=calibracao,
         multiplas_destaque=multiplas_destaque,
         piso=PISO_PROBABILIDADE_MULTIPLAS_DESTAQUE,
     )
