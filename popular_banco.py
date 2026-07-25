@@ -414,12 +414,14 @@ def get_or_create_jogo(cur, fixture):
     visitante_api_id = fixture["teams"]["away"]["id"]
 
     cur.execute(
-        "SELECT id, arbitro, mandante_id, visitante_id, datahora_jogo FROM jogos WHERE id = %s",
+        "SELECT id, arbitro, mandante_id, visitante_id, datahora_jogo, "
+        "placar_corinthians, placar_adversario FROM jogos WHERE id = %s",
         (fixture_id,),
     )
     row = cur.fetchone()
     if row:
-        jogo_id, arbitro_salvo, mandante_id_salvo, visitante_id_salvo, datahora_salva = row
+        (jogo_id, arbitro_salvo, mandante_id_salvo, visitante_id_salvo, datahora_salva,
+         placar_cor_salvo, placar_adv_salvo) = row
         # backfill: jogo já existia (de antes dessa funcionalidade) mas
         # está sem árbitro salvo, e agora a API nos deu esse dado - atualiza.
         if arbitro_salvo is None and arbitro:
@@ -441,6 +443,24 @@ def get_or_create_jogo(cur, fixture):
                 "UPDATE jogos SET datahora_jogo = %s WHERE id = %s",
                 (fixture["fixture"]["date"], fixture_id),
             )
+
+        # NOVO: backfill de placar - esse é o bug real que resolvemos agora.
+        # Jogo criado antes de acontecer (pelo atualizar_odds.py, sem placar
+        # nenhum ainda) nunca tinha o placar preenchido depois, mesmo esse
+        # script (popular_banco.py) já tendo o resultado real disponível -
+        # fazia o mercado de "Resultado Final" ficar pendente pra sempre,
+        # mesmo com o jogo já concluído há dias.
+        if placar_cor_salvo is None or placar_adv_salvo is None:
+            gol_home = fixture["goals"]["home"]
+            gol_away = fixture["goals"]["away"]
+            if gol_home is not None and gol_away is not None:
+                eh_mandante_backfill = mandante_api_id == TEAM_ID
+                novo_placar_cor = gol_home if eh_mandante_backfill else gol_away
+                novo_placar_adv = gol_away if eh_mandante_backfill else gol_home
+                cur.execute(
+                    "UPDATE jogos SET placar_corinthians = %s, placar_adversario = %s WHERE id = %s",
+                    (novo_placar_cor, novo_placar_adv, fixture_id),
+                )
         return jogo_id
 
     data_jogo = fixture["fixture"]["date"][:10]
