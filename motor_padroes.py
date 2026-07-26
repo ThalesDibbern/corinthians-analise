@@ -292,20 +292,20 @@ def calcular_padroes_escanteio_total(cur):
     return resultados, jogos_analisados
 
 
-def salvar_padroes_escanteio_total(cur, resultados):
+def salvar_padroes_escanteio_total(cur, resultados, time_id):
     for linha, jogos_analisados, jogos_acima, frequencia, media in resultados:
         cur.execute(
             """
-            INSERT INTO padroes_escanteio_total (linha, jogos_analisados, jogos_acima_da_linha, frequencia, media, atualizado_em)
-            VALUES (%s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (linha) DO UPDATE SET
+            INSERT INTO padroes_escanteio_total (time_id, linha, jogos_analisados, jogos_acima_da_linha, frequencia, media, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, linha) DO UPDATE SET
                 jogos_analisados = EXCLUDED.jogos_analisados,
                 jogos_acima_da_linha = EXCLUDED.jogos_acima_da_linha,
                 frequencia = EXCLUDED.frequencia,
                 media = EXCLUDED.media,
                 atualizado_em = NOW()
             """,
-            (linha, jogos_analisados, jogos_acima, frequencia, media),
+            (time_id, linha, jogos_analisados, jogos_acima, frequencia, media),
         )
         print(f"  Mais de {linha} escanteios (total do jogo): {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
 
@@ -351,20 +351,20 @@ def calcular_padroes_cartao_total(cur):
     return resultados, jogos_analisados
 
 
-def salvar_padroes_cartao_total(cur, resultados):
+def salvar_padroes_cartao_total(cur, resultados, time_id):
     for linha, jogos_analisados, jogos_acima, frequencia, media in resultados:
         cur.execute(
             """
-            INSERT INTO padroes_cartao_total (linha, jogos_analisados, jogos_acima_da_linha, frequencia, media, atualizado_em)
-            VALUES (%s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (linha) DO UPDATE SET
+            INSERT INTO padroes_cartao_total (time_id, linha, jogos_analisados, jogos_acima_da_linha, frequencia, media, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, linha) DO UPDATE SET
                 jogos_analisados = EXCLUDED.jogos_analisados,
                 jogos_acima_da_linha = EXCLUDED.jogos_acima_da_linha,
                 frequencia = EXCLUDED.frequencia,
                 media = EXCLUDED.media,
                 atualizado_em = NOW()
             """,
-            (linha, jogos_analisados, jogos_acima, frequencia, media),
+            (time_id, linha, jogos_analisados, jogos_acima, frequencia, media),
         )
         print(f"  Mais de {linha} cartões (total do jogo): {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
 
@@ -995,11 +995,18 @@ def main():
         print("\nCalculando padrões de escanteio TOTAL do jogo (mandante + visitante)...")
         resultados_escanteio_total, jogos_analisados_escanteio_total = calcular_padroes_escanteio_total(cur)
 
+        # NOVO: id do Corinthians, usado como time_id ao salvar os padrões de
+        # total do jogo (escanteio/cartão) - prepara terreno pra multi-time,
+        # já que cada time vai precisar da sua própria frequência calculada.
+        corinthians_id = buscar_id_time(cur, "Corinthians")
+
         if not resultados_escanteio_total:
             print(f"Dados insuficientes ainda para escanteio total ({jogos_analisados_escanteio_total} jogos "
                   f"analisados, mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+        elif not corinthians_id:
+            print("  Aviso: time 'Corinthians' não encontrado na tabela `times` - pulando escanteio total.")
         else:
-            salvar_padroes_escanteio_total(cur, resultados_escanteio_total)
+            salvar_padroes_escanteio_total(cur, resultados_escanteio_total, corinthians_id)
             conn.commit()
             print(f"Concluído! Padrões de escanteio total calculados com base em "
                   f"{jogos_analisados_escanteio_total} jogo(s).")
@@ -1010,8 +1017,10 @@ def main():
         if not resultados_cartao_total:
             print(f"Dados insuficientes ainda para cartão total ({jogos_analisados_cartao_total} jogos "
                   f"analisados, mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+        elif not corinthians_id:
+            print("  Aviso: time 'Corinthians' não encontrado na tabela `times` - pulando cartão total.")
         else:
-            salvar_padroes_cartao_total(cur, resultados_cartao_total)
+            salvar_padroes_cartao_total(cur, resultados_cartao_total, corinthians_id)
             conn.commit()
             print(f"Concluído! Padrões de cartão total calculados com base em "
                   f"{jogos_analisados_cartao_total} jogo(s).")
