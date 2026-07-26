@@ -177,24 +177,27 @@ def buscar_frequencia_escanteio_time(cur, linha):
     return float(row[0]) if row else None
 
 
-def buscar_frequencia_escanteio_total(cur, linha):
+def buscar_frequencia_escanteio_total(cur, linha, time_id):
     """NOVO: frequência de escanteios do jogo INTEIRO (mandante + visitante
     somados) passar de uma linha - diferente de buscar_frequencia_escanteio_time,
-    que olha só o lado do Corinthians."""
+    que olha só o lado do Corinthians. Filtra por time_id, já que essa
+    tabela pode ter frequências diferentes calculadas pra times diferentes
+    quando outros clubes forem adicionados."""
     cur.execute(
-        "SELECT frequencia FROM padroes_escanteio_total WHERE linha = %s",
-        (linha,),
+        "SELECT frequencia FROM padroes_escanteio_total WHERE linha = %s AND time_id = %s",
+        (linha, time_id),
     )
     row = cur.fetchone()
     return float(row[0]) if row else None
 
 
-def buscar_frequencia_cartao_total(cur, linha):
+def buscar_frequencia_cartao_total(cur, linha, time_id):
     """NOVO: frequência de cartões do jogo INTEIRO (mandante + visitante
-    somados) passar de uma linha."""
+    somados) passar de uma linha. Filtra por time_id (ver docstring de
+    buscar_frequencia_escanteio_total)."""
     cur.execute(
-        "SELECT frequencia FROM padroes_cartao_total WHERE linha = %s",
-        (linha,),
+        "SELECT frequencia FROM padroes_cartao_total WHERE linha = %s AND time_id = %s",
+        (linha, time_id),
     )
     row = cur.fetchone()
     return float(row[0]) if row else None
@@ -477,7 +480,7 @@ def calcular_recomendacoes(cur):
             if frequencia_bruta is not None:
                 veio_de_confronto_direto = True
             else:
-                frequencia_bruta = buscar_frequencia_escanteio_total(cur, linha)
+                frequencia_bruta = buscar_frequencia_escanteio_total(cur, linha, corinthians_id)
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
@@ -491,7 +494,7 @@ def calcular_recomendacoes(cur):
             if frequencia_bruta is not None:
                 veio_de_confronto_direto = True
             else:
-                frequencia_bruta = buscar_frequencia_cartao_total(cur, linha)
+                frequencia_bruta = buscar_frequencia_cartao_total(cur, linha, corinthians_id)
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
