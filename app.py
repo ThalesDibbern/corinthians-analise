@@ -20,15 +20,22 @@ Variáveis de ambiente necessárias:
 
 import os
 import json
+from functools import wraps
 from itertools import combinations
 
 import requests
 import psycopg2
-from flask import Flask, render_template_string, request, redirect, Response
+from flask import Flask, render_template_string, request, redirect, Response, session, url_for
+from werkzeug.security import generate_password_hash, check_password_hash
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 app = Flask(__name__)
+# NOVO: chave usada pra assinar o cookie de sessão (login). Configure a
+# variável de ambiente SECRET_KEY no Railway com um valor aleatório - sem
+# isso, a sessão de todo mundo seria invalidada (logout forçado) toda vez
+# que o serviço reiniciar/fizer novo deploy.
+app.secret_key = os.environ.get("SECRET_KEY", "troque-essa-chave-numa-variavel-de-ambiente-SECRET_KEY")
 
 
 PAGINA = """
@@ -231,6 +238,10 @@ PAGINA = """
         <a href="/minhas-apostas" class="link-historico">💰 Minhas apostas (ROI)</a>
         &nbsp;·&nbsp;
         <a href="/jogadores" class="link-historico">📈 Estatísticas de jogadores</a>
+        &nbsp;·&nbsp;
+        <span style="color:#8b949e; font-size:0.85rem;">Olá, {{ session.usuario_nome }}</span>
+        &nbsp;·&nbsp;
+        <a href="/logout" class="link-historico">🚪 Sair</a>
     </p>
 
     <div class="painel">
@@ -800,12 +811,158 @@ def historico():
     )
 
 
+@app.before_request
+def exigir_login():
+    """NOVO: protege o app INTEIRO (não só ROI/apostas) - qualquer página,
+    sem estar logado, redireciona pro login. Exceções: a própria página de
+    login, e o proxy de escudo (é só uma imagem pública, sem dado
+    pessoal)."""
+    rotas_livres = ("login",)
+    if request.endpoint in rotas_livres or (request.endpoint or "").startswith("escudo"):
+        return
+    if request.endpoint == "static":
+        return
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
+
+PAGINA_LOGIN = """
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Análise de Apostas</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+            background: #0d1117; color: #e6edf3; max-width: 480px;
+            margin: 80px auto; padding: 0 20px; text-align: center;
+        }
+        h1 { font-size: 1.4rem; margin-bottom: 4px; }
+        .subtitulo { color: #8b949e; font-size: 0.85rem; margin-bottom: 32px; }
+        .grid-usuarios {
+            display: flex; flex-wrap: wrap; gap: 22px; justify-content: center;
+        }
+        .avatar-usuario {
+            display: flex; flex-direction: column; align-items: center; gap: 8px;
+            cursor: pointer; background: none; border: none; padding: 0;
+        }
+        .avatar-circulo {
+            width: 64px; height: 64px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            color: white; font-size: 1.5rem; font-weight: 700;
+            border: 2px solid transparent; transition: border-color 0.15s;
+        }
+        .avatar-usuario.ativo .avatar-circulo { border-color: #58a6ff; }
+        .avatar-nome { font-size: 0.82rem; color: #c9d1d9; }
+        .senha-box { display: none; margin-top: 20px; }
+        .senha-box.ativo { display: block; }
+        .senha-box input {
+            width: 100%; padding: 10px 12px; margin-bottom: 10px;
+            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+            border-radius: 8px; font-size: 0.9rem; text-align: center;
+        }
+        .senha-box button {
+            width: 100%; padding: 10px; background: #1f6feb; color: white;
+            border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600;
+            cursor: pointer;
+        }
+        .senha-box button:hover { background: #388bfd; }
+        .erro { color: #f85149; font-size: 0.82rem; margin-top: 16px; }
+        .vazio { color: #8b949e; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+    <h1>⚫⚪ Análise de Apostas</h1>
+    <p class="subtitulo">Selecione seu usuário pra entrar</p>
+
+    {% if usuarios %}
+    <div class="grid-usuarios" id="grid-usuarios">
+        {% for u in usuarios %}
+        <button type="button" class="avatar-usuario" id="avatar-{{ u.id }}"
+                onclick="selecionarUsuario({{ u.id }}, '{{ u.nome }}')">
+            <div class="avatar-circulo" style="background:{{ u.cor_avatar }};">
+                {{ u.nome[0]|upper }}
+            </div>
+            <div class="avatar-nome">{{ u.nome }}</div>
+        </button>
+        {% endfor %}
+    </div>
+
+    <div class="senha-box" id="senha-box">
+        <form method="POST">
+            <input type="hidden" name="usuario_id" id="campo-usuario-id">
+            <input type="password" name="senha" id="campo-senha" placeholder="Senha" required autofocus>
+            <button type="submit">Entrar</button>
+        </form>
+    </div>
+    {% else %}
+    <div class="vazio">Nenhum usuário cadastrado ainda.</div>
+    {% endif %}
+
+    {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+
+    <script>
+        function selecionarUsuario(id, nome) {
+            document.querySelectorAll('.avatar-usuario').forEach(el => el.classList.remove('ativo'));
+            document.getElementById('avatar-' + id).classList.add('ativo');
+            document.getElementById('campo-usuario-id').value = id;
+            document.getElementById('senha-box').classList.add('ativo');
+            document.getElementById('campo-senha').focus();
+        }
+    </script>
+</body>
+</html>
+"""
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+
+        if request.method == "GET":
+            cur.execute("SELECT id, nome, cor_avatar FROM usuarios ORDER BY nome")
+            usuarios = [{"id": r[0], "nome": r[1], "cor_avatar": r[2]} for r in cur.fetchall()]
+            cur.close()
+            return render_template_string(PAGINA_LOGIN, usuarios=usuarios, erro=None)
+
+        usuario_id = request.form.get("usuario_id")
+        senha = request.form.get("senha", "")
+
+        cur.execute("SELECT id, nome, senha_hash, cor_avatar FROM usuarios WHERE id = %s", (usuario_id,))
+        row = cur.fetchone()
+        cur.execute("SELECT id, nome, cor_avatar FROM usuarios ORDER BY nome")
+        usuarios = [{"id": r[0], "nome": r[1], "cor_avatar": r[2]} for r in cur.fetchall()]
+        cur.close()
+    finally:
+        conn.close()
+
+    if not row or not check_password_hash(row[2], senha):
+        return render_template_string(PAGINA_LOGIN, usuarios=usuarios, erro="Senha incorreta.")
+
+    session["usuario_id"] = row[0]
+    session["usuario_nome"] = row[1]
+    return redirect("/")
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+
 @app.route("/salvar-aposta", methods=["POST"])
 def salvar_aposta():
     """NOVO: salva uma aposta (individual ou múltipla) que o usuário decidiu
     apostar de verdade, com o valor apostado - alimenta a página de ROI
     (/minhas-apostas). Sem piso de probabilidade nenhum aqui - o usuário
-    pode salvar qualquer odd/múltipla mostrada em qualquer parte do site."""
+    pode salvar qualquer odd/múltipla mostrada em qualquer parte do site.
+    Cada aposta salva pertence ao usuário logado nessa sessão (o app
+    inteiro já exige login, via exigir_login)."""
     descricao = request.form["descricao"]
     casa_aposta = request.form.get("casa_aposta", "")
     odd_combinada = float(request.form["odd_combinada"])
@@ -820,10 +977,10 @@ def salvar_aposta():
         cur.execute(
             """INSERT INTO apostas_salvas
                (descricao, casa_aposta, odd_combinada, probabilidade_combinada,
-                valor_apostado, pernas)
-               VALUES (%s, %s, %s, %s, %s, %s)""",
+                valor_apostado, pernas, usuario_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
             (descricao, casa_aposta, odd_combinada, probabilidade_combinada,
-             valor_apostado, pernas_json),
+             valor_apostado, pernas_json, session["usuario_id"]),
         )
         conn.commit()
         cur.close()
@@ -837,13 +994,18 @@ def salvar_aposta():
 def cancelar_aposta():
     """NOVO: cancela (apaga) uma aposta salva, só se ela ainda estiver
     'pendente' - não deixa cancelar uma aposta que já foi resolvida
-    (acertou/errou), já que isso já aconteceu de verdade."""
+    (acertou/errou), já que isso já aconteceu de verdade. Também confere
+    que a aposta pertence a quem está logado - evita cancelar aposta de
+    outro usuário."""
     aposta_id = request.form["aposta_id"]
 
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
-        cur.execute("DELETE FROM apostas_salvas WHERE id = %s AND resultado = 'pendente'", (aposta_id,))
+        cur.execute(
+            "DELETE FROM apostas_salvas WHERE id = %s AND resultado = 'pendente' AND usuario_id = %s",
+            (aposta_id, session["usuario_id"]),
+        )
         conn.commit()
         cur.close()
     finally:
@@ -1103,13 +1265,15 @@ def resolver_apostas_pendentes(cur):
         )
 
 
-def buscar_apostas_salvas(cur):
+def buscar_apostas_salvas(cur, usuario_id):
     cur.execute(
         """
         SELECT id, descricao, casa_aposta, odd_combinada, valor_apostado, resultado, retorno, criado_em
         FROM apostas_salvas
+        WHERE usuario_id = %s
         ORDER BY criado_em DESC
-        """
+        """,
+        (usuario_id,),
     )
     colunas = ["id", "descricao", "casa_aposta", "odd_combinada", "valor_apostado",
                "resultado", "retorno", "criado_em"]
@@ -1151,7 +1315,7 @@ def minhas_apostas():
         resolver_apostas_pendentes(cur)
         conn.commit()
 
-        apostas = buscar_apostas_salvas(cur)
+        apostas = buscar_apostas_salvas(cur, session["usuario_id"])
         cur.close()
     finally:
         conn.close()
@@ -1187,11 +1351,16 @@ def minhas_apostas():
     )
 
 
-def buscar_totais_apostados(cur):
+def buscar_totais_apostados(cur, usuario_id):
     """NOVO: soma o valor já apostado por (descricao, casa_aposta), pra
-    mostrar um aviso tipo "R$ X já apostado nessa odd" - não impede apostar
-    de novo na mesma odd, é só informativo."""
-    cur.execute("SELECT descricao, casa_aposta, SUM(valor_apostado) FROM apostas_salvas GROUP BY descricao, casa_aposta")
+    mostrar um aviso tipo "R$ X já apostado nessa odd" - só das apostas do
+    usuário logado (cada um vê só o próprio "já apostado", não o dos
+    outros). Não impede apostar de novo na mesma odd, é só informativo."""
+    cur.execute(
+        "SELECT descricao, casa_aposta, SUM(valor_apostado) FROM apostas_salvas "
+        "WHERE usuario_id = %s GROUP BY descricao, casa_aposta",
+        (usuario_id,),
+    )
     return {(row[0], row[1]): float(row[2]) for row in cur.fetchall()}
 
 
@@ -2023,7 +2192,7 @@ def index():
             cur = conn.cursor()
             recomendacoes = buscar_recomendacoes(cur)
             combinacoes = montar_combinacoes(recomendacoes, float(odd_min), float(odd_max))
-            aplicar_totais_apostados(combinacoes, buscar_totais_apostados(cur))
+            aplicar_totais_apostados(combinacoes, buscar_totais_apostados(cur, session["usuario_id"]))
             if not combinacoes:
                 motivo = descobrir_motivo(cur)
             cur.close()
