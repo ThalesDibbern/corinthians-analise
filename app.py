@@ -1437,6 +1437,18 @@ PAGINA_CLUBE = """
             display: inline-flex; align-items: center; gap: 6px;
         }
         .btn-salvar:hover { background: #388bfd; }
+        .modal-caixa-grande { max-width: 720px; }
+        .aviso-tres-apostas { color: #8b949e; font-size: 0.8rem; margin-bottom: 16px; }
+        .retangulo-aposta {
+            background: #0d1117; border: 1px solid #30363d; border-radius: 12px;
+            padding: 16px 18px; margin-bottom: 16px;
+        }
+        .retangulo-titulo { font-weight: 700; font-size: 0.95rem; margin-bottom: 8px; }
+        .retangulo-pernas { font-size: 0.8rem; color: #c9d1d9; margin-bottom: 8px; line-height: 1.6; }
+        .retangulo-prob {
+            font-size: 0.82rem; color: #3fb950; font-weight: 700; margin-bottom: 10px;
+        }
+        .retangulo-vazio { color: #8b949e; font-size: 0.82rem; font-style: italic; }
     </style>
 </head>
 <body>
@@ -1469,7 +1481,7 @@ PAGINA_CLUBE = """
         as apostas manuais criadas abaixo são pra esse jogo.
     </div>
     <div class="botoes-topo">
-        <button class="btn-acao" onclick="gerarMelhores()">🎯 Gerar melhores estatísticas</button>
+        <button class="btn-acao" onclick="gerarTresApostas()">🎯 Gerar 3 apostas automáticas</button>
         <button class="btn-acao" onclick="limparSelecao()">🧹 Limpar seleção</button>
     </div>
     {% endif %}
@@ -1581,6 +1593,17 @@ PAGINA_CLUBE = """
             </form>
         </div>
     </div>
+    <div id="modal-tres-apostas" class="modal-fundo" onclick="if(event.target===this) this.style.display='none'">
+        <div class="modal-caixa modal-caixa-grande">
+            <div class="modal-topo">
+                <span class="modal-titulo">3 apostas geradas automaticamente</span>
+                <span class="modal-fechar" onclick="document.getElementById('modal-tres-apostas').style.display='none'">✕</span>
+            </div>
+            <p class="aviso-tres-apostas">No máximo 1 jogador pode se repetir entre as 3 apostas (sempre o de
+                maior probabilidade histórica) - os demais aparecem em só uma delas.</p>
+            <div id="tres-apostas-container"></div>
+        </div>
+    </div>
     {% endif %}
 
     <script>
@@ -1609,19 +1632,113 @@ PAGINA_CLUBE = """
             atualizarCarrinho();
         }
 
-        function gerarMelhores() {
-            // NOVO: seleciona automaticamente as melhores estatísticas -
-            // frequência abaixo de 85% (casas de aposta não costumam
-            // liberar mercado com quase 100% de chance) e ordenadas da
-            // maior pra menor, limitado a 6 pra não gerar múltipla
-            // gigante com odd combinada absurda.
-            limparSelecao();
+        function gerarTresApostas() {
+            // NOVO: em vez de uma única múltipla com 6 estatísticas (muito
+            // fácil de errar, já que uma múltipla só acerta se TODAS as
+            // pernas acertarem), monta 3 apostas separadas e menores
+            // (3-4 pernas cada), diversificando entre jogadores diferentes.
+            // Regra: no máximo 1 jogador pode aparecer em mais de uma das
+            // 3 apostas - e esse jogador tem que ser o de maior
+            // probabilidade histórica entre todos os candidatos. Os demais
+            // jogadores aparecem em, no máximo, uma aposta.
+            const MAX_PERNAS_POR_APOSTA = 4;
+            const PISO_FREQUENCIA = 85;
+
             const candidatos = Array.from(document.querySelectorAll('.item-selecionavel'))
-                .filter(el => parseFloat(el.dataset.frequencia) < 85)
-                .sort((a, b) => parseFloat(b.dataset.frequencia) - parseFloat(a.dataset.frequencia))
-                .slice(0, 6);
-            candidatos.forEach(el => el.checked = true);
-            atualizarCarrinho();
+                .map(el => ({
+                    jogadorId: el.dataset.jogadorId,
+                    jogadorNome: el.dataset.jogadorNome,
+                    tipo: el.dataset.tipo,
+                    linha: el.dataset.linha,
+                    direcao: el.dataset.direcao,
+                    frequencia: parseFloat(el.dataset.frequencia),
+                    descricao: el.dataset.descricao,
+                }))
+                .filter(c => c.frequencia < PISO_FREQUENCIA)
+                .sort((a, b) => b.frequencia - a.frequencia);
+
+            if (candidatos.length === 0) {
+                alert('Nenhuma estatística disponível abaixo de 85% de probabilidade no momento.');
+                return;
+            }
+
+            const melhorJogadorId = candidatos[0].jogadorId;
+            const apostas = [[], [], []];
+            const jogadoresUsados = new Set();
+            let melhorJogadorUsos = 0;
+
+            for (const candidato of candidatos) {
+                const jaUsado = jogadoresUsados.has(candidato.jogadorId);
+                const podeRepetir = candidato.jogadorId === melhorJogadorId && melhorJogadorUsos < 2;
+                if (jaUsado && !podeRepetir) continue;
+
+                // acha a aposta com menos pernas que ainda não tem esse jogador e não está cheia
+                let destino = null;
+                for (const aposta of apostas) {
+                    if (aposta.length >= MAX_PERNAS_POR_APOSTA) continue;
+                    if (aposta.some(p => p.jogadorId === candidato.jogadorId)) continue;
+                    if (destino === null || aposta.length < destino.length) destino = aposta;
+                }
+                if (destino === null) continue;
+
+                destino.push(candidato);
+                if (!jaUsado) {
+                    jogadoresUsados.add(candidato.jogadorId);
+                    if (candidato.jogadorId === melhorJogadorId) melhorJogadorUsos++;
+                } else {
+                    melhorJogadorUsos++;
+                }
+            }
+
+            renderizarTresApostas(apostas);
+            document.getElementById('modal-tres-apostas').style.display = 'flex';
+        }
+
+        function renderizarTresApostas(apostas) {
+            const container = document.getElementById('tres-apostas-container');
+            container.innerHTML = apostas.map((aposta, i) => {
+                if (aposta.length < 3) {
+                    return `<div class="retangulo-aposta">
+                        <div class="retangulo-titulo">Aposta ${i + 1}</div>
+                        <div class="retangulo-vazio">Não há candidatos suficientes pra montar essa aposta agora.</div>
+                    </div>`;
+                }
+
+                let probCombinada = 1.0;
+                const pernas = aposta.map(c => {
+                    probCombinada *= c.frequencia / 100;
+                    return {
+                        jogo_id: {{ proximo_jogo.jogo_id if proximo_jogo else 'null' }},
+                        jogador_id: parseInt(c.jogadorId),
+                        tipo_padrao: c.tipo,
+                        linha: c.linha ? parseFloat(c.linha) : null,
+                        direcao: c.direcao,
+                        descricao: c.descricao,
+                        fonte: "manual"
+                    };
+                });
+                const probPct = (probCombinada * 100).toFixed(2);
+                const descricaoCompleta = aposta.map(c => c.descricao).join(' + ');
+                const pernasJson = JSON.stringify(pernas).replace(/"/g, '&quot;');
+
+                return `<div class="retangulo-aposta">
+                    <div class="retangulo-titulo">Aposta ${i + 1}</div>
+                    <div class="retangulo-pernas">${aposta.map(c => `• ${c.descricao} (${c.frequencia}%)`).join('<br>')}</div>
+                    <div class="retangulo-prob">📐 Probabilidade histórica: ${probPct}%</div>
+                    <form method="POST" action="/salvar-aposta" class="modal-form-linha" style="flex-direction:column;">
+                        <input type="hidden" name="descricao" value="${descricaoCompleta}">
+                        <input type="hidden" name="casa_aposta" value="Anotado manualmente">
+                        <input type="hidden" name="probabilidade_combinada" value="${probPct}">
+                        <input type="hidden" name="pernas" value='${pernasJson}'>
+                        <input type="hidden" name="voltar" value="/clube/corinthians">
+                        <div style="display:flex; gap:10px; width:100%;">
+                            <input type="number" step="0.01" min="0.01" name="valor_apostado" placeholder="Valor (R$)" required>
+                            <input type="number" step="0.01" min="1.01" name="odd_combinada" placeholder="Odd da casa" required>
+                        </div>
+                        <button type="submit" class="btn-salvar" style="width:100%; justify-content:center; margin-top:8px;">💾 Salvar Aposta ${i + 1}</button>
+                    </form>
+                </div>`;
+            }).join('');
         }
 
         function abrirModalAposta() {
