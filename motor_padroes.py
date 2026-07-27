@@ -69,6 +69,14 @@ PADROES_LINHA_JOGADOR = {
     "falta_cometida": ("faltas_cometidas", [0.5, 1.5, 2.5]),
     "desarme": ("desarmes", [0.5, 1.5, 2.5]),
     "chute_no_gol": ("chutes_no_gol", [0.5, 1.5]),
+    # NOVO: chute total (dentro + fora do gol) - diferente de "chute no gol",
+    # que já existia. Usa a coluna `chutes`, já coletada desde o início do
+    # projeto (jogador_estatisticas_jogo.chutes), nunca aproveitada até
+    # agora. Confirmado no catálogo da OddsPapi (marketType "players-shots"),
+    # mas ainda não confirmamos se a Superbet publica preço real pra esse
+    # mercado no Brasileirão - se não publicar, essa recomendação nunca
+    # aparece, sem quebrar nada.
+    "chute_total": ("chutes", [0.5, 1.5, 2.5, 3.5]),
 }
 
 # padrões simples (sim/não teve pelo menos 1 no jogo)
