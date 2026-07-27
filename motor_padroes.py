@@ -77,6 +77,14 @@ PADROES_LINHA_JOGADOR = {
     # mercado no Brasileirão - se não publicar, essa recomendação nunca
     # aparece, sem quebrar nada.
     "chute_total": ("chutes", [0.5, 1.5, 2.5, 3.5]),
+    # NOVO: faltas sofridas - confirmado que NÃO existe mercado real na
+    # OddsPapi/Superbet (nem "cometida" nem "sofrida" têm preço real hoje).
+    # Fica só como estatística informativa em /jogadores e /clube/<time>,
+    # e disponível pra "criar aposta manual" (onde o usuário anota a odd
+    # dele mesmo, sem depender de mercado nosso). O dado já era coletado
+    # desde o início do projeto (jogador_estatisticas_jogo.faltas_sofridas),
+    # nunca tinha virado padrão.
+    "falta_sofrida": ("faltas_sofridas", [0.5, 1.5, 2.5]),
 }
 
 # padrões simples (sim/não teve pelo menos 1 no jogo)
