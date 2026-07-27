@@ -1024,10 +1024,11 @@ def avaliar_perna_manual(cur, perna):
             return "acertou" if recebeu else "errou"
         return "acertou" if not recebeu else "errou"
 
-    if tipo in ("falta_cometida", "desarme", "chute_no_gol", "chute_total"):
+    if tipo in ("falta_cometida", "desarme", "chute_no_gol", "chute_total", "falta_sofrida"):
         coluna = {
             "falta_cometida": "faltas_cometidas", "desarme": "desarmes",
             "chute_no_gol": "chutes_no_gol", "chute_total": "chutes",
+            "falta_sofrida": "faltas_sofridas",
         }[tipo]
         cur.execute(
             f"SELECT {coluna} FROM jogador_estatisticas_jogo WHERE jogo_id = %s AND jogador_id = %s",
@@ -1576,6 +1577,7 @@ PAGINA_CLUBE = """
                 <span class="modal-fechar" onclick="document.getElementById('modal-aposta').style.display='none'">✕</span>
             </div>
             <div class="modal-pernas-lista" id="modal-pernas-lista"></div>
+            <div class="retangulo-prob" id="modal-prob-combinada"></div>
             <form method="POST" action="/salvar-aposta" id="form-aposta-manual">
                 <input type="hidden" name="descricao" id="campo-descricao">
                 <input type="hidden" name="casa_aposta" value="Anotado manualmente">
@@ -1764,6 +1766,8 @@ PAGINA_CLUBE = """
                 };
             });
             document.getElementById('campo-probabilidade').value = (probCombinada * 100).toFixed(2);
+            document.getElementById('modal-prob-combinada').textContent =
+                `📐 Probabilidade histórica combinada: ${(probCombinada * 100).toFixed(2)}%`;
             document.getElementById('campo-pernas').value = JSON.stringify(pernas);
 
             document.getElementById('modal-aposta').style.display = 'flex';
@@ -1792,6 +1796,8 @@ NOMES_TIPO_LINHA = {
     "falta_cometida": "Faltas cometidas",
     "desarme": "Desarmes",
     "chute_no_gol": "Chutes no gol",
+    "chute_total": "Chutes (total)",
+    "falta_sofrida": "Faltas sofridas",
 }
 
 
