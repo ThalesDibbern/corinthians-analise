@@ -996,6 +996,67 @@ PAGINA_ROI = """
 """
 
 
+def avaliar_perna_manual(cur, perna):
+    """NOVO: avalia uma perna de aposta MANUAL (montada a partir da
+    estatística de jogador, sem odd real correspondente - ver 'Criar
+    Aposta Manual' em /clube/<time>). Diferente das pernas normais (que
+    vieram de uma recomendação real, já avaliada em historico_recomendacoes),
+    essas nunca passaram pelo motor de recomendações - então a avaliação
+    aqui vai direto nas tabelas de estatística real do jogo, mesma lógica
+    usada em arquivar_recomendacoes.py."""
+    jogo_id = perna["jogo_id"]
+    jogador_id = perna.get("jogador_id")
+    tipo = perna["tipo_padrao"]
+    linha = perna.get("linha")
+    direcao = (perna.get("direcao") or "").strip().lower()
+
+    if tipo == "cartao":
+        cur.execute("SELECT 1 FROM cartoes WHERE jogo_id = %s AND jogador_id = %s", (jogo_id, jogador_id))
+        recebeu = cur.fetchone() is not None
+        cur.execute(
+            "SELECT 1 FROM jogador_estatisticas_jogo WHERE jogo_id = %s AND jogador_id = %s",
+            (jogo_id, jogador_id),
+        )
+        tem_dado = cur.fetchone() is not None
+        if not recebeu and not tem_dado:
+            return "pendente"
+        if direcao == "sim":
+            return "acertou" if recebeu else "errou"
+        return "acertou" if not recebeu else "errou"
+
+    if tipo in ("falta_cometida", "desarme", "chute_no_gol", "chute_total"):
+        coluna = {
+            "falta_cometida": "faltas_cometidas", "desarme": "desarmes",
+            "chute_no_gol": "chutes_no_gol", "chute_total": "chutes",
+        }[tipo]
+        cur.execute(
+            f"SELECT {coluna} FROM jogador_estatisticas_jogo WHERE jogo_id = %s AND jogador_id = %s",
+            (jogo_id, jogador_id),
+        )
+        row = cur.fetchone()
+        if row is None or row[0] is None:
+            return "pendente"
+        valor_real = float(row[0])
+        if direcao == "mais":
+            return "acertou" if valor_real > float(linha) else "errou"
+        return "acertou" if valor_real <= float(linha) else "errou"
+
+    if tipo == "impedimento":
+        cur.execute(
+            "SELECT impedimentos FROM jogador_estatisticas_jogo WHERE jogo_id = %s AND jogador_id = %s",
+            (jogo_id, jogador_id),
+        )
+        row = cur.fetchone()
+        if row is None or row[0] is None:
+            return "pendente"
+        ocorreu = row[0] > 0
+        if direcao == "sim":
+            return "acertou" if ocorreu else "errou"
+        return "acertou" if not ocorreu else "errou"
+
+    return "pendente"
+
+
 def resolver_apostas_pendentes(cur):
     """NOVO: pra cada aposta salva ainda 'pendente', confere se TODAS as
     pernas dela já têm resultado em historico_recomendacoes - só resolve
@@ -1009,6 +1070,10 @@ def resolver_apostas_pendentes(cur):
 
         resultados_pernas = []
         for perna in pernas:
+            if perna.get("fonte") == "manual":
+                resultados_pernas.append(avaliar_perna_manual(cur, perna))
+                continue
+
             cur.execute(
                 """SELECT resultado FROM historico_recomendacoes
                    WHERE jogo_id = %s AND descricao = %s
@@ -1313,6 +1378,65 @@ PAGINA_CLUBE = """
             text-align: center; color: #8b949e; padding: 32px 24px;
             background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
         }
+        .proximo-jogo {
+            background: #1f6feb18; border: 1px solid #1f6feb44; border-radius: 12px;
+            padding: 12px 18px; margin-bottom: 20px; font-size: 0.85rem;
+        }
+        .botoes-topo { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+        .btn-acao {
+            background: #21262d; color: #e6edf3; border: 1px solid #30363d;
+            border-radius: 8px; padding: 9px 16px; font-size: 0.85rem; font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-acao:hover { border-color: #58a6ff; }
+        .item-linha-label {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
+            padding: 6px 12px; font-size: 0.82rem; cursor: pointer;
+        }
+        .item-linha-label:has(input:checked) { border-color: #3fb950; background: #3fb95018; }
+        .item-linha-label b { color: #3fb950; }
+        .item-linha-label input { accent-color: #3fb950; }
+        .carrinho-flutuante {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: #161b22; border: 1px solid #3fb950; border-radius: 12px;
+            padding: 12px 20px; display: none; align-items: center; gap: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4); z-index: 90;
+        }
+        .carrinho-flutuante.ativo { display: flex; }
+        .carrinho-contagem { font-size: 0.85rem; }
+        .carrinho-contagem b { color: #3fb950; }
+        .btn-carrinho {
+            background: #3fb950; color: #0d1117; border: none; border-radius: 8px;
+            padding: 8px 16px; font-size: 0.85rem; font-weight: 700; cursor: pointer;
+        }
+        .modal-form-linha {
+            display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap;
+        }
+        .modal-form-linha input {
+            flex: 1; min-width: 120px; padding: 8px 12px;
+            background: #0d1117; border: 1px solid #30363d; color: #e6edf3; border-radius: 8px;
+            font-size: 0.85rem;
+        }
+        .modal-pernas-lista { font-size: 0.78rem; color: #8b949e; margin-top: 10px; max-height: 150px; overflow-y: auto; }
+        .modal-fundo {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center;
+        }
+        .modal-caixa {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 20px 24px; max-width: 420px; width: 90%; max-height: 80vh; overflow-y: auto;
+        }
+        .modal-topo { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+        .modal-titulo { font-weight: 700; font-size: 0.95rem; }
+        .modal-fechar { cursor: pointer; color: #8b949e; font-size: 1.1rem; }
+        .modal-fechar:hover { color: #e6edf3; }
+        .btn-salvar {
+            background: #1f6feb; color: white; border: none; border-radius: 8px;
+            padding: 10px 16px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+            display: inline-flex; align-items: center; gap: 6px;
+        }
+        .btn-salvar:hover { background: #388bfd; }
     </style>
 </head>
 <body>
@@ -1339,6 +1463,17 @@ PAGINA_CLUBE = """
     </div>
     {% endif %}
 
+    {% if proximo_jogo %}
+    <div class="proximo-jogo">
+        📅 Próximo jogo: <b>{{ proximo_jogo.data_jogo }} · {{ nome_clube }} x {{ proximo_jogo.adversario }}</b> -
+        as apostas manuais criadas abaixo são pra esse jogo.
+    </div>
+    <div class="botoes-topo">
+        <button class="btn-acao" onclick="gerarMelhores()">🎯 Gerar melhores estatísticas</button>
+        <button class="btn-acao" onclick="limparSelecao()">🧹 Limpar seleção</button>
+    </div>
+    {% endif %}
+
     <input type="text" class="busca" id="busca" placeholder="Buscar jogador..." onkeyup="filtrar()">
 
     <div id="lista">
@@ -1350,8 +1485,20 @@ PAGINA_CLUBE = """
             {% if j.cartao %}
             <div class="bloco">
                 <div class="bloco-titulo">Cartão</div>
+                {% if proximo_jogo %}
+                <label class="item-linha-label">
+                    <input type="checkbox" class="item-selecionavel"
+                        data-jogador-id="{{ j.jogador_id }}" data-jogador-nome="{{ j.nome }}"
+                        data-tipo="cartao" data-linha="" data-direcao="sim"
+                        data-frequencia="{{ j.cartao.frequencia }}"
+                        data-descricao="{{ j.nome }} - Receberá cartão"
+                        onchange="atualizarCarrinho()">
+                    Receberá cartão: <b>{{ j.cartao.frequencia }}%</b> (últimos {{ j.cartao.jogos_analisados }} jogos)
+                </label>
+                {% else %}
                 <div class="binario-texto">Recebeu cartão em <b>{{ j.cartao.frequencia }}%</b> dos últimos
                     {{ j.cartao.jogos_analisados }} jogos</div>
+                {% endif %}
             </div>
             {% endif %}
 
@@ -1360,7 +1507,19 @@ PAGINA_CLUBE = """
                 <div class="bloco-titulo">{{ bloco.titulo }}</div>
                 <div class="linhas-grid">
                     {% for item in bloco.itens %}
-                    <div class="linha-item">+{{ item.linha }}: <b>{{ item.frequencia }}%</b></div>
+                        {% if proximo_jogo %}
+                        <label class="item-linha-label">
+                            <input type="checkbox" class="item-selecionavel"
+                                data-jogador-id="{{ j.jogador_id }}" data-jogador-nome="{{ j.nome }}"
+                                data-tipo="{{ bloco.tipo }}" data-linha="{{ item.linha }}" data-direcao="mais"
+                                data-frequencia="{{ item.frequencia }}"
+                                data-descricao="{{ j.nome }} - {{ bloco.titulo }} - Mais de {{ item.linha }}"
+                                onchange="atualizarCarrinho()">
+                            +{{ item.linha }}: <b>{{ item.frequencia }}%</b>
+                        </label>
+                        {% else %}
+                        <div class="linha-item">+{{ item.linha }}: <b>{{ item.frequencia }}%</b></div>
+                        {% endif %}
                     {% endfor %}
                 </div>
             </div>
@@ -1369,8 +1528,20 @@ PAGINA_CLUBE = """
             {% if j.impedimento %}
             <div class="bloco">
                 <div class="bloco-titulo">Impedimento</div>
+                {% if proximo_jogo %}
+                <label class="item-linha-label">
+                    <input type="checkbox" class="item-selecionavel"
+                        data-jogador-id="{{ j.jogador_id }}" data-jogador-nome="{{ j.nome }}"
+                        data-tipo="impedimento" data-linha="" data-direcao="sim"
+                        data-frequencia="{{ j.impedimento.frequencia }}"
+                        data-descricao="{{ j.nome }} - Ficará em impedimento"
+                        onchange="atualizarCarrinho()">
+                    Impedimento: <b>{{ j.impedimento.frequencia }}%</b> (últimos {{ j.impedimento.jogos_analisados }} jogos)
+                </label>
+                {% else %}
                 <div class="binario-texto">Ficou em impedimento em <b>{{ j.impedimento.frequencia }}%</b> dos
                     últimos {{ j.impedimento.jogos_analisados }} jogos</div>
+                {% endif %}
             </div>
             {% endif %}
         </div>
@@ -1380,6 +1551,38 @@ PAGINA_CLUBE = """
     {% endif %}
     </div>
 
+    {% if proximo_jogo %}
+    <div class="carrinho-flutuante" id="carrinho">
+        <span class="carrinho-contagem"><b id="carrinho-count">0</b> estatística(s) selecionada(s)</span>
+        <button class="btn-carrinho" onclick="abrirModalAposta()">💾 Criar Aposta</button>
+    </div>
+
+    <div id="modal-aposta" class="modal-fundo" onclick="if(event.target===this) this.style.display='none'">
+        <div class="modal-caixa">
+            <div class="modal-topo">
+                <span class="modal-titulo">Criar aposta manual</span>
+                <span class="modal-fechar" onclick="document.getElementById('modal-aposta').style.display='none'">✕</span>
+            </div>
+            <div class="modal-pernas-lista" id="modal-pernas-lista"></div>
+            <form method="POST" action="/salvar-aposta" id="form-aposta-manual">
+                <input type="hidden" name="descricao" id="campo-descricao">
+                <input type="hidden" name="casa_aposta" value="Anotado manualmente">
+                <input type="hidden" name="odd_combinada" id="campo-odd">
+                <input type="hidden" name="probabilidade_combinada" id="campo-probabilidade">
+                <input type="hidden" name="pernas" id="campo-pernas">
+                <input type="hidden" name="voltar" value="/clube/corinthians">
+                <div class="modal-form-linha">
+                    <input type="number" step="0.01" min="0.01" id="input-valor" placeholder="Valor apostado (R$)" required>
+                    <input type="number" step="0.01" min="1.01" id="input-odd" placeholder="Odd dada pela casa" required>
+                </div>
+                <div class="modal-form-linha">
+                    <button type="submit" class="btn-salvar" style="width:100%; justify-content:center;">💾 Salvar aposta</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
     <script>
         function filtrar() {
             const termo = document.getElementById('busca').value.toLowerCase();
@@ -1388,6 +1591,81 @@ PAGINA_CLUBE = """
                 card.style.display = nome.includes(termo) ? '' : 'none';
             });
         }
+
+        function itensSelecionados() {
+            return Array.from(document.querySelectorAll('.item-selecionavel:checked'));
+        }
+
+        function atualizarCarrinho() {
+            const itens = itensSelecionados();
+            const carrinho = document.getElementById('carrinho');
+            if (!carrinho) return;
+            document.getElementById('carrinho-count').textContent = itens.length;
+            carrinho.classList.toggle('ativo', itens.length > 0);
+        }
+
+        function limparSelecao() {
+            document.querySelectorAll('.item-selecionavel').forEach(el => el.checked = false);
+            atualizarCarrinho();
+        }
+
+        function gerarMelhores() {
+            // NOVO: seleciona automaticamente as melhores estatísticas -
+            // frequência abaixo de 85% (casas de aposta não costumam
+            // liberar mercado com quase 100% de chance) e ordenadas da
+            // maior pra menor, limitado a 6 pra não gerar múltipla
+            // gigante com odd combinada absurda.
+            limparSelecao();
+            const candidatos = Array.from(document.querySelectorAll('.item-selecionavel'))
+                .filter(el => parseFloat(el.dataset.frequencia) < 85)
+                .sort((a, b) => parseFloat(b.dataset.frequencia) - parseFloat(a.dataset.frequencia))
+                .slice(0, 6);
+            candidatos.forEach(el => el.checked = true);
+            atualizarCarrinho();
+        }
+
+        function abrirModalAposta() {
+            const itens = itensSelecionados();
+            if (itens.length === 0) return;
+
+            const lista = document.getElementById('modal-pernas-lista');
+            lista.innerHTML = itens.map(el => `• ${el.dataset.descricao} (${el.dataset.frequencia}%)`).join('<br>');
+
+            document.getElementById('campo-descricao').value = itens.map(el => el.dataset.descricao).join(' + ');
+
+            let probCombinada = 1.0;
+            const pernas = itens.map(el => {
+                probCombinada *= parseFloat(el.dataset.frequencia) / 100;
+                return {
+                    jogo_id: {{ proximo_jogo.jogo_id if proximo_jogo else 'null' }},
+                    jogador_id: parseInt(el.dataset.jogadorId),
+                    tipo_padrao: el.dataset.tipo,
+                    linha: el.dataset.linha ? parseFloat(el.dataset.linha) : null,
+                    direcao: el.dataset.direcao,
+                    descricao: el.dataset.descricao,
+                    fonte: "manual"
+                };
+            });
+            document.getElementById('campo-probabilidade').value = (probCombinada * 100).toFixed(2);
+            document.getElementById('campo-pernas').value = JSON.stringify(pernas);
+
+            document.getElementById('modal-aposta').style.display = 'flex';
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('form-aposta-manual');
+            if (!form) return;
+            form.addEventListener('submit', function() {
+                document.getElementById('campo-odd').value = document.getElementById('input-odd').value;
+                document.getElementById('campo-descricao').value += ''; // já preenchido
+                const valorInput = document.getElementById('input-valor');
+                const valorHidden = document.createElement('input');
+                valorHidden.type = 'hidden';
+                valorHidden.name = 'valor_apostado';
+                valorHidden.value = valorInput.value;
+                form.appendChild(valorHidden);
+            });
+        });
     </script>
 </body>
 </html>
@@ -1488,12 +1766,13 @@ def buscar_estatisticas_jogadores(cur):
         }
 
     lista = []
-    for dados in jogadores_dict.values():
+    for jogador_id, dados in jogadores_dict.items():
         blocos_linha = [
-            {"titulo": NOMES_TIPO_LINHA.get(tipo, tipo), "itens": itens}
+            {"titulo": NOMES_TIPO_LINHA.get(tipo, tipo), "tipo": tipo, "itens": itens}
             for tipo, itens in dados["linhas"].items()
         ]
         lista.append({
+            "jogador_id": jogador_id,
             "nome": dados["nome"],
             "cartao": dados["cartao"],
             "impedimento": dados["impedimento"],
@@ -1544,6 +1823,31 @@ def buscar_ultima_escalacao_titular(cur):
     return {"data_jogo": data_jogo, "adversario": adversario, "titulares": titulares}
 
 
+def buscar_proximo_jogo(cur, nome_time):
+    """NOVO: busca o próximo jogo AINDA NÃO disputado do time - usado pra
+    associar apostas manuais de estatística de jogador a um jogo específico
+    (necessário pra conseguir avaliar acerto/erro depois que o jogo
+    acontecer)."""
+    cur.execute(
+        """
+        SELECT j.id, j.data_jogo, j.adversario
+        FROM jogos j
+        WHERE (j.mandante_id = (SELECT id FROM times WHERE nome = %s)
+            OR j.visitante_id = (SELECT id FROM times WHERE nome = %s))
+          AND ((j.datahora_jogo IS NOT NULL AND j.datahora_jogo >= NOW())
+            OR (j.datahora_jogo IS NULL AND j.data_jogo >= CURRENT_DATE))
+        ORDER BY COALESCE(j.datahora_jogo, j.data_jogo::timestamp) ASC
+        LIMIT 1
+        """,
+        (nome_time, nome_time),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    jogo_id, data_jogo, adversario = row
+    return {"jogo_id": jogo_id, "data_jogo": data_jogo, "adversario": adversario}
+
+
 @app.route("/jogadores")
 def jogadores():
     conn = psycopg2.connect(DATABASE_URL)
@@ -1563,12 +1867,14 @@ def clube_corinthians():
     """NOVO: página específica do clube - hoje só existe o Corinthians, mas
     a estrutura já fica pronta pra quando outros clubes forem adicionados
     (cada um com sua própria rota /clube/<slug>). Mostra todos os
-    jogadores ativos do clube + a última escalação titular confirmada."""
+    jogadores ativos do clube + a última escalação titular confirmada +
+    o próximo jogo (usado pra montar apostas manuais de estatística)."""
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
         lista = buscar_estatisticas_jogadores(cur)
         ultima_escalacao = buscar_ultima_escalacao_titular(cur)
+        proximo_jogo = buscar_proximo_jogo(cur, "Corinthians")
         escudo_url = buscar_escudo_url(cur, "Corinthians")
         cur.close()
     finally:
@@ -1576,7 +1882,7 @@ def clube_corinthians():
 
     return render_template_string(
         PAGINA_CLUBE, jogadores=lista, ultima_escalacao=ultima_escalacao,
-        nome_clube="Corinthians", escudo_url=escudo_url,
+        proximo_jogo=proximo_jogo, nome_clube="Corinthians", escudo_url=escudo_url,
     )
 
 
