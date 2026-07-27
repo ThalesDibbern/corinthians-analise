@@ -88,11 +88,12 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, d
             return "pendente"  # ainda não temos as estatísticas desse jogo
         return avaliar_binario(recebeu_cartao, d)
 
-    if tipo_padrao in ("falta_cometida", "desarme", "chute_no_gol"):
+    if tipo_padrao in ("falta_cometida", "desarme", "chute_no_gol", "chute_total"):
         coluna = {
             "falta_cometida": "faltas_cometidas",
             "desarme": "desarmes",
             "chute_no_gol": "chutes_no_gol",
+            "chute_total": "chutes",
         }[tipo_padrao]
         cur.execute(
             f"SELECT {coluna} FROM jogador_estatisticas_jogo WHERE jogo_id = %s AND jogador_id = %s",
