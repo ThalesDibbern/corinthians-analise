@@ -102,8 +102,13 @@ def identificar_tipo_padrao(mercado):
         return "falta_cometida"
     if "desarme" in nome or "tackle" in nome:
         return "desarme"
-    if "chute" in nome or "shot" in nome:
+    # NOVO: "chute no gol" precisa ser checado ANTES do genérico "chute" -
+    # senão "Chutes do Jogador" (chute total, sem "no gol" no nome) cairia
+    # por engano no tipo errado, já que "chute" sozinho bate nos dois.
+    if ("chute" in nome and "no gol" in nome) or "shotsongoal" in nome or "shots on goal" in nome:
         return "chute_no_gol"
+    if "chute" in nome or "shot" in nome:
+        return "chute_total"
     if "impediment" in nome:
         return "impedimento"
     if "escanteio" in nome or "corner" in nome:
@@ -442,7 +447,7 @@ def calcular_recomendacoes(cur):
 
                 frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
-        elif tipo in ("falta_cometida", "desarme", "chute_no_gol") and jogador_id \
+        elif tipo in ("falta_cometida", "desarme", "chute_no_gol", "chute_total") and jogador_id \
                 and direcao_normalizada in ("mais", "menos") and linha is not None:
             frequencia_bruta = buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha)
             if frequencia_bruta is not None:
