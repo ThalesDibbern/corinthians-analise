@@ -486,6 +486,23 @@ def mercado_de_tempo_parcial(nome_mercado):
     return "primeiro tempo" in nome or "segundo tempo" in nome
 
 
+def existem_odds_utilizaveis(dados_odds):
+    """NOVO: checa se a resposta da OddsPapi realmente trouxe algo
+    aproveitável (pelo menos uma casa não suspensa, com mercados). Sem essa
+    checagem, uma resposta "com sucesso" mas vazia (ex: mercados suspensos
+    temporariamente perto/durante o jogo) fazia o script apagar as odds
+    antigas (boas) e não colocar nada no lugar - o jogo ficava
+    permanentemente sem odds depois disso, mesmo tendo tido odds válidas
+    antes."""
+    bookmaker_odds = dados_odds.get("bookmakerOdds", {})
+    for info_casa in bookmaker_odds.values():
+        if info_casa.get("suspended"):
+            continue
+        if info_casa.get("markets"):
+            return True
+    return False
+
+
 def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, adversario):
     """Percorre as odds de todas as casas/mercados retornados e salva só os
     mercados de interesse (cartão de jogador + escanteios do time), incluindo
@@ -610,18 +627,20 @@ def main():
                 print(f"  Aviso: não foi possível buscar odds desse jogo ({e}). Pulando pro próximo.")
                 continue
 
-            # NOVO: apaga as odds antigas desse jogo antes de salvar as novas.
-            # Sem isso, cada execução do cron (dentro da janela de 2 dias)
-            # inseria de novo as mesmas odds com o preço daquele dia,
-            # acumulando "duplicatas" com odd/probabilidade levemente
-            # diferentes de uma execução pra outra.
-            cur.execute("DELETE FROM odds WHERE jogo_id = %s", (jogo_id,))
-
-            salvos = salvar_odds_do_jogo(
-                cur, jogo_id, dados_odds, catalogo_mercados, eh_mandante, adversario
-            )
-
-            print(f"  -> {salvos} odds salvas.")
+            # NOVO: só apaga as odds antigas se a resposta nova realmente
+            # trouxer algo aproveitável (evita zerar odds boas quando a
+            # casa suspende temporariamente os mercados, comum perto/durante
+            # o jogo - antes disso, isso deixava o jogo sem NENHUMA odd
+            # depois, mesmo tendo tido odds válidas na coleta anterior).
+            if existem_odds_utilizaveis(dados_odds):
+                cur.execute("DELETE FROM odds WHERE jogo_id = %s", (jogo_id,))
+                salvos = salvar_odds_do_jogo(
+                    cur, jogo_id, dados_odds, catalogo_mercados, eh_mandante, adversario
+                )
+                print(f"  -> {salvos} odds salvas.")
+            else:
+                print("  Aviso: nenhuma odd utilizável nessa resposta (mercados suspensos/vazios) - "
+                      "mantendo as odds já salvas desse jogo.")
             conn.commit()
 
     except Exception as e:
