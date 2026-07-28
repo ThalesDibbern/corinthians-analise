@@ -1,3 +1,4 @@
+
 """
 Interface web do projeto - Análise Corinthians.
 
@@ -305,7 +306,8 @@ def buscar_recomendacoes(cur):
     cur.execute(
         """
         SELECT r.jogo_id, r.jogador_id, r.descricao, r.casa_aposta,
-               r.odd_oferecida, r.probabilidade_historica, j.adversario, j.data_jogo, r.tipo_padrao
+               r.odd_oferecida, r.probabilidade_historica, j.adversario, j.data_jogo,
+               r.tipo_padrao, r.linha, r.direcao
         FROM recomendacoes r
         JOIN jogos j ON j.id = r.jogo_id
         """
@@ -316,7 +318,8 @@ def buscar_recomendacoes(cur):
 def montar_combinacoes(recomendacoes, odd_min, odd_max):
     grupos = {}
     for rec in recomendacoes:
-        (jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo, tipo_padrao) = rec
+        (jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo,
+         tipo_padrao, linha, direcao) = rec
 
         # resultado final (1X2) só entra como candidato quando a faixa pedida
         # permite odds acima de 5.0 (mercado de alta variância)
@@ -330,6 +333,8 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
             "descricao": descricao,
             "odd": float(odd),
             "probabilidade": float(prob) / 100,
+            "linha": float(linha) if linha is not None else None,
+            "direcao": (direcao or "").strip().lower(),
             "adversario": adversario,
             "data_jogo": data_jogo,
         })
@@ -340,34 +345,95 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
             if len(pernas) < tamanho:
                 continue
             for combo in combinations(pernas, tamanho):
-                # NOVO: antes só verificava se o mesmo JOGADOR aparecia duas
-                # vezes na múltipla. Isso não pegava o caso de duas pernas do
-                # mesmo mercado de TIME (ex: duas linhas diferentes de
-                # escanteio do mesmo jogo) - que são fortemente
-                # correlacionadas (medem a mesma coisa em pontos de corte
-                # diferentes), violando a suposição de independência usada
-                # no cálculo de probabilidade/valor esperado combinado, e
-                # inflando o VE de forma artificial. Agora a checagem é pelo
-                # par (tipo_padrao, jogador_id), que cobre tanto jogador
-                # repetido quanto mercado de time repetido.
-                chaves_mercado = [(p["tipo_padrao"], p["jogador_id"]) for p in combo]
-                if len(chaves_mercado) != len(set(chaves_mercado)):
+                # NOVO: em vez de bloquear TODA repetição de (tipo_padrao,
+                # jogador_id), agora existe uma exceção específica: duas
+                # pernas do mesmo mercado que formam uma FAIXA coerente
+                # (ex: "Mais de 3.5" + "Menos de 7.5" escanteios do
+                # Corinthians = "entre 4 e 7 escanteios"). Isso é uma
+                # aposta genuinamente nova, não uma repetição redundante -
+                # mas a probabilidade dela NÃO pode ser calculada
+                # multiplicando as duas probabilidades individuais (elas
+                # não são eventos independentes, são dois cortes da MESMA
+                # variável). A fórmula certa: P(faixa) = P(mais do corte
+                # menor) + P(menos do corte maior) - 1 - equivalente a
+                # "P(mais do corte menor) menos P(mais do corte maior)",
+                # calculada só com o que já temos, sem precisar contar
+                # jogo por jogo de novo.
+                #
+                # Qualquer OUTRA repetição de mercado (duas pernas "mais",
+                # duas "menos", ou mais de 2 pernas do mesmo mercado)
+                # continua bloqueada, exatamente como antes.
+                contagem_mercado = {}
+                for p in combo:
+                    chave_mercado = (p["tipo_padrao"], p["jogador_id"])
+                    contagem_mercado.setdefault(chave_mercado, []).append(p)
+
+                valido = True
+                faixa_chave = None
+                faixa_probabilidade = None
+
+                for chave_mercado, pernas_do_mercado in contagem_mercado.items():
+                    if len(pernas_do_mercado) == 1:
+                        continue
+                    if len(pernas_do_mercado) > 2:
+                        valido = False
+                        break
+
+                    a, b = pernas_do_mercado
+                    if a["linha"] is None or b["linha"] is None or a["direcao"] == b["direcao"] \
+                            or {a["direcao"], b["direcao"]} != {"mais", "menos"}:
+                        valido = False
+                        break
+
+                    leg_mais = a if a["direcao"] == "mais" else b
+                    leg_menos = a if a["direcao"] == "menos" else b
+
+                    # garante que é uma faixa de verdade (corte de "mais"
+                    # estritamente menor que o corte de "menos") - senão a
+                    # combinação é impossível (ex: "mais de 7.5" + "menos
+                    # de 3.5" nunca acontecem juntos)
+                    if leg_mais["linha"] >= leg_menos["linha"]:
+                        valido = False
+                        break
+
+                    prob_faixa = leg_mais["probabilidade"] + leg_menos["probabilidade"] - 1
+                    if prob_faixa <= 0:
+                        valido = False
+                        break
+
+                    faixa_chave = chave_mercado
+                    faixa_probabilidade = prob_faixa
+
+                if not valido:
                     continue
 
                 odd_combinada = 1.0
                 prob_combinada = 1.0
+                faixa_ja_contabilizada = False
                 for p in combo:
-                    odd_combinada *= p["odd"]
-                    prob_combinada *= p["probabilidade"]
+                    odd_combinada *= p["odd"]  # odd real de cada perna sempre multiplica normalmente
+                    chave_mercado = (p["tipo_padrao"], p["jogador_id"])
+                    if faixa_chave is not None and chave_mercado == faixa_chave:
+                        if not faixa_ja_contabilizada:
+                            prob_combinada *= faixa_probabilidade
+                            faixa_ja_contabilizada = True
+                        # a segunda perna da faixa não conta probabilidade
+                        # de novo - já foi contabilizada junto, uma única vez
+                    else:
+                        prob_combinada *= p["probabilidade"]
 
                 if not (odd_min <= odd_combinada <= odd_max):
                     continue
 
                 valor_esperado = round((prob_combinada * odd_combinada) - 1, 3)
+                descricao_final = " + ".join(p["descricao"] for p in combo)
+                if faixa_chave is not None:
+                    descricao_final += " (faixa)"
+
                 resultado.append({
                     "jogo_id": jogo_id,
                     "casa_aposta": casa,
-                    "descricao": " + ".join(p["descricao"] for p in combo),
+                    "descricao": descricao_final,
                     "odd_combinada": round(odd_combinada, 2),
                     "probabilidade_combinada": round(prob_combinada * 100, 2),
                     "valor_esperado": valor_esperado,
