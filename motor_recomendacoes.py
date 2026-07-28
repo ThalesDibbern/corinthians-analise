@@ -185,10 +185,10 @@ def buscar_frequencia_simples_jogador(cur, jogador_id, tipo):
     return float(row[0]) if row else None
 
 
-def buscar_frequencia_escanteio_time(cur, linha):
+def buscar_frequencia_escanteio_time(cur, linha, time_id):
     cur.execute(
-        "SELECT frequencia FROM padroes_time_escanteio WHERE linha = %s",
-        (linha,),
+        "SELECT frequencia FROM padroes_time_escanteio WHERE linha = %s AND time_id = %s",
+        (linha, time_id),
     )
     row = cur.fetchone()
     return float(row[0]) if row else None
@@ -220,10 +220,10 @@ def buscar_frequencia_cartao_total(cur, linha, time_id):
     return float(row[0]) if row else None
 
 
-def buscar_frequencia_resultado(cur, lado, resultado):
+def buscar_frequencia_resultado(cur, lado, resultado, time_id):
     cur.execute(
-        "SELECT frequencia FROM padroes_time_resultado WHERE lado = %s AND resultado = %s",
-        (lado, resultado),
+        "SELECT frequencia FROM padroes_time_resultado WHERE lado = %s AND resultado = %s AND time_id = %s",
+        (lado, resultado, time_id),
     )
     row = cur.fetchone()
     return float(row[0]) if row else None
@@ -238,37 +238,39 @@ def buscar_id_corinthians(cur):
     return row[0] if row else None
 
 
-def buscar_frequencia_confronto(cur, adversario_id, mandante_filtro, tipo_padrao, linha=0, resultado=""):
+def buscar_frequencia_confronto(cur, nosso_time_id, adversario_id, mandante_filtro, tipo_padrao, linha=0, resultado=""):
     """NOVO (confronto direto): busca a frequência específica contra esse
     adversário (ex: "cartões totais contra o Palmeiras, jogando em casa"),
     se já tiver sido calculada com uma amostra que não seja pequena demais.
     Retorna None se não houver dado suficiente - nesse caso, quem chamou
     essa função deve cair de volta pro padrão geral (não filtrado por
-    adversário)."""
+    adversário). Filtra por nosso_time_id (o time do qual estamos vendo o
+    confronto - hoje sempre Corinthians), pra não colidir com o confronto
+    do mesmo adversário visto de outro time no futuro."""
     if adversario_id is None:
         return None
     cur.execute(
         """SELECT frequencia FROM padroes_confronto_direto
-           WHERE adversario_id = %s AND mandante_filtro = %s AND tipo_padrao = %s
+           WHERE nosso_time_id = %s AND adversario_id = %s AND mandante_filtro = %s AND tipo_padrao = %s
              AND linha = %s AND resultado = %s AND amostra_pequena = FALSE""",
-        (adversario_id, mandante_filtro, tipo_padrao, linha, resultado),
+        (nosso_time_id, adversario_id, mandante_filtro, tipo_padrao, linha, resultado),
     )
     row = cur.fetchone()
     return float(row[0]) if row else None
 
 
-def buscar_frequencia_forma_recente(cur, resultado):
+def buscar_frequencia_forma_recente(cur, resultado, time_id):
     """NOVO (forma recente): frequência de vitória/empate/derrota nos
-    últimos jogos do Corinthians (qualquer adversário/mando de campo)."""
+    últimos jogos do time (qualquer adversário/mando de campo)."""
     cur.execute(
-        "SELECT frequencia FROM padroes_forma_recente WHERE resultado = %s ORDER BY janela DESC LIMIT 1",
-        (resultado,),
+        "SELECT frequencia FROM padroes_forma_recente WHERE resultado = %s AND time_id = %s ORDER BY janela DESC LIMIT 1",
+        (resultado, time_id),
     )
     row = cur.fetchone()
     return float(row[0]) if row else None
 
 
-def calcular_fator_forma_recente(cur, resultado_cor):
+def calcular_fator_forma_recente(cur, resultado_cor, time_id):
     """NOVO (forma recente): retorna o multiplicador a aplicar em cima da
     probabilidade de resultado final (vinda do confronto direto ou da média
     geral), com base em quanto o momento atual do time (últimos jogos) se
@@ -276,8 +278,8 @@ def calcular_fator_forma_recente(cur, resultado_cor):
     ao intervalo [FATOR_FORMA_MINIMO, FATOR_FORMA_MAXIMO] - mesma filosofia
     do ajuste de árbitro: o momento recente BELISCA a probabilidade, nunca
     domina sobre um dado mais específico (como o confronto direto)."""
-    baseline = buscar_frequencia_resultado(cur, "geral", resultado_cor)
-    recente = buscar_frequencia_forma_recente(cur, resultado_cor)
+    baseline = buscar_frequencia_resultado(cur, "geral", resultado_cor, time_id)
+    recente = buscar_frequencia_forma_recente(cur, resultado_cor, time_id)
     if baseline is None or recente is None or baseline == 0:
         return None
 
@@ -513,7 +515,7 @@ def calcular_recomendacoes(cur):
             # Quando outros times tiverem padrão próprio calculado, trocar
             # essa checagem fixa por uma busca dinâmica pelo time certo.
             if "corinthians" in mercado.lower():
-                frequencia_bruta = buscar_frequencia_escanteio_time(cur, linha)
+                frequencia_bruta = buscar_frequencia_escanteio_time(cur, linha, corinthians_id)
                 if frequencia_bruta is not None:
                     frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
@@ -524,7 +526,7 @@ def calcular_recomendacoes(cur):
             # Palmeiras, jogando em casa"); só cai pro padrão geral do time
             # se não houver confronto direto com amostra suficiente ainda.
             frequencia_bruta = buscar_frequencia_confronto(
-                cur, adversario_id, mandante_filtro_atual, "escanteio_total", linha=linha
+                cur, corinthians_id, adversario_id, mandante_filtro_atual, "escanteio_total", linha=linha
             )
             if frequencia_bruta is not None:
                 veio_de_confronto_direto = True
@@ -538,7 +540,7 @@ def calcular_recomendacoes(cur):
             # NOVO (confronto direto): mesma lógica de prioridade do escanteio
             # total acima.
             frequencia_bruta = buscar_frequencia_confronto(
-                cur, adversario_id, mandante_filtro_atual, "cartao_total", linha=linha
+                cur, corinthians_id, adversario_id, mandante_filtro_atual, "cartao_total", linha=linha
             )
             if frequencia_bruta is not None:
                 veio_de_confronto_direto = True
@@ -556,13 +558,13 @@ def calcular_recomendacoes(cur):
                 # mandante/visitante se não houver confronto direto com
                 # amostra suficiente ainda.
                 frequencia = buscar_frequencia_confronto(
-                    cur, adversario_id, mandante_filtro_atual, "resultado_final", resultado=resultado_cor
+                    cur, corinthians_id, adversario_id, mandante_filtro_atual, "resultado_final", resultado=resultado_cor
                 )
                 if frequencia is not None:
                     veio_de_confronto_direto = True
                 else:
                     lado = "mandante" if mandante else "visitante"
-                    frequencia = buscar_frequencia_resultado(cur, lado, resultado_cor)
+                    frequencia = buscar_frequencia_resultado(cur, lado, resultado_cor, corinthians_id)
 
                 # NOVO (forma recente): belisca a probabilidade (seja ela do
                 # confronto direto ou do padrão geral) com base no momento
@@ -570,7 +572,7 @@ def calcular_recomendacoes(cur):
                 # ajusta dentro de um intervalo estreito (ver docstring de
                 # calcular_fator_forma_recente).
                 if frequencia is not None:
-                    fator_forma = calcular_fator_forma_recente(cur, resultado_cor)
+                    fator_forma = calcular_fator_forma_recente(cur, resultado_cor, corinthians_id)
                     if fator_forma is not None:
                         frequencia = min(round(frequencia * fator_forma, 2), 100.0)
                         fator_forma_aplicado = fator_forma
