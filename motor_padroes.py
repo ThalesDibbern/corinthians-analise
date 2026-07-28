@@ -109,7 +109,13 @@ def calcular_jogadores_ativos(cur):
     como oponente em algum jogo do Corinthians.
 
     Totalmente reversível: se o jogador voltar a aparecer numa escalação
-    do Corinthians, volta pra ativo sozinho na próxima execução."""
+    do Corinthians, volta pra ativo sozinho na próxima execução.
+
+    NOVO: também atualiza jogadores.time_atual_id - preenche com o id do
+    Corinthians quando o jogador é marcado ativo, e limpa (NULL) quando é
+    marcado inativo (não sabemos pra qual time ele foi, se foi pra algum).
+    Prepara terreno pra multi-time, sem mudar nada do comportamento atual."""
+    corinthians_id = buscar_id_time(cur, "Corinthians")
     cur.execute(
         """
         SELECT id FROM jogos
@@ -144,7 +150,11 @@ def calcular_jogadores_ativos(cur):
     for jogador_id, ativo_atual in todos:
         deve_estar_ativo = jogador_id in ativos_ids
         if deve_estar_ativo != ativo_atual:
-            cur.execute("UPDATE jogadores SET ativo = %s WHERE id = %s", (deve_estar_ativo, jogador_id))
+            novo_time_atual = corinthians_id if deve_estar_ativo else None
+            cur.execute(
+                "UPDATE jogadores SET ativo = %s, time_atual_id = %s WHERE id = %s",
+                (deve_estar_ativo, novo_time_atual, jogador_id),
+            )
 
     # NOVO: reporta a contagem final de verdade (quantos ESTÃO ativos/inativos
     # agora), não só quantos mudaram de estado nessa execução - contar só a
@@ -250,20 +260,20 @@ def calcular_padroes_escanteio(cur):
     return resultados, jogos_analisados
 
 
-def salvar_padroes_escanteio(cur, resultados):
+def salvar_padroes_escanteio(cur, resultados, time_id):
     for linha, jogos_analisados, jogos_acima, frequencia, media in resultados:
         cur.execute(
             """
-            INSERT INTO padroes_time_escanteio (linha, jogos_analisados, jogos_acima_da_linha, frequencia, media, atualizado_em)
-            VALUES (%s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (linha) DO UPDATE SET
+            INSERT INTO padroes_time_escanteio (time_id, linha, jogos_analisados, jogos_acima_da_linha, frequencia, media, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, linha) DO UPDATE SET
                 jogos_analisados = EXCLUDED.jogos_analisados,
                 jogos_acima_da_linha = EXCLUDED.jogos_acima_da_linha,
                 frequencia = EXCLUDED.frequencia,
                 media = EXCLUDED.media,
                 atualizado_em = NOW()
             """,
-            (linha, jogos_analisados, jogos_acima, frequencia, media),
+            (time_id, linha, jogos_analisados, jogos_acima, frequencia, media),
         )
         print(f"  Mais de {linha} escanteios: {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
 
@@ -513,23 +523,23 @@ def calcular_frequencias_linha(valores, linhas_testadas):
     return resultados
 
 
-def salvar_padrao_confronto_linha(cur, adversario_id, mandante_filtro, tipo_padrao, jogos_analisados, resultados):
+def salvar_padrao_confronto_linha(cur, nosso_time_id, adversario_id, mandante_filtro, tipo_padrao, jogos_analisados, resultados):
     amostra_pequena = jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR
     for linha, ocorrencias, frequencia in resultados:
         cur.execute(
             """
             INSERT INTO padroes_confronto_direto
-                (adversario_id, mandante_filtro, tipo_padrao, linha, resultado,
+                (nosso_time_id, adversario_id, mandante_filtro, tipo_padrao, linha, resultado,
                  jogos_analisados, ocorrencias, frequencia, amostra_pequena, atualizado_em)
-            VALUES (%s, %s, %s, %s, '', %s, %s, %s, %s, NOW())
-            ON CONFLICT (adversario_id, mandante_filtro, tipo_padrao, linha, resultado) DO UPDATE SET
+            VALUES (%s, %s, %s, %s, %s, '', %s, %s, %s, %s, NOW())
+            ON CONFLICT (nosso_time_id, adversario_id, mandante_filtro, tipo_padrao, linha, resultado) DO UPDATE SET
                 jogos_analisados = EXCLUDED.jogos_analisados,
                 ocorrencias = EXCLUDED.ocorrencias,
                 frequencia = EXCLUDED.frequencia,
                 amostra_pequena = EXCLUDED.amostra_pequena,
                 atualizado_em = NOW()
             """,
-            (adversario_id, mandante_filtro, tipo_padrao, linha,
+            (nosso_time_id, adversario_id, mandante_filtro, tipo_padrao, linha,
              jogos_analisados, ocorrencias, frequencia, amostra_pequena),
         )
 
@@ -561,24 +571,24 @@ def calcular_resultado_confronto(cur, corinthians_id, adversario_id, mandante_fi
     return contagem, total
 
 
-def salvar_padrao_confronto_resultado(cur, adversario_id, mandante_filtro, contagem, total):
+def salvar_padrao_confronto_resultado(cur, nosso_time_id, adversario_id, mandante_filtro, contagem, total):
     amostra_pequena = total < JOGOS_MINIMOS_PARA_ANALISAR
     for resultado, ocorrencias in contagem.items():
         frequencia = round(100 * ocorrencias / total, 2)
         cur.execute(
             """
             INSERT INTO padroes_confronto_direto
-                (adversario_id, mandante_filtro, tipo_padrao, linha, resultado,
+                (nosso_time_id, adversario_id, mandante_filtro, tipo_padrao, linha, resultado,
                  jogos_analisados, ocorrencias, frequencia, amostra_pequena, atualizado_em)
-            VALUES (%s, %s, 'resultado_final', 0, %s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (adversario_id, mandante_filtro, tipo_padrao, linha, resultado) DO UPDATE SET
+            VALUES (%s, %s, %s, 'resultado_final', 0, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (nosso_time_id, adversario_id, mandante_filtro, tipo_padrao, linha, resultado) DO UPDATE SET
                 jogos_analisados = EXCLUDED.jogos_analisados,
                 ocorrencias = EXCLUDED.ocorrencias,
                 frequencia = EXCLUDED.frequencia,
                 amostra_pequena = EXCLUDED.amostra_pequena,
                 atualizado_em = NOW()
             """,
-            (adversario_id, mandante_filtro, resultado, total, ocorrencias, frequencia, amostra_pequena),
+            (nosso_time_id, adversario_id, mandante_filtro, resultado, total, ocorrencias, frequencia, amostra_pequena),
         )
 
 
@@ -612,30 +622,30 @@ def calcular_padroes_confronto_direto(cur):
             valores = buscar_totais_escanteio_confronto(cur, corinthians_id, adversario_id, mandante_filtro)
             if len(valores) >= JOGOS_MINIMOS_CONFRONTO:
                 resultados = calcular_frequencias_linha(valores, LINHAS_ESCANTEIO_TOTAL)
-                salvar_padrao_confronto_linha(cur, adversario_id, mandante_filtro, "escanteio_total", len(valores), resultados)
+                salvar_padrao_confronto_linha(cur, corinthians_id, adversario_id, mandante_filtro, "escanteio_total", len(valores), resultados)
                 total_calculado += 1
 
             valores = buscar_totais_cartao_confronto(cur, corinthians_id, adversario_id, mandante_filtro)
             if len(valores) >= JOGOS_MINIMOS_CONFRONTO:
                 resultados = calcular_frequencias_linha(valores, LINHAS_CARTAO_TOTAL)
-                salvar_padrao_confronto_linha(cur, adversario_id, mandante_filtro, "cartao_total", len(valores), resultados)
+                salvar_padrao_confronto_linha(cur, corinthians_id, adversario_id, mandante_filtro, "cartao_total", len(valores), resultados)
                 total_calculado += 1
 
             valores = buscar_totais_falta_confronto(cur, corinthians_id, adversario_id, mandante_filtro)
             if len(valores) >= JOGOS_MINIMOS_CONFRONTO:
                 resultados = calcular_frequencias_linha(valores, LINHAS_FALTA_TOTAL)
-                salvar_padrao_confronto_linha(cur, adversario_id, mandante_filtro, "falta_total", len(valores), resultados)
+                salvar_padrao_confronto_linha(cur, corinthians_id, adversario_id, mandante_filtro, "falta_total", len(valores), resultados)
                 total_calculado += 1
 
             valores = buscar_totais_chute_confronto(cur, corinthians_id, adversario_id, mandante_filtro)
             if len(valores) >= JOGOS_MINIMOS_CONFRONTO:
                 resultados = calcular_frequencias_linha(valores, LINHAS_CHUTE_TOTAL)
-                salvar_padrao_confronto_linha(cur, adversario_id, mandante_filtro, "chute_total", len(valores), resultados)
+                salvar_padrao_confronto_linha(cur, corinthians_id, adversario_id, mandante_filtro, "chute_total", len(valores), resultados)
                 total_calculado += 1
 
             contagem, total = calcular_resultado_confronto(cur, corinthians_id, adversario_id, mandante_filtro)
             if contagem and total >= JOGOS_MINIMOS_CONFRONTO:
-                salvar_padrao_confronto_resultado(cur, adversario_id, mandante_filtro, contagem, total)
+                salvar_padrao_confronto_resultado(cur, corinthians_id, adversario_id, mandante_filtro, contagem, total)
                 total_calculado += 1
 
         print(f"  {nome_adversario}: {total_jogos} confronto(s) direto(s) no histórico.")
@@ -807,19 +817,19 @@ def calcular_padroes_resultado(cur):
     return resultados_finais
 
 
-def salvar_padroes_resultado(cur, resultados):
+def salvar_padroes_resultado(cur, resultados, time_id):
     for lado, resultado, total, ocorrencias, frequencia in resultados:
         cur.execute(
             """
-            INSERT INTO padroes_time_resultado (lado, resultado, jogos_analisados, ocorrencias, frequencia, atualizado_em)
-            VALUES (%s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (lado, resultado) DO UPDATE SET
+            INSERT INTO padroes_time_resultado (time_id, lado, resultado, jogos_analisados, ocorrencias, frequencia, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, lado, resultado) DO UPDATE SET
                 jogos_analisados = EXCLUDED.jogos_analisados,
                 ocorrencias = EXCLUDED.ocorrencias,
                 frequencia = EXCLUDED.frequencia,
                 atualizado_em = NOW()
             """,
-            (lado, resultado, total, ocorrencias, frequencia),
+            (time_id, lado, resultado, total, ocorrencias, frequencia),
         )
         print(f"  {lado} - {resultado}: {ocorrencias}/{total} jogos ({frequencia}%)")
 
@@ -868,20 +878,20 @@ def calcular_forma_recente(cur):
     return contagem, total
 
 
-def salvar_forma_recente(cur, contagem, total):
+def salvar_forma_recente(cur, contagem, total, time_id):
     for resultado, ocorrencias in contagem.items():
         frequencia = round(100 * ocorrencias / total, 2)
         cur.execute(
             """
-            INSERT INTO padroes_forma_recente (janela, resultado, jogos_analisados, ocorrencias, frequencia, atualizado_em)
-            VALUES (%s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (janela, resultado) DO UPDATE SET
+            INSERT INTO padroes_forma_recente (time_id, janela, resultado, jogos_analisados, ocorrencias, frequencia, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, janela, resultado) DO UPDATE SET
                 jogos_analisados = EXCLUDED.jogos_analisados,
                 ocorrencias = EXCLUDED.ocorrencias,
                 frequencia = EXCLUDED.frequencia,
                 atualizado_em = NOW()
             """,
-            (JOGOS_FORMA_RECENTE, resultado, total, ocorrencias, frequencia),
+            (time_id, JOGOS_FORMA_RECENTE, resultado, total, ocorrencias, frequencia),
         )
         print(f"  Últimos {total} jogos - {resultado}: {ocorrencias}/{total} ({frequencia}%)")
 
@@ -997,24 +1007,26 @@ def main():
             conn.commit()
             print(f"Concluído! Padrões de cartão calculados para {len(resultados_cartao)} jogador(es).")
 
+        # NOVO: id do Corinthians, usado como time_id ao salvar os padrões
+        # que ainda são "de um time só" - prepara terreno pra multi-time,
+        # já que cada time vai precisar da sua própria frequência calculada.
+        corinthians_id = buscar_id_time(cur, "Corinthians")
+
         print("\nCalculando padrões de escanteio do time...")
         resultados_escanteio, jogos_analisados = calcular_padroes_escanteio(cur)
 
         if not resultados_escanteio:
             print(f"Dados insuficientes ainda para escanteio ({jogos_analisados} jogos analisados, "
                   f"mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+        elif not corinthians_id:
+            print("  Aviso: time 'Corinthians' não encontrado na tabela `times` - pulando escanteio.")
         else:
-            salvar_padroes_escanteio(cur, resultados_escanteio)
+            salvar_padroes_escanteio(cur, resultados_escanteio, corinthians_id)
             conn.commit()
             print(f"Concluído! Padrões de escanteio calculados com base em {jogos_analisados} jogo(s).")
 
         print("\nCalculando padrões de escanteio TOTAL do jogo (mandante + visitante)...")
         resultados_escanteio_total, jogos_analisados_escanteio_total = calcular_padroes_escanteio_total(cur)
-
-        # NOVO: id do Corinthians, usado como time_id ao salvar os padrões de
-        # total do jogo (escanteio/cartão) - prepara terreno pra multi-time,
-        # já que cada time vai precisar da sua própria frequência calculada.
-        corinthians_id = buscar_id_time(cur, "Corinthians")
 
         if not resultados_escanteio_total:
             print(f"Dados insuficientes ainda para escanteio total ({jogos_analisados_escanteio_total} jogos "
@@ -1061,16 +1073,16 @@ def main():
 
         print("\nCalculando padrões de resultado final (vitória/empate/derrota)...")
         resultados_finais = calcular_padroes_resultado(cur)
-        if resultados_finais:
-            salvar_padroes_resultado(cur, resultados_finais)
+        if resultados_finais and corinthians_id:
+            salvar_padroes_resultado(cur, resultados_finais, corinthians_id)
             conn.commit()
         else:
             print("  Dados insuficientes ainda para resultado final.")
 
         print(f"\nCalculando forma recente (últimos {JOGOS_FORMA_RECENTE} jogos)...")
         contagem_forma, jogos_analisados_forma = calcular_forma_recente(cur)
-        if contagem_forma:
-            salvar_forma_recente(cur, contagem_forma, jogos_analisados_forma)
+        if contagem_forma and corinthians_id:
+            salvar_forma_recente(cur, contagem_forma, jogos_analisados_forma, corinthians_id)
             conn.commit()
         else:
             print(f"  Dados insuficientes ainda pra forma recente ({jogos_analisados_forma} jogos "
