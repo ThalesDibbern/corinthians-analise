@@ -92,9 +92,21 @@ def identificar_tipo_padrao(mercado):
     contém as palavras "escanteio"/"cartão" - sem essa ordem, cairiam por
     engano nos tipos genéricos (escanteio_time/cartao)."""
     nome = mercado.lower()
-    if "escanteio total do jogo" in nome:
+    # NOVO (bug corrigido): a checagem antiga procurava pelo texto exato
+    # "escanteio total do jogo" (singular) - mas o nome real que a OddsPapi
+    # manda é "Escanteios Total do Jogo" (plural, com "s"). Como a
+    # comparação era de substring exata, o "s" extra quebrava a
+    # correspondência e esse mercado NUNCA era classificado corretamente -
+    # caía em None silenciosamente, e nenhuma recomendação de escanteio/
+    # cartão total do jogo era gerada, mesmo com VE positivo confirmado.
+    # Agora a checagem não depende de singular/plural exato.
+    if "escanteio" in nome and "total do jogo" in nome:
         return "escanteio_total"
-    if "cartão total do jogo" in nome or "cartao total do jogo" in nome:
+    # NOVO: "cart" (não "cartão"/"cartões" por extenso) porque "cartão"
+    # (singular) e "cartões" (plural) têm radicais diferentes em português
+    # - uma checagem por texto exato de um dos dois falharia pro outro,
+    # exatamente como aconteceu com escanteio/escanteios.
+    if "cart" in nome and "total do jogo" in nome:
         return "cartao_total"
     if "cartão" in nome or "cartao" in nome or "card" in nome:
         return "cartao"
