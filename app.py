@@ -1,4 +1,3 @@
-
 """
 Interface web do projeto - Análise Corinthians.
 
@@ -426,6 +425,17 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                     continue
 
                 valor_esperado = round((prob_combinada * odd_combinada) - 1, 3)
+
+                # NOVO: mesmo com pernas individuais sempre positivas, a
+                # combinação de "faixa" usa uma fórmula mais rigorosa
+                # (subtração, não multiplicação) que pode revelar VE
+                # negativo mesmo quando as duas pernas separadas eram boas
+                # - sem esse filtro, o site mostrava múltiplas com VE
+                # negativo como se fossem recomendação, contradizendo o
+                # propósito de só sugerir apostas com vantagem matemática.
+                if valor_esperado <= 0:
+                    continue
+
                 descricao_final = " + ".join(p["descricao"] for p in combo)
                 if faixa_chave is not None:
                     descricao_final += " (faixa)"
