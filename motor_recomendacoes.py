@@ -294,6 +294,15 @@ def buscar_media_geral_cartoes(cur):
     return float(row[0]) if row and row[0] is not None else None
 
 
+def buscar_media_geral_faltas(cur):
+    """NOVO: mesma ideia de buscar_media_geral_cartoes, mas pra falta - usa
+    o dado que já existia calculado (padroes_arbitro.media_faltas) mas
+    nunca tinha sido aproveitado em nenhum ajuste."""
+    cur.execute("SELECT AVG(media_faltas) FROM padroes_arbitro")
+    row = cur.fetchone()
+    return float(row[0]) if row and row[0] is not None else None
+
+
 def buscar_perfil_arbitro(cur, arbitro):
     cur.execute(
         "SELECT media_cartoes, media_faltas FROM padroes_arbitro WHERE arbitro = %s",
@@ -302,23 +311,30 @@ def buscar_perfil_arbitro(cur, arbitro):
     return cur.fetchone()
 
 
-def calcular_fator_arbitro(cur, arbitro, media_geral_cartoes):
-    """NOVO: retorna o multiplicador a aplicar na probabilidade de cartão,
-    com base em quanto esse árbitro se desvia da média geral. Limitado ao
-    intervalo [FATOR_ARBITRO_MINIMO, FATOR_ARBITRO_MAXIMO]. Retorna None se
-    não houver árbitro definido, perfil calculado, ou média geral disponível."""
-    if not arbitro or media_geral_cartoes is None or media_geral_cartoes == 0:
+def calcular_fator_arbitro(cur, arbitro, media_geral, tipo):
+    """Retorna o multiplicador a aplicar na probabilidade, com base em
+    quanto esse árbitro se desvia da média geral. Limitado ao intervalo
+    [FATOR_ARBITRO_MINIMO, FATOR_ARBITRO_MAXIMO]. Retorna None se não
+    houver árbitro definido, perfil calculado, ou média geral disponível.
+
+    NOVO: `tipo` decide se usa a média de CARTÃO ou de FALTA do árbitro -
+    antes só existia ajuste de cartão, mesmo a média de falta já sendo
+    calculada e salva há um tempo (nunca tinha sido usada). Faz sentido
+    aplicar nos dois: árbitro rigoroso marca mais falta E mais cartão;
+    árbitro que "deixa o jogo rolar" marca menos dos dois."""
+    if not arbitro or media_geral is None or media_geral == 0:
         return None
 
     perfil = buscar_perfil_arbitro(cur, arbitro)
     if not perfil:
         return None
 
-    media_cartoes_arbitro, _ = perfil
-    if media_cartoes_arbitro is None:
+    media_cartoes_arbitro, media_faltas_arbitro = perfil
+    media_arbitro = media_cartoes_arbitro if tipo == "cartao" else media_faltas_arbitro
+    if media_arbitro is None:
         return None
 
-    fator = float(media_cartoes_arbitro) / media_geral_cartoes
+    fator = float(media_arbitro) / media_geral
     return max(FATOR_ARBITRO_MINIMO, min(FATOR_ARBITRO_MAXIMO, fator))
 
 
@@ -400,8 +416,9 @@ def calcular_recomendacoes(cur):
     recomendacoes = []
     jogadores_indisponiveis_pulados = 0
 
-    # NOVO: calcula a média geral de cartões uma única vez, fora do loop
+    # NOVO: calcula a média geral de cartões e faltas uma única vez, fora do loop
     media_geral_cartoes = buscar_media_geral_cartoes(cur)
+    media_geral_faltas = buscar_media_geral_faltas(cur)
 
     # NOVO (confronto direto): id do Corinthians, calculado uma única vez,
     # usado pra identificar o adversário de cada jogo por ID.
@@ -452,14 +469,29 @@ def calcular_recomendacoes(cur):
             if frequencia_bruta is not None:
                 # NOVO: aplica o ajuste de árbitro, se disponível - sempre em
                 # cima da frequência do lado "Sim", antes de inverter pro "Não"
-                fator = calcular_fator_arbitro(cur, arbitro, media_geral_cartoes)
+                fator = calcular_fator_arbitro(cur, arbitro, media_geral_cartoes, "cartao")
                 if fator is not None:
                     frequencia_bruta = min(round(frequencia_bruta * fator, 2), 100.0)
                     fator_arbitro_aplicado = fator
 
                 frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
-        elif tipo in ("falta_cometida", "desarme", "chute_no_gol", "chute_total") and jogador_id \
+        elif tipo == "falta_cometida" and jogador_id \
+                and direcao_normalizada in ("mais", "menos") and linha is not None:
+            # NOVO: falta cometida agora também recebe ajuste de árbitro -
+            # separado do bloco genérico de linha (desarme/chute), porque só
+            # falta tem relação com o perfil do árbitro (árbitro rigoroso
+            # apita mais falta, não faz o jogador chutar mais no gol).
+            frequencia_bruta = buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha)
+            if frequencia_bruta is not None:
+                fator = calcular_fator_arbitro(cur, arbitro, media_geral_faltas, "falta")
+                if fator is not None:
+                    frequencia_bruta = min(round(frequencia_bruta * fator, 2), 100.0)
+                    fator_arbitro_aplicado = fator
+
+                frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
+
+        elif tipo in ("desarme", "chute_no_gol", "chute_total") and jogador_id \
                 and direcao_normalizada in ("mais", "menos") and linha is not None:
             frequencia_bruta = buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha)
             if frequencia_bruta is not None:
