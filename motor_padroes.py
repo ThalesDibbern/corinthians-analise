@@ -153,13 +153,19 @@ def calcular_jogadores_ativos(cur):
         for (jogador_id,) in cur.fetchall():
             ativos_por_jogador[jogador_id] = time_id
 
-    cur.execute("SELECT id, ativo FROM jogadores")
-    todos = cur.fetchall()
+    cur.execute("SELECT id, ativo, time_atual_id FROM jogadores")
+    todos_com_time = cur.fetchall()
 
-    for jogador_id, ativo_atual in todos:
+    for jogador_id, ativo_atual, time_atual_salvo in todos_com_time:
         deve_estar_ativo = jogador_id in ativos_por_jogador
         novo_time_atual = ativos_por_jogador.get(jogador_id)
-        if deve_estar_ativo != ativo_atual:
+        # NOVO: bug real corrigido - antes só atualizava quando o campo
+        # `ativo` mudava de valor. Jogador CRIADO AGORA já nasce com
+        # ativo=TRUE (valor padrão da coluna) - então, mesmo estando
+        # corretamente ativo, a comparação "mudou?" dava falso, e o
+        # `time_atual_id` nunca era preenchido (ficava sempre NULL). Agora
+        # também atualiza quando só o time_atual_id está errado/faltando.
+        if deve_estar_ativo != ativo_atual or novo_time_atual != time_atual_salvo:
             cur.execute(
                 "UPDATE jogadores SET ativo = %s, time_atual_id = %s WHERE id = %s",
                 (deve_estar_ativo, novo_time_atual, jogador_id),
@@ -168,7 +174,7 @@ def calcular_jogadores_ativos(cur):
     # NOVO: reporta a contagem final de verdade (quantos ESTÃO ativos/inativos
     # agora), não só quantos mudaram de estado nessa execução.
     total_ativos = len(ativos_por_jogador)
-    total_inativos = len(todos) - total_ativos
+    total_inativos = len(todos_com_time) - total_ativos
 
     return total_ativos, total_inativos
 
