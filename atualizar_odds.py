@@ -59,16 +59,21 @@ BOOKMAKERS = "superbet.bet.br"  # só Superbet por enquanto (plano pago com Play
 DIAS_ANTECEDENCIA = 2   # busca odds de jogos que acontecem em até X dias
 
 
-# NOVO (multi-time): antes existiam PARTICIPANT_ID e TEAM_ID_API_FOOTBALL
-# fixos (só Corinthians). Agora os times rastreados vêm da própria tabela
-# `times` (qualquer um que já tenha os dois ids de odds/API-Football
-# preenchidos) - adicionar um time novo no banco já é suficiente pra esse
-# script passar a coletar as odds dele também, sem precisar mexer em código.
+# NOVO (multi-time): os times rastreados vêm da própria tabela `times`
+# (marcados com `rastreado = TRUE`) - adicionar um time novo é: preencher
+# os IDs dele + marcar rastreado=TRUE, e esse script já passa a coletar as
+# odds dele também, sem precisar mexer em código.
+# IMPORTANTE: NÃO basta ter os IDs preenchidos - um time pode ter os dois
+# IDs preenchidos só por coincidência (correção de duplicata, ou por ter
+# aparecido como adversário algum dia), sem nunca ter sido escolhido pra
+# ser rastreado de verdade. `rastreado` é a marcação explícita que evita
+# esse problema (foi exatamente isso que fez o script tentar coletar o
+# Bahia inteiro sem ninguém ter pedido, e estourar o limite de requisição).
 def buscar_times_rastreados(cur):
     cur.execute(
         "SELECT id, nome, oddspapi_participant_id, api_football_team_id FROM times "
-        "WHERE oddspapi_participant_id IS NOT NULL AND api_football_team_id IS NOT NULL "
-        "ORDER BY nome"
+        "WHERE rastreado = TRUE AND oddspapi_participant_id IS NOT NULL "
+        "AND api_football_team_id IS NOT NULL ORDER BY nome"
     )
     return cur.fetchall()
 
