@@ -139,16 +139,13 @@ def buscar_odds_futuras(cur):
     problema de nomes grafados diferente entre fontes) e cruzar com
     padroes_confronto_direto.
 
-    NOVO (datahora_jogo): antes comparava só a DATA (j.data_jogo >=
-    CURRENT_DATE), então um jogo de hoje já encerrado continuava sendo
-    tratado como "futuro" até a virada do dia. Agora usa o horário completo
-    (datahora_jogo >= NOW()) quando disponível, com fallback pra data
-    (jogos antigos que ainda não têm esse dado preenchido)."""
+    NOVO (multi-time): também traz j.nosso_time_id - cada odd agora sabe de
+    qual time rastreado ela é, em vez de assumir sempre Corinthians."""
     cur.execute(
         """
         SELECT o.id, o.jogo_id, o.jogador_id, o.casa_aposta, o.mercado,
                o.valor_odd, o.linha, o.direcao, j.data_jogo, j.adversario,
-               j.mandante, j.arbitro, j.mandante_id, j.visitante_id
+               j.mandante, j.arbitro, j.mandante_id, j.visitante_id, j.nosso_time_id
         FROM odds o
         JOIN jogos j ON j.id = o.jogo_id
         WHERE (j.datahora_jogo IS NOT NULL AND j.datahora_jogo >= NOW())
@@ -422,13 +419,15 @@ def calcular_recomendacoes(cur):
     media_geral_cartoes = buscar_media_geral_cartoes(cur)
     media_geral_faltas = buscar_media_geral_faltas(cur)
 
-    # NOVO (confronto direto): id do Corinthians, calculado uma única vez,
-    # usado pra identificar o adversário de cada jogo por ID.
-    corinthians_id = buscar_id_corinthians(cur)
+    # NOVO (multi-time): nome de cada time, usado pra montar a descrição do
+    # resultado final com o nome certo (ex: "Vitória do Athletico
+    # Paranaense"), em vez de sempre "Corinthians" fixo no texto.
+    cur.execute("SELECT id, nome FROM times")
+    nomes_times = dict(cur.fetchall())
 
     for (odd_id, jogo_id, jogador_id, casa, mercado, valor_odd,
          linha, direcao, data_jogo, adversario, mandante, arbitro,
-         mandante_id, visitante_id) in odds:
+         mandante_id, visitante_id, nosso_time_id) in odds:
 
         tipo = identificar_tipo_padrao(mercado)
         if tipo is None:
@@ -451,9 +450,12 @@ def calcular_recomendacoes(cur):
         # fontes) e o filtro de mandante/visitante correspondente, usados
         # pra tentar uma frequência específica contra esse adversário antes
         # de cair pro padrão geral do time.
+        # NOVO (multi-time): usa nosso_time_id (vindo da própria linha de
+        # odds, via jogos.nosso_time_id) em vez de um id fixo - cada jogo
+        # já sabe de qual time rastreado ele é.
         adversario_id = None
-        if corinthians_id is not None and mandante_id is not None and visitante_id is not None:
-            adversario_id = visitante_id if mandante_id == corinthians_id else mandante_id
+        if nosso_time_id is not None and mandante_id is not None and visitante_id is not None:
+            adversario_id = visitante_id if mandante_id == nosso_time_id else mandante_id
         mandante_filtro_atual = "mandante" if mandante else "visitante"
 
         # NOVO: suporte ao lado "Menos"/"Não" de cada mercado, além do "Mais"/
@@ -515,7 +517,7 @@ def calcular_recomendacoes(cur):
             # Quando outros times tiverem padrão próprio calculado, trocar
             # essa checagem fixa por uma busca dinâmica pelo time certo.
             if "corinthians" in mercado.lower():
-                frequencia_bruta = buscar_frequencia_escanteio_time(cur, linha, corinthians_id)
+                frequencia_bruta = buscar_frequencia_escanteio_time(cur, linha, nosso_time_id)
                 if frequencia_bruta is not None:
                     frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
@@ -526,12 +528,12 @@ def calcular_recomendacoes(cur):
             # Palmeiras, jogando em casa"); só cai pro padrão geral do time
             # se não houver confronto direto com amostra suficiente ainda.
             frequencia_bruta = buscar_frequencia_confronto(
-                cur, corinthians_id, adversario_id, mandante_filtro_atual, "escanteio_total", linha=linha
+                cur, nosso_time_id, adversario_id, mandante_filtro_atual, "escanteio_total", linha=linha
             )
             if frequencia_bruta is not None:
                 veio_de_confronto_direto = True
             else:
-                frequencia_bruta = buscar_frequencia_escanteio_total(cur, linha, corinthians_id)
+                frequencia_bruta = buscar_frequencia_escanteio_total(cur, linha, nosso_time_id)
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
@@ -540,12 +542,12 @@ def calcular_recomendacoes(cur):
             # NOVO (confronto direto): mesma lógica de prioridade do escanteio
             # total acima.
             frequencia_bruta = buscar_frequencia_confronto(
-                cur, corinthians_id, adversario_id, mandante_filtro_atual, "cartao_total", linha=linha
+                cur, nosso_time_id, adversario_id, mandante_filtro_atual, "cartao_total", linha=linha
             )
             if frequencia_bruta is not None:
                 veio_de_confronto_direto = True
             else:
-                frequencia_bruta = buscar_frequencia_cartao_total(cur, linha, corinthians_id)
+                frequencia_bruta = buscar_frequencia_cartao_total(cur, linha, nosso_time_id)
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
@@ -558,13 +560,13 @@ def calcular_recomendacoes(cur):
                 # mandante/visitante se não houver confronto direto com
                 # amostra suficiente ainda.
                 frequencia = buscar_frequencia_confronto(
-                    cur, corinthians_id, adversario_id, mandante_filtro_atual, "resultado_final", resultado=resultado_cor
+                    cur, nosso_time_id, adversario_id, mandante_filtro_atual, "resultado_final", resultado=resultado_cor
                 )
                 if frequencia is not None:
                     veio_de_confronto_direto = True
                 else:
                     lado = "mandante" if mandante else "visitante"
-                    frequencia = buscar_frequencia_resultado(cur, lado, resultado_cor, corinthians_id)
+                    frequencia = buscar_frequencia_resultado(cur, lado, resultado_cor, nosso_time_id)
 
                 # NOVO (forma recente): belisca a probabilidade (seja ela do
                 # confronto direto ou do padrão geral) com base no momento
@@ -572,7 +574,7 @@ def calcular_recomendacoes(cur):
                 # ajusta dentro de um intervalo estreito (ver docstring de
                 # calcular_fator_forma_recente).
                 if frequencia is not None:
-                    fator_forma = calcular_fator_forma_recente(cur, resultado_cor, corinthians_id)
+                    fator_forma = calcular_fator_forma_recente(cur, resultado_cor, nosso_time_id)
                     if fator_forma is not None:
                         frequencia = min(round(frequencia * fator_forma, 2), 100.0)
                         fator_forma_aplicado = fator_forma
@@ -585,7 +587,12 @@ def calcular_recomendacoes(cur):
 
         descricao_final = mercado
         if tipo == "resultado_final":
-            nomes = {"vitoria": "Vitória do Corinthians", "empate": "Empate", "derrota": "Derrota do Corinthians"}
+            nome_nosso_time = nomes_times.get(nosso_time_id, "nosso time")
+            nomes = {
+                "vitoria": f"Vitória do {nome_nosso_time}",
+                "empate": "Empate",
+                "derrota": f"Derrota do {nome_nosso_time}",
+            }
             descricao_final = f"Resultado Final - {nomes[resultado_cor]}"
 
         if fator_arbitro_aplicado is not None:
