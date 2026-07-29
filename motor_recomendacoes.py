@@ -508,15 +508,23 @@ def calcular_recomendacoes(cur):
 
         elif tipo == "escanteio_time" and not jogador_id \
                 and direcao_normalizada in ("mais", "menos") and linha is not None:
-            # NOVO: o padrão de escanteio_time (padroes_time_escanteio) só é
-            # calculado com base nos jogos do Corinthians - não temos base
-            # histórica de outros times ainda. Sem essa checagem, o sistema
-            # aplicava por engano a frequência do Corinthians em mercados de
-            # escanteio do ADVERSÁRIO (ex: "Escanteios - Mais/Menos Clube do
-            # Remo PA"), gerando recomendação com probabilidade errada.
-            # Quando outros times tiverem padrão próprio calculado, trocar
-            # essa checagem fixa por uma busca dinâmica pelo time certo.
-            if "corinthians" in mercado.lower():
+            # NOVO (multi-time): o mercado de escanteio_time da Superbet é
+            # nomeado com o nome real do time (ex: "Escanteios - Mais/Menos
+            # Corinthians" ou "...CA Paranaense PR"). Antes a checagem era
+            # fixa em "corinthians" no texto - isso funcionava com um time
+            # só, mas quebrava com dois: no jogo do Athletico Paranaense
+            # contra o Corinthians, o mercado de escanteio DO ADVERSÁRIO
+            # (Corinthians) também contém a palavra "corinthians", e a
+            # checagem fixa aplicava por engano a frequência/mercado do
+            # Corinthians como se fosse do Athletico Paranaense.
+            # Em vez de tentar confirmar "é o nosso time" (frágil - o nome
+            # salvo em `times.nome` nem sempre bate exatamente com o texto
+            # que a Superbet usa no mercado, como já vimos antes com nomes
+            # tipo "CA Paranaense PR"), EXCLUI quando o mercado bate com o
+            # nome do ADVERSÁRIO - esse nome já vem resolvido corretamente
+            # por ID (não por texto) em `adversario`, então é mais confiável.
+            eh_mercado_do_adversario = adversario and adversario.lower() in mercado.lower()
+            if not eh_mercado_do_adversario:
                 frequencia_bruta = buscar_frequencia_escanteio_time(cur, linha, nosso_time_id)
                 if frequencia_bruta is not None:
                     frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
