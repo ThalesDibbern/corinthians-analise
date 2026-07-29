@@ -69,15 +69,18 @@ LEAGUE_ID = 71                    # Brasileirão Série A
 TEMPORADAS = [2022, 2023, 2024, 2025, 2026]  # histórico + temporada atual (plano pago libera 2025/2026)
 LIMITE_REQUISICOES_DIA = 7000      # margem de segurança abaixo do limite de 7.500/dia do plano novo
 
-# NOVO (multi-time): antes existia um TEAM_ID fixo (só Corinthians). Agora
-# os times rastreados vêm da própria tabela `times` (qualquer um que já
-# tenha api_football_team_id preenchido) - adicionar um time novo no banco
-# já é suficiente pra esse script passar a coletar o histórico dele também,
-# sem precisar mexer em código.
+# NOVO (multi-time): os times rastreados vêm da própria tabela `times`
+# (marcados com `rastreado = TRUE`) - adicionar um time novo é: preencher
+# os IDs dele + marcar rastreado=TRUE, e esse script já passa a coletar o
+# histórico dele também, sem precisar mexer em código.
+# IMPORTANTE: NÃO basta ter os IDs preenchidos - um time pode ter
+# api_football_team_id preenchido só por ter aparecido como adversário
+# algum dia (isso é automático), sem nunca ter sido escolhido pra ser
+# rastreado de verdade. `rastreado` é a marcação explícita que evita isso.
 def buscar_times_rastreados(cur):
     cur.execute(
         "SELECT id, nome, api_football_team_id FROM times "
-        "WHERE api_football_team_id IS NOT NULL ORDER BY nome"
+        "WHERE rastreado = TRUE AND api_football_team_id IS NOT NULL ORDER BY nome"
     )
     return cur.fetchall()
 
