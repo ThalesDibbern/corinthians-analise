@@ -101,66 +101,73 @@ FATOR_ARBITRO_MAXIMO = 1.15
 
 def calcular_jogadores_ativos(cur):
     """NOVO: marca cada jogador como ativo/inativo, olhando se ele apareceu
-    (titular ou reserva) jogando PELO Corinthians em pelo menos 1 dos
-    últimos JANELA_ATIVIDADE_JOGADOR jogos concluídos. Quem não aparece em
-    nenhum deles é marcado inativo - normalmente jogador que foi
+    (titular ou reserva) jogando PELO time dele em pelo menos 1 dos últimos
+    JANELA_ATIVIDADE_JOGADOR jogos concluídos DESSE time. Quem não aparece
+    em nenhum deles é marcado inativo - normalmente jogador que foi
     transferido/emprestado pra fora, ou (efeito colateral útil) jogador de
-    time adversário que só está na tabela `jogadores` por ter aparecido
-    como oponente em algum jogo do Corinthians.
+    time adversário (não rastreado) que só está na tabela `jogadores` por
+    ter aparecido como oponente em algum jogo.
 
     Totalmente reversível: se o jogador voltar a aparecer numa escalação
-    do Corinthians, volta pra ativo sozinho na próxima execução.
+    de um time rastreado, volta pra ativo sozinho na próxima execução.
 
-    NOVO: também atualiza jogadores.time_atual_id - preenche com o id do
-    Corinthians quando o jogador é marcado ativo, e limpa (NULL) quando é
-    marcado inativo (não sabemos pra qual time ele foi, se foi pra algum).
-    Prepara terreno pra multi-time, sem mudar nada do comportamento atual."""
-    corinthians_id = buscar_id_time(cur, "Corinthians")
-    cur.execute(
-        """
-        SELECT id FROM jogos
-        WHERE (datahora_jogo IS NOT NULL AND datahora_jogo < NOW())
-           OR (datahora_jogo IS NULL AND data_jogo < CURRENT_DATE)
-        ORDER BY COALESCE(datahora_jogo, data_jogo::timestamp) DESC
-        LIMIT %s
-        """,
-        (JANELA_ATIVIDADE_JOGADOR,),
-    )
-    jogos_recentes = [row[0] for row in cur.fetchall()]
-    if not jogos_recentes:
+    NOVO (multi-time): percorre TODOS os times rastreados (não só o
+    Corinthians), cada um com sua própria janela de "últimos jogos" e seu
+    próprio elenco - um jogador fica marcado ativo pro time em que
+    realmente jogou recentemente, nunca por outro. jogadores.time_atual_id
+    é preenchido de acordo."""
+    times_rastreados = buscar_times_rastreados(cur)
+    if not times_rastreados:
         return 0, 0
 
-    cur.execute(
-        """
-        SELECT DISTINCT e.jogador_id
-        FROM escalacoes e
-        JOIN jogador_estatisticas_jogo jeg ON jeg.jogo_id = e.jogo_id AND jeg.jogador_id = e.jogador_id
-        JOIN jogos jg ON jg.id = e.jogo_id
-        WHERE e.jogo_id = ANY(%s)
-          AND ((jeg.lado = 'mandante' AND jg.mandante = TRUE)
-            OR (jeg.lado = 'visitante' AND jg.mandante = FALSE))
-        """,
-        (jogos_recentes,),
-    )
-    ativos_ids = {row[0] for row in cur.fetchall()}
+    ativos_por_jogador = {}  # jogador_id -> time_id (pra qual time ele está ativo)
+
+    for time_id, time_nome, time_api_football_id in times_rastreados:
+        cur.execute(
+            """
+            SELECT id FROM jogos
+            WHERE nosso_time_id = %s
+              AND ((datahora_jogo IS NOT NULL AND datahora_jogo < NOW())
+                OR (datahora_jogo IS NULL AND data_jogo < CURRENT_DATE))
+            ORDER BY COALESCE(datahora_jogo, data_jogo::timestamp) DESC
+            LIMIT %s
+            """,
+            (time_id, JANELA_ATIVIDADE_JOGADOR),
+        )
+        jogos_recentes = [row[0] for row in cur.fetchall()]
+        if not jogos_recentes:
+            continue  # esse time ainda não tem jogo concluído suficiente - pula, sem travar os outros
+
+        cur.execute(
+            """
+            SELECT DISTINCT e.jogador_id
+            FROM escalacoes e
+            JOIN jogador_estatisticas_jogo jeg ON jeg.jogo_id = e.jogo_id AND jeg.jogador_id = e.jogador_id
+            JOIN jogos jg ON jg.id = e.jogo_id
+            WHERE e.jogo_id = ANY(%s)
+              AND ((jeg.lado = 'mandante' AND jg.mandante = TRUE)
+                OR (jeg.lado = 'visitante' AND jg.mandante = FALSE))
+            """,
+            (jogos_recentes,),
+        )
+        for (jogador_id,) in cur.fetchall():
+            ativos_por_jogador[jogador_id] = time_id
 
     cur.execute("SELECT id, ativo FROM jogadores")
     todos = cur.fetchall()
 
     for jogador_id, ativo_atual in todos:
-        deve_estar_ativo = jogador_id in ativos_ids
+        deve_estar_ativo = jogador_id in ativos_por_jogador
+        novo_time_atual = ativos_por_jogador.get(jogador_id)
         if deve_estar_ativo != ativo_atual:
-            novo_time_atual = corinthians_id if deve_estar_ativo else None
             cur.execute(
                 "UPDATE jogadores SET ativo = %s, time_atual_id = %s WHERE id = %s",
                 (deve_estar_ativo, novo_time_atual, jogador_id),
             )
 
     # NOVO: reporta a contagem final de verdade (quantos ESTÃO ativos/inativos
-    # agora), não só quantos mudaram de estado nessa execução - contar só a
-    # mudança é enganoso, porque a maioria já estava correta desde a última
-    # vez e nunca aparecia no log, mesmo estando tudo certo.
-    total_ativos = len(ativos_ids)
+    # agora), não só quantos mudaram de estado nessa execução.
+    total_ativos = len(ativos_por_jogador)
     total_inativos = len(todos) - total_ativos
 
     return total_ativos, total_inativos
@@ -169,30 +176,34 @@ def calcular_jogadores_ativos(cur):
 def calcular_padroes_cartao(cur):
     """Para cada jogador, olha seus últimos jogos e calcula a frequência de cartão.
 
-    NOVO: filtra só os jogos em que o jogador estava jogando PELO Corinthians
-    (lado dele bate com o lado do Corinthians naquele jogo específico) - sem
-    isso, um jogador que trocou de time (ex: era adversário do Corinthians
-    numa temporada, depois se tornou jogador do Corinthians) tinha os dois
-    períodos misturados na mesma frequência, distorcendo o padrão real dele
-    hoje jogando pelo Corinthians."""
-    cur.execute("SELECT id, nome FROM jogadores WHERE ativo = TRUE")
+    NOVO: filtra só os jogos em que o jogador estava jogando PELO time dele
+    (lado dele bate com o lado do time naquele jogo específico) - sem isso,
+    um jogador que trocou de time tinha os dois períodos misturados na
+    mesma frequência, distorcendo o padrão real dele hoje.
+
+    NOVO (multi-time): também filtra por nosso_time_id (jogos.nosso_time_id
+    = jogadores.time_atual_id) - agora que a tabela `jogos` pode ter jogos
+    de mais de um time rastreado, sem esse filtro um jogador do Corinthians
+    poderia acidentalmente "ver" jogos do Athletico Paranaense (ou
+    vice-versa) se a condição de lado/mandante coincidisse por acaso."""
+    cur.execute("SELECT id, nome, time_atual_id FROM jogadores WHERE ativo = TRUE")
     jogadores = cur.fetchall()
 
     resultados = []
 
-    for jogador_id, nome in jogadores:
+    for jogador_id, nome, time_atual_id in jogadores:
         cur.execute(
             """
             SELECT jeg.cartao_amarelo, jeg.cartao_vermelho
             FROM jogador_estatisticas_jogo jeg
             JOIN jogos j ON j.id = jeg.jogo_id
-            WHERE jeg.jogador_id = %s
+            WHERE jeg.jogador_id = %s AND j.nosso_time_id = %s
               AND ((jeg.lado = 'mandante' AND j.mandante = TRUE)
                 OR (jeg.lado = 'visitante' AND j.mandante = FALSE))
             ORDER BY j.data_jogo DESC
             LIMIT %s
             """,
-            (jogador_id, JANELA_MAXIMA_DE_JOGOS),
+            (jogador_id, time_atual_id, JANELA_MAXIMA_DE_JOGOS),
         )
         jogos_do_jogador = cur.fetchall()
 
@@ -228,20 +239,23 @@ def salvar_padroes(cur, resultados):
         print(f"  {nome}: {jogos_com_cartao}/{jogos_analisados} jogos com cartão ({frequencia}%)")
 
 
-def calcular_padroes_escanteio(cur):
-    """Olha os escanteios do Corinthians (não do adversário) nos últimos jogos,
-    e calcula a frequência de passar de cada linha testada (3.5, 4.5, ...)."""
+def calcular_padroes_escanteio(cur, time_id):
+    """Olha os escanteios DESSE time (não do adversário) nos últimos jogos
+    dele, e calcula a frequência de passar de cada linha testada (3.5, 4.5, ...).
+    NOVO (multi-time): filtra por nosso_time_id - sem isso, misturaria
+    escanteios de jogos de times rastreados diferentes."""
     cur.execute(
         """
         SELECT eg.escanteios
         FROM estatisticas_jogo eg
         JOIN jogos j ON j.id = eg.jogo_id
-        WHERE (j.mandante = TRUE AND eg.lado = 'mandante')
-           OR (j.mandante = FALSE AND eg.lado = 'visitante')
+        WHERE j.nosso_time_id = %s
+          AND ((j.mandante = TRUE AND eg.lado = 'mandante')
+           OR (j.mandante = FALSE AND eg.lado = 'visitante'))
         ORDER BY j.data_jogo DESC
         LIMIT %s
         """,
-        (JANELA_MAXIMA_DE_JOGOS,),
+        (time_id, JANELA_MAXIMA_DE_JOGOS),
     )
     linhas_brutas = [row[0] for row in cur.fetchall() if row[0] is not None]
 
@@ -278,12 +292,13 @@ def salvar_padroes_escanteio(cur, resultados, time_id):
         print(f"  Mais de {linha} escanteios: {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
 
 
-def calcular_padroes_escanteio_total(cur):
+def calcular_padroes_escanteio_total(cur, time_id):
     """NOVO: escanteios do jogo INTEIRO (mandante + visitante somados),
-    diferente de calcular_padroes_escanteio, que olha só o lado do
-    Corinthians. Mercados de "total do jogo" tendem a ter frequência
-    histórica mais alta que mercados de um lado só, o que aumenta a chance
-    de gerar recomendação com odd mais baixa."""
+    diferente de calcular_padroes_escanteio, que olha só o lado do nosso
+    time. Mercados de "total do jogo" tendem a ter frequência histórica
+    mais alta que mercados de um lado só, o que aumenta a chance de gerar
+    recomendação com odd mais baixa.
+    NOVO (multi-time): filtra por nosso_time_id."""
     cur.execute(
         """
         SELECT totais.total_escanteios
@@ -292,14 +307,14 @@ def calcular_padroes_escanteio_total(cur):
                    COUNT(DISTINCT eg.lado) AS lados
             FROM estatisticas_jogo eg
             JOIN jogos j ON j.id = eg.jogo_id
-            WHERE j.data_jogo < CURRENT_DATE AND eg.escanteios IS NOT NULL
+            WHERE j.data_jogo < CURRENT_DATE AND eg.escanteios IS NOT NULL AND j.nosso_time_id = %s
             GROUP BY eg.jogo_id, j.data_jogo
         ) totais
         WHERE totais.lados = 2
         ORDER BY totais.data_jogo DESC
         LIMIT %s
         """,
-        (JANELA_MAXIMA_DE_JOGOS,),
+        (time_id, JANELA_MAXIMA_DE_JOGOS),
     )
     valores = [row[0] for row in cur.fetchall()]
 
@@ -336,12 +351,13 @@ def salvar_padroes_escanteio_total(cur, resultados, time_id):
         print(f"  Mais de {linha} escanteios (total do jogo): {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
 
 
-def calcular_padroes_cartao_total(cur):
+def calcular_padroes_cartao_total(cur, time_id):
     """NOVO: cartões do jogo INTEIRO (mandante + visitante somados). Só
     considera jogos "completos" (com estatísticas dos dois lados já salvas
     em estatisticas_jogo) como critério de que o jogo já foi totalmente
     processado - sem isso, um jogo ainda não coletado entraria como "0
-    cartões" por engano, em vez de simplesmente não entrar na amostra."""
+    cartões" por engano, em vez de simplesmente não entrar na amostra.
+    NOVO (multi-time): filtra por nosso_time_id."""
     cur.execute(
         """
         SELECT contagem.total_cartoes
@@ -351,14 +367,14 @@ def calcular_padroes_cartao_total(cur):
             FROM jogos j
             JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
             LEFT JOIN cartoes c ON c.jogo_id = j.id
-            WHERE j.data_jogo < CURRENT_DATE
+            WHERE j.data_jogo < CURRENT_DATE AND j.nosso_time_id = %s
             GROUP BY j.id, j.data_jogo
         ) contagem
         WHERE contagem.lados = 2
         ORDER BY contagem.data_jogo DESC
         LIMIT %s
         """,
-        (JANELA_MAXIMA_DE_JOGOS,),
+        (time_id, JANELA_MAXIMA_DE_JOGOS),
     )
     valores = [row[0] for row in cur.fetchall()]
 
@@ -401,11 +417,24 @@ def buscar_id_time(cur, nome):
     return row[0] if row else None
 
 
+def buscar_times_rastreados(cur):
+    """NOVO (multi-time): times marcados explicitamente como rastreados
+    (`rastreado = TRUE`) - não basta ter os ids preenchidos (um time pode
+    ter isso por coincidência, sem nunca ter sido escolhido de verdade)."""
+    cur.execute(
+        "SELECT id, nome, api_football_team_id FROM times "
+        "WHERE rastreado = TRUE AND api_football_team_id IS NOT NULL ORDER BY nome"
+    )
+    return cur.fetchall()
+
+
 def buscar_adversarios_com_historico(cur, corinthians_id):
-    """NOVO (confronto direto): lista os adversários que já enfrentaram o
-    Corinthians pelo menos JOGOS_MINIMOS_CONFRONTO vezes, com jogo já
-    concluído e mandante_id/visitante_id preenchidos (dependem da migração
-    de times já aplicada)."""
+    """NOVO (confronto direto): lista os adversários que já enfrentaram esse
+    time pelo menos JOGOS_MINIMOS_CONFRONTO vezes, com jogo já concluído e
+    mandante_id/visitante_id preenchidos.
+    NOVO (multi-time): filtra também por nosso_time_id - sem isso, um jogo
+    entre DOIS times rastreados (ex: Corinthians x Athletico Paranaense)
+    seria contado duas vezes (uma por linha, uma por time)."""
     cur.execute(
         """
         SELECT CASE WHEN mandante_id = %s THEN visitante_id ELSE mandante_id END AS adversario_id,
@@ -413,11 +442,11 @@ def buscar_adversarios_com_historico(cur, corinthians_id):
         FROM jogos
         WHERE (mandante_id = %s OR visitante_id = %s)
           AND mandante_id IS NOT NULL AND visitante_id IS NOT NULL
-          AND data_jogo < CURRENT_DATE
+          AND data_jogo < CURRENT_DATE AND nosso_time_id = %s
         GROUP BY adversario_id
         HAVING COUNT(*) >= %s
         """,
-        (corinthians_id, corinthians_id, corinthians_id, JOGOS_MINIMOS_CONFRONTO),
+        (corinthians_id, corinthians_id, corinthians_id, corinthians_id, JOGOS_MINIMOS_CONFRONTO),
     )
     return cur.fetchall()
 
@@ -425,13 +454,18 @@ def buscar_adversarios_com_historico(cur, corinthians_id):
 def condicao_confronto(mandante_filtro):
     """NOVO (confronto direto): monta a condição SQL que filtra os jogos
     contra um adversário específico, considerando o lado (geral, só como
-    mandante, ou só como visitante)."""
+    mandante, ou só como visitante).
+    NOVO (multi-time): também exige j.nosso_time_id = %(corinthians_id)s -
+    sem isso, um jogo entre DOIS times rastreados (ex: Corinthians x
+    Athletico Paranaense) seria contado duas vezes (uma linha por time)."""
     if mandante_filtro == "mandante":
-        return "j.mandante_id = %(corinthians_id)s AND j.visitante_id = %(adversario_id)s"
-    if mandante_filtro == "visitante":
-        return "j.mandante_id = %(adversario_id)s AND j.visitante_id = %(corinthians_id)s"
-    return ("((j.mandante_id = %(corinthians_id)s AND j.visitante_id = %(adversario_id)s) "
-            "OR (j.mandante_id = %(adversario_id)s AND j.visitante_id = %(corinthians_id)s))")
+        condicao_lado = "j.mandante_id = %(corinthians_id)s AND j.visitante_id = %(adversario_id)s"
+    elif mandante_filtro == "visitante":
+        condicao_lado = "j.mandante_id = %(adversario_id)s AND j.visitante_id = %(corinthians_id)s"
+    else:
+        condicao_lado = ("((j.mandante_id = %(corinthians_id)s AND j.visitante_id = %(adversario_id)s) "
+                          "OR (j.mandante_id = %(adversario_id)s AND j.visitante_id = %(corinthians_id)s))")
+    return f"({condicao_lado}) AND j.nosso_time_id = %(corinthians_id)s"
 
 
 def buscar_totais_escanteio_confronto(cur, corinthians_id, adversario_id, mandante_filtro):
@@ -592,20 +626,19 @@ def salvar_padrao_confronto_resultado(cur, nosso_time_id, adversario_id, mandant
         )
 
 
-def calcular_padroes_confronto_direto(cur):
+def calcular_padroes_confronto_direto(cur, time_id):
     """NOVO: calcula padrões específicos por adversário (não só a média
     geral por mandante/visitante) - escanteio total, cartão total, falta
     total, chutes no gol total e resultado, cada um separado em três
-    visões: 'geral' (os dois lados juntos), 'mandante' (só quando o
-    Corinthians manda esse confronto) e 'visitante' (só quando visita).
+    visões: 'geral' (os dois lados juntos), 'mandante' (só quando esse time
+    manda esse confronto) e 'visitante' (só quando visita).
     Isso permite capturar rivalidades específicas (ex: jogo sempre mais
     truncado/com mais falta contra um adversário em particular) e mandos de
     campo muito marcantes contra um time específico (ex: anos sem perder
-    em casa pra um rival), que a média geral do time inteiro não enxerga."""
-    corinthians_id = buscar_id_time(cur, "Corinthians")
-    if not corinthians_id:
-        print("  Aviso: time 'Corinthians' não encontrado na tabela `times` - pulando confronto direto.")
-        return 0
+    em casa pra um rival), que a média geral do time inteiro não enxerga.
+    NOVO (multi-time): recebe time_id como parâmetro, chamada uma vez por
+    time rastreado."""
+    corinthians_id = time_id
 
     adversarios = buscar_adversarios_com_historico(cur, corinthians_id)
     if not adversarios:
@@ -658,25 +691,27 @@ def calcular_padrao_linha_jogador(cur, coluna, linhas_testadas):
     numa coluna numérica da tabela jogador_estatisticas_jogo (ex: desarmes).
 
     NOVO: mesmo filtro de lado usado em calcular_padroes_cartao - só conta
-    jogos em que o jogador estava jogando pelo Corinthians."""
-    cur.execute("SELECT id, nome FROM jogadores WHERE ativo = TRUE")
+    jogos em que o jogador estava jogando pelo time dele.
+    NOVO (multi-time): também filtra por nosso_time_id, mesmo motivo de
+    calcular_padroes_cartao."""
+    cur.execute("SELECT id, nome, time_atual_id FROM jogadores WHERE ativo = TRUE")
     jogadores = cur.fetchall()
 
     resultados = []
 
-    for jogador_id, nome in jogadores:
+    for jogador_id, nome, time_atual_id in jogadores:
         cur.execute(
             f"""
             SELECT jeg.{coluna}
             FROM jogador_estatisticas_jogo jeg
             JOIN jogos j ON j.id = jeg.jogo_id
-            WHERE jeg.jogador_id = %s AND jeg.{coluna} IS NOT NULL
+            WHERE jeg.jogador_id = %s AND jeg.{coluna} IS NOT NULL AND j.nosso_time_id = %s
               AND ((jeg.lado = 'mandante' AND j.mandante = TRUE)
                 OR (jeg.lado = 'visitante' AND j.mandante = FALSE))
             ORDER BY j.data_jogo DESC
             LIMIT %s
             """,
-            (jogador_id, JANELA_MAXIMA_DE_JOGOS),
+            (jogador_id, time_atual_id, JANELA_MAXIMA_DE_JOGOS),
         )
         valores = [row[0] for row in cur.fetchall()]
 
@@ -714,25 +749,27 @@ def calcular_padrao_frequencia_jogador(cur, coluna):
     pelo menos 1 ocorrência (ex: pelo menos 1 impedimento no jogo).
 
     NOVO: mesmo filtro de lado usado em calcular_padroes_cartao - só conta
-    jogos em que o jogador estava jogando pelo Corinthians."""
-    cur.execute("SELECT id, nome FROM jogadores WHERE ativo = TRUE")
+    jogos em que o jogador estava jogando pelo time dele.
+    NOVO (multi-time): também filtra por nosso_time_id, mesmo motivo de
+    calcular_padroes_cartao."""
+    cur.execute("SELECT id, nome, time_atual_id FROM jogadores WHERE ativo = TRUE")
     jogadores = cur.fetchall()
 
     resultados = []
 
-    for jogador_id, nome in jogadores:
+    for jogador_id, nome, time_atual_id in jogadores:
         cur.execute(
             f"""
             SELECT jeg.{coluna}
             FROM jogador_estatisticas_jogo jeg
             JOIN jogos j ON j.id = jeg.jogo_id
-            WHERE jeg.jogador_id = %s AND jeg.{coluna} IS NOT NULL
+            WHERE jeg.jogador_id = %s AND jeg.{coluna} IS NOT NULL AND j.nosso_time_id = %s
               AND ((jeg.lado = 'mandante' AND j.mandante = TRUE)
                 OR (jeg.lado = 'visitante' AND j.mandante = FALSE))
             ORDER BY j.data_jogo DESC
             LIMIT %s
             """,
-            (jogador_id, JANELA_MAXIMA_DE_JOGOS),
+            (jogador_id, time_atual_id, JANELA_MAXIMA_DE_JOGOS),
         )
         valores = [row[0] for row in cur.fetchall()]
 
@@ -764,11 +801,12 @@ def salvar_padrao_frequencia_jogador(cur, tipo, resultados):
     print(f"  {tipo}: {len(resultados)} jogador(es) calculados.")
 
 
-def calcular_padroes_resultado(cur):
-    """Calcula a frequência histórica de vitória/empate/derrota do Corinthians,
+def calcular_padroes_resultado(cur, time_id):
+    """Calcula a frequência histórica de vitória/empate/derrota desse time,
     separado por mandante e visitante. NOVO: também calcula uma linha 'geral'
     (sem filtrar por mandante/visitante) - usada como referência de base pra
-    comparar com a forma recente (ver calcular_forma_recente)."""
+    comparar com a forma recente (ver calcular_forma_recente).
+    NOVO (multi-time): filtra por nosso_time_id."""
     resultados_finais = []
 
     combinacoes = [(True, "mandante"), (False, "visitante"), (None, "geral")]
@@ -779,22 +817,23 @@ def calcular_padroes_resultado(cur):
                 """
                 SELECT placar_corinthians, placar_adversario
                 FROM jogos
-                WHERE placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+                WHERE nosso_time_id = %s AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
                 ORDER BY data_jogo DESC
                 LIMIT %s
                 """,
-                (JANELA_MAXIMA_DE_JOGOS,),
+                (time_id, JANELA_MAXIMA_DE_JOGOS),
             )
         else:
             cur.execute(
                 """
                 SELECT placar_corinthians, placar_adversario
                 FROM jogos
-                WHERE mandante = %s AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+                WHERE nosso_time_id = %s AND mandante = %s
+                  AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
                 ORDER BY data_jogo DESC
                 LIMIT %s
                 """,
-                (lado_bool, JANELA_MAXIMA_DE_JOGOS),
+                (time_id, lado_bool, JANELA_MAXIMA_DE_JOGOS),
             )
         jogos = cur.fetchall()
         total = len(jogos)
@@ -845,21 +884,22 @@ JOGOS_FORMA_RECENTE = 5
 JOGOS_MINIMOS_FORMA_RECENTE = 3
 
 
-def calcular_forma_recente(cur):
+def calcular_forma_recente(cur, time_id):
     """NOVO: frequência de vitória/empate/derrota nos últimos
-    JOGOS_FORMA_RECENTE jogos do Corinthians, independente de mandante/
+    JOGOS_FORMA_RECENTE jogos desse time, independente de mandante/
     visitante ou adversário - captura o "momento atual" do time, separado
-    da média histórica geral."""
+    da média histórica geral.
+    NOVO (multi-time): filtra por nosso_time_id."""
     cur.execute(
         """
         SELECT placar_corinthians, placar_adversario
         FROM jogos
-        WHERE data_jogo < CURRENT_DATE
+        WHERE nosso_time_id = %s AND data_jogo < CURRENT_DATE
           AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
         ORDER BY data_jogo DESC
         LIMIT %s
         """,
-        (JOGOS_FORMA_RECENTE,),
+        (time_id, JOGOS_FORMA_RECENTE),
     )
     jogos = cur.fetchall()
     total = len(jogos)
@@ -988,12 +1028,17 @@ def main():
 
     try:
         print("Atualizando quais jogadores estão ativos (apareceram nos "
-              f"últimos {JANELA_ATIVIDADE_JOGADOR} jogos do Corinthians)...")
+              f"últimos {JANELA_ATIVIDADE_JOGADOR} jogos de cada time rastreado)...")
         total_ativos, total_inativos = calcular_jogadores_ativos(cur)
         conn.commit()
         print(f"Concluído! {total_ativos} jogador(es) ativo(s) agora, "
               f"{total_inativos} inativo(s).")
 
+        # NOVO (multi-time): as três funções de padrão por JOGADOR (cartão,
+        # falta/desarme/chute, impedimento) processam TODOS os jogadores de
+        # TODOS os times rastreados numa passada só - cada jogador usa o
+        # time_atual_id dele mesmo pra filtrar os jogos certos internamente,
+        # então não precisam de loop de time aqui fora.
         print("\nCalculando padrões de cartão por jogador...")
         resultados_cartao = calcular_padroes_cartao(cur)
 
@@ -1001,57 +1046,10 @@ def main():
             print("Nenhum jogador com dados suficientes ainda "
                   f"(mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos analisados).")
         else:
-            # ordena do mais frequente pro menos frequente, só para o log ficar mais legível
             resultados_cartao.sort(key=lambda r: r[4], reverse=True)
             salvar_padroes(cur, resultados_cartao)
             conn.commit()
             print(f"Concluído! Padrões de cartão calculados para {len(resultados_cartao)} jogador(es).")
-
-        # NOVO: id do Corinthians, usado como time_id ao salvar os padrões
-        # que ainda são "de um time só" - prepara terreno pra multi-time,
-        # já que cada time vai precisar da sua própria frequência calculada.
-        corinthians_id = buscar_id_time(cur, "Corinthians")
-
-        print("\nCalculando padrões de escanteio do time...")
-        resultados_escanteio, jogos_analisados = calcular_padroes_escanteio(cur)
-
-        if not resultados_escanteio:
-            print(f"Dados insuficientes ainda para escanteio ({jogos_analisados} jogos analisados, "
-                  f"mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
-        elif not corinthians_id:
-            print("  Aviso: time 'Corinthians' não encontrado na tabela `times` - pulando escanteio.")
-        else:
-            salvar_padroes_escanteio(cur, resultados_escanteio, corinthians_id)
-            conn.commit()
-            print(f"Concluído! Padrões de escanteio calculados com base em {jogos_analisados} jogo(s).")
-
-        print("\nCalculando padrões de escanteio TOTAL do jogo (mandante + visitante)...")
-        resultados_escanteio_total, jogos_analisados_escanteio_total = calcular_padroes_escanteio_total(cur)
-
-        if not resultados_escanteio_total:
-            print(f"Dados insuficientes ainda para escanteio total ({jogos_analisados_escanteio_total} jogos "
-                  f"analisados, mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
-        elif not corinthians_id:
-            print("  Aviso: time 'Corinthians' não encontrado na tabela `times` - pulando escanteio total.")
-        else:
-            salvar_padroes_escanteio_total(cur, resultados_escanteio_total, corinthians_id)
-            conn.commit()
-            print(f"Concluído! Padrões de escanteio total calculados com base em "
-                  f"{jogos_analisados_escanteio_total} jogo(s).")
-
-        print("\nCalculando padrões de cartão TOTAL do jogo (mandante + visitante)...")
-        resultados_cartao_total, jogos_analisados_cartao_total = calcular_padroes_cartao_total(cur)
-
-        if not resultados_cartao_total:
-            print(f"Dados insuficientes ainda para cartão total ({jogos_analisados_cartao_total} jogos "
-                  f"analisados, mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
-        elif not corinthians_id:
-            print("  Aviso: time 'Corinthians' não encontrado na tabela `times` - pulando cartão total.")
-        else:
-            salvar_padroes_cartao_total(cur, resultados_cartao_total, corinthians_id)
-            conn.commit()
-            print(f"Concluído! Padrões de cartão total calculados com base em "
-                  f"{jogos_analisados_cartao_total} jogo(s).")
 
         print("\nCalculando padrões de linha por jogador (faltas, desarmes, chutes)...")
         for tipo, (coluna, linhas) in PADROES_LINHA_JOGADOR.items():
@@ -1071,31 +1069,80 @@ def main():
             else:
                 print(f"  {tipo}: nenhum jogador com dados suficientes ainda.")
 
-        print("\nCalculando padrões de resultado final (vitória/empate/derrota)...")
-        resultados_finais = calcular_padroes_resultado(cur)
-        if resultados_finais and corinthians_id:
-            salvar_padroes_resultado(cur, resultados_finais, corinthians_id)
+        # NOVO (multi-time): a partir daqui, os padrões são POR TIME - cada
+        # time rastreado passa por essa parte separadamente, com sua
+        # própria frequência calculada.
+        times_rastreados = buscar_times_rastreados(cur)
+        if not times_rastreados:
+            print("\nNenhum time com rastreado=TRUE - pulando padrões de time.")
+        for time_id, time_nome, time_api_football_id in times_rastreados:
+            print(f"\n========== Padrões de time: {time_nome} ==========")
+
+            print("Calculando padrões de escanteio do time...")
+            resultados_escanteio, jogos_analisados = calcular_padroes_escanteio(cur, time_id)
+
+            if not resultados_escanteio:
+                print(f"  Dados insuficientes ainda para escanteio ({jogos_analisados} jogos analisados, "
+                      f"mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+            else:
+                salvar_padroes_escanteio(cur, resultados_escanteio, time_id)
+                conn.commit()
+                print(f"  Concluído! Padrões de escanteio calculados com base em {jogos_analisados} jogo(s).")
+
+            print("Calculando padrões de escanteio TOTAL do jogo (mandante + visitante)...")
+            resultados_escanteio_total, jogos_analisados_escanteio_total = calcular_padroes_escanteio_total(cur, time_id)
+
+            if not resultados_escanteio_total:
+                print(f"  Dados insuficientes ainda para escanteio total ({jogos_analisados_escanteio_total} jogos "
+                      f"analisados, mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+            else:
+                salvar_padroes_escanteio_total(cur, resultados_escanteio_total, time_id)
+                conn.commit()
+                print(f"  Concluído! Padrões de escanteio total calculados com base em "
+                      f"{jogos_analisados_escanteio_total} jogo(s).")
+
+            print("Calculando padrões de cartão TOTAL do jogo (mandante + visitante)...")
+            resultados_cartao_total, jogos_analisados_cartao_total = calcular_padroes_cartao_total(cur, time_id)
+
+            if not resultados_cartao_total:
+                print(f"  Dados insuficientes ainda para cartão total ({jogos_analisados_cartao_total} jogos "
+                      f"analisados, mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+            else:
+                salvar_padroes_cartao_total(cur, resultados_cartao_total, time_id)
+                conn.commit()
+                print(f"  Concluído! Padrões de cartão total calculados com base em "
+                      f"{jogos_analisados_cartao_total} jogo(s).")
+
+            print("Calculando padrões de resultado final (vitória/empate/derrota)...")
+            resultados_finais = calcular_padroes_resultado(cur, time_id)
+            if resultados_finais:
+                salvar_padroes_resultado(cur, resultados_finais, time_id)
+                conn.commit()
+            else:
+                print("  Dados insuficientes ainda para resultado final.")
+
+            print(f"Calculando forma recente (últimos {JOGOS_FORMA_RECENTE} jogos)...")
+            contagem_forma, jogos_analisados_forma = calcular_forma_recente(cur, time_id)
+            if contagem_forma:
+                salvar_forma_recente(cur, contagem_forma, jogos_analisados_forma, time_id)
+                conn.commit()
+            else:
+                print(f"  Dados insuficientes ainda pra forma recente ({jogos_analisados_forma} jogos "
+                      f"disponíveis, mínimo de {JOGOS_MINIMOS_FORMA_RECENTE}).")
+
+            print("Calculando padrões de confronto direto (por adversário específico)...")
+            total_confronto = calcular_padroes_confronto_direto(cur, time_id)
             conn.commit()
-        else:
-            print("  Dados insuficientes ainda para resultado final.")
+            if total_confronto:
+                print(f"  Concluído! {total_confronto} padrão(ões) de confronto direto calculados.")
+            else:
+                print(f"  Nenhum adversário com pelo menos {JOGOS_MINIMOS_CONFRONTO} jogos analisados ainda.")
 
-        print(f"\nCalculando forma recente (últimos {JOGOS_FORMA_RECENTE} jogos)...")
-        contagem_forma, jogos_analisados_forma = calcular_forma_recente(cur)
-        if contagem_forma and corinthians_id:
-            salvar_forma_recente(cur, contagem_forma, jogos_analisados_forma, corinthians_id)
-            conn.commit()
-        else:
-            print(f"  Dados insuficientes ainda pra forma recente ({jogos_analisados_forma} jogos "
-                  f"disponíveis, mínimo de {JOGOS_MINIMOS_FORMA_RECENTE}).")
-
-        print("\nCalculando padrões de confronto direto (por adversário específico)...")
-        total_confronto = calcular_padroes_confronto_direto(cur)
-        conn.commit()
-        if total_confronto:
-            print(f"Concluído! {total_confronto} padrão(ões) de confronto direto calculados.")
-        else:
-            print(f"  Nenhum adversário com pelo menos {JOGOS_MINIMOS_CONFRONTO} jogos analisados ainda.")
-
+        # NOVO: perfil de árbitro continua sendo calculado uma vez só, pra
+        # TODOS os jogos disponíveis - não é "do Corinthians" nem "do
+        # Athletico Paranaense", é um dado sobre o próprio árbitro, então
+        # não faz sentido repetir por time (a amostra dele só fica maior e
+        # melhor incluindo jogos de todos os times rastreados juntos).
         print("\nCalculando perfil de árbitros (cartões e faltas por jogo apitado)...")
         resultados_arbitro = calcular_padroes_arbitro(cur)
         if resultados_arbitro:
