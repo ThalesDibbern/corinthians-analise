@@ -12,8 +12,10 @@ já está no banco - verifica eventos e cada tipo de estatística de forma
 independente, então é seguro rodar esse script várias vezes, ele só
 processa o que falta, sem duplicar nada.
 
-ESCOPO ATUAL: só Corinthians (TEAM_ID = 131). Teste com escopo menor antes
-de expandir pra outros times do Brasileirão.
+ESCOPO: qualquer time com api_football_team_id preenchido na tabela `times`
+(hoje: Corinthians e Athletico Paranaense) - basta adicionar um time novo
+no banco pra esse script passar a coletar o histórico dele também, sem
+precisar mexer em código.
 
 NOVO: também salva o árbitro de cada jogo (campo "referee" da API), usado
 depois pelo motor_padroes.py pra calcular o "perfil" de cada árbitro
@@ -64,9 +66,20 @@ API_BASE = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
 LEAGUE_ID = 71                    # Brasileirão Série A
-TEAM_ID = 131                      # Corinthians
 TEMPORADAS = [2022, 2023, 2024, 2025, 2026]  # histórico + temporada atual (plano pago libera 2025/2026)
 LIMITE_REQUISICOES_DIA = 7000      # margem de segurança abaixo do limite de 7.500/dia do plano novo
+
+# NOVO (multi-time): antes existia um TEAM_ID fixo (só Corinthians). Agora
+# os times rastreados vêm da própria tabela `times` (qualquer um que já
+# tenha api_football_team_id preenchido) - adicionar um time novo no banco
+# já é suficiente pra esse script passar a coletar o histórico dele também,
+# sem precisar mexer em código.
+def buscar_times_rastreados(cur):
+    cur.execute(
+        "SELECT id, nome, api_football_team_id FROM times "
+        "WHERE api_football_team_id IS NOT NULL ORDER BY nome"
+    )
+    return cur.fetchall()
 
 requisicoes_usadas = 0
 _cursor_para_contador = None  # referência ao cursor do banco, usada só pelo controle de limite
@@ -126,9 +139,9 @@ def chamar_api(endpoint, params, tentativas=3):
     raise RuntimeError(f"Falhou após {tentativas} tentativas por causa do erro 429 (limite por minuto).")
 
 
-def buscar_jogos(temporada):
-    """Busca os jogos do Corinthians numa temporada específica."""
-    dados = chamar_api("fixtures", {"league": LEAGUE_ID, "season": temporada, "team": TEAM_ID})
+def buscar_jogos(temporada, team_api_id):
+    """Busca os jogos desse time numa temporada específica."""
+    dados = chamar_api("fixtures", {"league": LEAGUE_ID, "season": temporada, "team": team_api_id})
 
     if dados.get("errors"):
         print(f"  Aviso da API para temporada {temporada}: {dados['errors']}")
@@ -398,13 +411,24 @@ def get_or_create_time(cur, api_football_team_id, nome):
     return cur.fetchone()[0]
 
 
-def get_or_create_jogo(cur, fixture):
+def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
     """Garante que o jogo existe na tabela `jogos`, retorna o id.
     NOVO: também salva o árbitro (campo "referee" da API), tanto na criação
     quanto num backfill pra jogos que já existiam no banco sem esse dado.
     NOVO (times): também preenche mandante_id/visitante_id, referenciando a
     tabela `times` (em vez de só o texto solto em `adversario`) - com o
-    mesmo backfill automático pra jogos que já existiam sem esse dado."""
+    mesmo backfill automático pra jogos que já existiam sem esse dado.
+
+    NOVO (multi-time): a busca agora é por (fixture_id_api, nosso_time_id),
+    não mais só por `id` - o mesmo jogo real da API-Football pode ter até
+    duas linhas na tabela `jogos`, uma pra cada time rastreado, se os dois
+    times rastreados jogarem entre si (ex: Corinthians x Athletico
+    Paranaense, se os dois estiverem sendo rastreados ao mesmo tempo).
+    `id` continua existindo como antes (só uma chave interna) - na maioria
+    dos casos ele ainda é igual ao fixture_id_api, mas se esse número já
+    estiver em uso pela visão de OUTRO time rastreado no mesmo jogo real, a
+    inserção cai pra um id automático (savepoint de segurança, mesmo padrão
+    já usado no atualizar_odds.py pra colisão de id)."""
     fixture_id = fixture["fixture"]["id"]
     arbitro = fixture["fixture"].get("referee")  # pode vir None em alguns casos
 
@@ -415,8 +439,9 @@ def get_or_create_jogo(cur, fixture):
 
     cur.execute(
         "SELECT id, arbitro, mandante_id, visitante_id, datahora_jogo, "
-        "placar_corinthians, placar_adversario FROM jogos WHERE id = %s",
-        (fixture_id,),
+        "placar_corinthians, placar_adversario FROM jogos "
+        "WHERE fixture_id_api = %s AND nosso_time_id = %s",
+        (fixture_id, nosso_time_id),
     )
     row = cur.fetchone()
     if row:
@@ -425,7 +450,7 @@ def get_or_create_jogo(cur, fixture):
         # backfill: jogo já existia (de antes dessa funcionalidade) mas
         # está sem árbitro salvo, e agora a API nos deu esse dado - atualiza.
         if arbitro_salvo is None and arbitro:
-            cur.execute("UPDATE jogos SET arbitro = %s WHERE id = %s", (arbitro, fixture_id))
+            cur.execute("UPDATE jogos SET arbitro = %s WHERE id = %s", (arbitro, jogo_id))
 
         # backfill: jogo já existia de antes da tabela `times` existir -
         # completa mandante_id/visitante_id agora.
@@ -434,14 +459,14 @@ def get_or_create_jogo(cur, fixture):
             visitante_id = get_or_create_time(cur, visitante_api_id, visitante_nome)
             cur.execute(
                 "UPDATE jogos SET mandante_id = %s, visitante_id = %s WHERE id = %s",
-                (mandante_id, visitante_id, fixture_id),
+                (mandante_id, visitante_id, jogo_id),
             )
 
         # NOVO: backfill de datahora_jogo (jogo criado antes dessa coluna existir)
         if datahora_salva is None:
             cur.execute(
                 "UPDATE jogos SET datahora_jogo = %s WHERE id = %s",
-                (fixture["fixture"]["date"], fixture_id),
+                (fixture["fixture"]["date"], jogo_id),
             )
 
         # NOVO: backfill de placar - esse é o bug real que resolvemos agora.
@@ -454,18 +479,18 @@ def get_or_create_jogo(cur, fixture):
             gol_home = fixture["goals"]["home"]
             gol_away = fixture["goals"]["away"]
             if gol_home is not None and gol_away is not None:
-                eh_mandante_backfill = mandante_api_id == TEAM_ID
+                eh_mandante_backfill = mandante_api_id == nosso_time_api_id
                 novo_placar_cor = gol_home if eh_mandante_backfill else gol_away
                 novo_placar_adv = gol_away if eh_mandante_backfill else gol_home
                 cur.execute(
                     "UPDATE jogos SET placar_corinthians = %s, placar_adversario = %s WHERE id = %s",
-                    (novo_placar_cor, novo_placar_adv, fixture_id),
+                    (novo_placar_cor, novo_placar_adv, jogo_id),
                 )
         return jogo_id
 
     data_jogo = fixture["fixture"]["date"][:10]
     datahora_jogo = fixture["fixture"]["date"]  # NOVO: timestamp completo, não só a data
-    eh_mandante = mandante_api_id == TEAM_ID
+    eh_mandante = mandante_api_id == nosso_time_api_id
     adversario = visitante_nome if eh_mandante else mandante_nome
     placar_corinthians = (
         fixture["goals"]["home"] if eh_mandante else fixture["goals"]["away"]
@@ -477,38 +502,55 @@ def get_or_create_jogo(cur, fixture):
     mandante_id = get_or_create_time(cur, mandante_api_id, mandante_nome)
     visitante_id = get_or_create_time(cur, visitante_api_id, visitante_nome)
 
-    cur.execute(
-        """
-        INSERT INTO jogos (id, data_jogo, datahora_jogo, adversario, mandante, competicao,
-                            placar_corinthians, placar_adversario, arbitro,
-                            mandante_id, visitante_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            fixture_id,
-            data_jogo,
-            datahora_jogo,
-            adversario,
-            eh_mandante,
-            "Brasileirão Série A",
-            placar_corinthians,
-            placar_adversario,
-            arbitro,
-            mandante_id,
-            visitante_id,
-        ),
-    )
-    return fixture_id
+    # NOVO (multi-time): tenta usar o próprio fixture_id como `id` (igual
+    # sempre foi) - só cai pro id automático se esse número já estiver em
+    # uso pela visão de OUTRO time rasteado nesse mesmo jogo real.
+    cur.execute("SAVEPOINT antes_de_inserir_jogo")
+    try:
+        cur.execute(
+            """
+            INSERT INTO jogos (id, fixture_id_api, nosso_time_id, data_jogo, datahora_jogo,
+                                adversario, mandante, competicao,
+                                placar_corinthians, placar_adversario, arbitro,
+                                mandante_id, visitante_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                fixture_id, fixture_id, nosso_time_id,
+                data_jogo, datahora_jogo, adversario, eh_mandante, "Brasileirão Série A",
+                placar_corinthians, placar_adversario, arbitro,
+                mandante_id, visitante_id,
+            ),
+        )
+        return fixture_id
+    except Exception:
+        cur.execute("ROLLBACK TO SAVEPOINT antes_de_inserir_jogo")
+        cur.execute(
+            """
+            INSERT INTO jogos (fixture_id_api, nosso_time_id, data_jogo, datahora_jogo,
+                                adversario, mandante, competicao,
+                                placar_corinthians, placar_adversario, arbitro,
+                                mandante_id, visitante_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+            """,
+            (
+                fixture_id, nosso_time_id,
+                data_jogo, datahora_jogo, adversario, eh_mandante, "Brasileirão Série A",
+                placar_corinthians, placar_adversario, arbitro,
+                mandante_id, visitante_id,
+            ),
+        )
+        return cur.fetchone()[0]
 
 
-def salvar_eventos(cur, jogo_id, eventos):
+def salvar_eventos(cur, jogo_id, eventos, nosso_time_api_id):
     """Classifica cada evento (gol / cartão / substituição) e salva na tabela certa."""
     contagem = {"gols": 0, "cartoes": 0, "substituicoes": 0, "ignorados": 0}
 
     for ev in eventos:
         tipo = ev["type"]  # "Goal", "Card", "subst" (varia conforme a API)
         minuto = ev["time"]["elapsed"]
-        lado = "mandante" if ev["team"]["id"] == TEAM_ID else "visitante"
+        lado = "mandante" if ev["team"]["id"] == nosso_time_api_id else "visitante"
         jogador_nome = ev["player"]["name"] if ev["player"]["name"] else None
         jogador_api_id = ev["player"].get("id") if ev.get("player") else None
 
@@ -638,65 +680,77 @@ def main():
         total_processados = 0
         total_pulados = 0
 
-        for temporada in TEMPORADAS:
-            jogos = buscar_jogos(temporada)
+        times_rastreados = buscar_times_rastreados(cur)
+        if not times_rastreados:
+            print("Nenhum time com api_football_team_id preenchido na tabela `times` - nada a fazer.")
+            return
 
-            for fixture in jogos:
-                fixture_id = fixture["fixture"]["id"]
-                home_team_id = fixture["teams"]["home"]["id"]
+        for time_id, time_nome, time_api_id in times_rastreados:
+            print(f"\n========== {time_nome} ==========")
 
-                falta_eventos = not jogo_ja_processado(cur, fixture_id)
-                falta_estatisticas = not jogo_tem_estatisticas(cur, fixture_id)
-                falta_estatisticas_jogador = not jogo_tem_estatisticas_jogador(cur, fixture_id)
-                falta_escalacao = not jogo_tem_escalacao(cur, fixture_id)
+            for temporada in TEMPORADAS:
+                jogos = buscar_jogos(temporada, time_api_id)
 
-                # NOVO: mesmo que o jogo já esteja completo, ainda passamos por
-                # get_or_create_jogo pra garantir o backfill do árbitro em jogos
-                # antigos - por isso não usamos mais "continue" direto aqui.
-                jogo_id = get_or_create_jogo(cur, fixture)
-                conn.commit()
+                for fixture in jogos:
+                    fixture_id = fixture["fixture"]["id"]
+                    home_team_id = fixture["teams"]["home"]["id"]
 
-                if not falta_eventos and not falta_estatisticas \
-                        and not falta_estatisticas_jogador and not falta_escalacao:
-                    total_pulados += 1
-                    continue
-
-                print(f"\nProcessando jogo {fixture_id} (temporada {temporada})...")
-
-                if falta_eventos:
-                    eventos = buscar_eventos(fixture_id)
-                    contagem = salvar_eventos(cur, jogo_id, eventos)
-                    print(f"  -> {contagem['gols']} gols, {contagem['cartoes']} cartões, "
-                          f"{contagem['substituicoes']} substituições salvos "
-                          f"({contagem['ignorados']} eventos ignorados).")
+                    # NOVO (multi-time): get_or_create_jogo roda ANTES das
+                    # checagens de "já processado" agora, porque o `jogo_id`
+                    # de verdade só é conhecido depois dele (pode ser
+                    # diferente do fixture_id, no caso raro de dois times
+                    # rastreados jogarem entre si).
+                    jogo_id = get_or_create_jogo(cur, fixture, time_id, time_api_id)
                     conn.commit()
-                    time.sleep(7)  # respeita o limite de ~10 requisições por minuto do plano grátis
 
-                if falta_estatisticas:
-                    estatisticas = buscar_estatisticas(fixture_id)
-                    salvos = salvar_estatisticas(cur, jogo_id, estatisticas, home_team_id)
-                    print(f"  -> estatísticas de {salvos} lado(s) salvas.")
-                    conn.commit()
-                    time.sleep(7)
+                    falta_eventos = not jogo_ja_processado(cur, jogo_id)
+                    falta_estatisticas = not jogo_tem_estatisticas(cur, jogo_id)
+                    falta_estatisticas_jogador = not jogo_tem_estatisticas_jogador(cur, jogo_id)
+                    falta_escalacao = not jogo_tem_escalacao(cur, jogo_id)
 
-                if falta_estatisticas_jogador:
-                    stats_jogadores = buscar_estatisticas_jogadores(fixture_id)
-                    salvos = salvar_estatisticas_jogadores(cur, jogo_id, stats_jogadores, home_team_id)
-                    print(f"  -> estatísticas individuais de {salvos} jogador(es) salvas.")
-                    conn.commit()
-                    time.sleep(7)
+                    if not falta_eventos and not falta_estatisticas \
+                            and not falta_estatisticas_jogador and not falta_escalacao:
+                        total_pulados += 1
+                        continue
 
-                if falta_escalacao:
-                    # NOVO: roda depois de eventos, pois precisa que
-                    # `substituicoes` já esteja salva pra cruzar o minuto de
-                    # saída de cada titular substituído.
-                    lineups = buscar_escalacao(fixture_id)
-                    salvos = salvar_escalacao(cur, jogo_id, lineups)
-                    print(f"  -> escalação: {salvos} jogador(es) salvos (titulares + reservas).")
-                    conn.commit()
-                    time.sleep(7)
+                    print(f"\nProcessando jogo {fixture_id} do {time_nome} (temporada {temporada})...")
 
-                total_processados += 1
+                    if falta_eventos:
+                        eventos = buscar_eventos(fixture_id)
+                        contagem = salvar_eventos(cur, jogo_id, eventos, time_api_id)
+                        print(f"  -> {contagem['gols']} gols, {contagem['cartoes']} cartões, "
+                              f"{contagem['substituicoes']} substituições salvos "
+                              f"({contagem['ignorados']} eventos ignorados).")
+                        conn.commit()
+                        time.sleep(7)  # respeita o limite de ~10 requisições por minuto do plano grátis
+
+                    if falta_estatisticas:
+                        estatisticas = buscar_estatisticas(fixture_id)
+                        salvos = salvar_estatisticas(cur, jogo_id, estatisticas, home_team_id)
+                        print(f"  -> estatísticas de {salvos} lado(s) salvas.")
+                        conn.commit()
+                        time.sleep(7)
+
+                    if falta_estatisticas_jogador:
+                        stats_jogadores = buscar_estatisticas_jogadores(fixture_id)
+                        salvos = salvar_estatisticas_jogadores(cur, jogo_id, stats_jogadores, home_team_id)
+                        print(f"  -> estatísticas individuais de {salvos} jogador(es) salvas.")
+                        conn.commit()
+                        time.sleep(7)
+
+                    if falta_escalacao:
+                        # NOVO: roda depois de eventos, pois precisa que
+                        # `substituicoes` já esteja salva pra cruzar o minuto de
+                        # saída de cada titular substituído.
+                        lineups = buscar_escalacao(fixture_id)
+                        salvos = salvar_escalacao(cur, jogo_id, lineups)
+                        print(f"  -> escalação: {salvos} jogador(es) salvos (titulares + reservas).")
+                        conn.commit()
+                        time.sleep(7)
+
+                    total_processados += 1
+
+            print(f"  Concluído {time_nome}.")
 
         print(f"\nConcluído! {total_processados} jogos novos processados, "
               f"{total_pulados} já existiam no banco e foram pulados.")
