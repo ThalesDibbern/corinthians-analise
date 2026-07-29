@@ -88,11 +88,31 @@ PALAVRAS_MERCADO_INTERESSE = [
 ]
 
 
+def get_com_retry_429(url, params, tentativas=5, espera_segundos=20):
+    """NOVO: tenta de novo automaticamente se a OddsPapi responder 429
+    (limite de requisição por minuto) - ficou mais comum agora que o script
+    processa vários times rastreados em sequência rápida, uma execução
+    atrás da outra. Espera um tempo fixo e tenta de novo, até um número
+    máximo de tentativas, antes de desistir de vez."""
+    resp = None
+    for tentativa in range(tentativas):
+        resp = requests.get(url, params=params)
+        if resp.status_code == 429:
+            if tentativa == tentativas - 1:
+                resp.raise_for_status()
+            print(f"  Aviso: limite de requisição da OddsPapi atingido (429) - "
+                  f"esperando {espera_segundos}s e tentando de novo...")
+            time.sleep(espera_segundos)
+            continue
+        return resp
+    return resp
+
+
 def buscar_catalogo_mercados():
     """Busca a lista de todos os mercados existentes, incluindo a linha
     (handicap) de cada mercado e o nome de cada outcome (Mais/Menos/Sim/Não/
     0/1+/2+), para conseguirmos interpretar as odds corretamente depois."""
-    resp = requests.get(
+    resp = get_com_retry_429(
         f"{API_BASE}/markets",
         params={"sportId": SPORT_ID, "language": "pt", "apiKey": API_KEY},
     )
@@ -113,7 +133,7 @@ def buscar_catalogo_mercados():
 def buscar_proximos_jogos(participant_id):
     """Busca jogos desse time no Brasileirão e filtra os que acontecem
     dentro da janela de antecedência definida."""
-    resp = requests.get(
+    resp = get_com_retry_429(
         f"{API_BASE}/fixtures",
         params={
             "tournamentId": TOURNAMENT_ID,
@@ -171,7 +191,7 @@ def buscar_odds(fixture_id, bookmakers=None):
     if not bookmakers:
         return {"bookmakerOdds": {}}
 
-    resp = requests.get(
+    resp = get_com_retry_429(
         f"{API_BASE}/odds",
         params={
             "fixtureId": fixture_id,
@@ -627,6 +647,7 @@ def main():
 
         for time_id, time_nome, time_participant_id, time_api_football_id in times_rastreados:
             print(f"\n========== {time_nome} ==========")
+            time.sleep(3)  # NOVO: pequena folga entre times, margem extra contra 429
 
             jogos = buscar_proximos_jogos(time_participant_id)
 
