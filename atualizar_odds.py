@@ -40,6 +40,7 @@ Variáveis de ambiente necessárias (configuradas no Railway, aba "Variables"):
 
 import os
 import re
+import time
 from datetime import datetime, timezone
 
 import requests
@@ -54,10 +55,22 @@ API_BASE = "https://api.oddspapi.io/v4"
 API_FOOTBALL_BASE = "https://v3.football.api-sports.io"
 SPORT_ID = 10
 TOURNAMENT_ID = 325     # Brasileirão Série A
-PARTICIPANT_ID = 1957   # Corinthians
-TEAM_ID_API_FOOTBALL = 131  # Corinthians na API-Football (id diferente do da OddsPapi)
 BOOKMAKERS = "superbet.bet.br"  # só Superbet por enquanto (plano pago com Player Props)
 DIAS_ANTECEDENCIA = 2   # busca odds de jogos que acontecem em até X dias
+
+
+# NOVO (multi-time): antes existiam PARTICIPANT_ID e TEAM_ID_API_FOOTBALL
+# fixos (só Corinthians). Agora os times rastreados vêm da própria tabela
+# `times` (qualquer um que já tenha os dois ids de odds/API-Football
+# preenchidos) - adicionar um time novo no banco já é suficiente pra esse
+# script passar a coletar as odds dele também, sem precisar mexer em código.
+def buscar_times_rastreados(cur):
+    cur.execute(
+        "SELECT id, nome, oddspapi_participant_id, api_football_team_id FROM times "
+        "WHERE oddspapi_participant_id IS NOT NULL AND api_football_team_id IS NOT NULL "
+        "ORDER BY nome"
+    )
+    return cur.fetchall()
 
 # Palavras usadas para filtrar quais mercados nos interessam. Comparação é
 # feita sem diferenciar maiúsculas.
@@ -92,15 +105,15 @@ def buscar_catalogo_mercados():
     return catalogo
 
 
-def buscar_proximos_jogos():
-    """Busca jogos do Corinthians no Brasileirão e filtra os que acontecem
+def buscar_proximos_jogos(participant_id):
+    """Busca jogos desse time no Brasileirão e filtra os que acontecem
     dentro da janela de antecedência definida."""
     resp = requests.get(
         f"{API_BASE}/fixtures",
         params={
             "tournamentId": TOURNAMENT_ID,
             "sportId": SPORT_ID,
-            "participantId": PARTICIPANT_ID,
+            "participantId": participant_id,
             "apiKey": API_KEY,
         },
     )
@@ -195,7 +208,7 @@ def buscar_odds(fixture_id, bookmakers=None):
     return resp.json()
 
 
-def buscar_fixture_api_football(data_jogo):
+def buscar_fixture_api_football(data_jogo, team_api_football_id):
     """Consulta a API-Football pra encontrar o fixture do Corinthians numa
     data específica. Retorna o fixture inteiro (dict) ou None se a chave não
     estiver configurada, se a API ainda não tiver esse jogo cadastrado, ou se
@@ -216,7 +229,7 @@ def buscar_fixture_api_football(data_jogo):
         resp = requests.get(
             f"{API_FOOTBALL_BASE}/fixtures",
             headers={"x-apisports-key": API_FOOTBALL_KEY},
-            params={"team": TEAM_ID_API_FOOTBALL, "date": data_jogo},
+            params={"team": team_api_football_id, "date": data_jogo},
         )
         resp.raise_for_status()
         dados = resp.json()
@@ -313,6 +326,7 @@ def get_or_create_time(cur, oddspapi_participant_id, nome):
 def get_or_create_jogo(cur, data_jogo, adversario, mandante,
                         mandante_nome, visitante_nome,
                         mandante_oddspapi_id, visitante_oddspapi_id,
+                        nosso_time_id, nosso_time_api_football_id,
                         datahora_jogo=None):
     """Encontra (ou cria) o jogo, retorna o id.
     NOVO: se o jogo já existe mas ainda não tem árbitro salvo, tenta buscar
@@ -341,14 +355,18 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
     busca usa mandante_id/visitante_id (já resolvidos de forma confiável
     via api_football_team_id/oddspapi_participant_id) - o texto só entra
     como fallback de segurança pra jogos bem antigos que ainda não tenham
-    esses ids preenchidos."""
+    esses ids preenchidos.
+    NOVO (multi-time): a busca também filtra por nosso_time_id - se os DOIS
+    times de um jogo forem rastreados (ex: Corinthians x Athletico
+    Paranaense), cada um enxerga sua PRÓPRIA linha desse jogo (mesmo padrão
+    já usado no popular_banco.py), em vez de compartilhar uma linha só."""
     mandante_id = get_or_create_time(cur, mandante_oddspapi_id, mandante_nome)
     visitante_id = get_or_create_time(cur, visitante_oddspapi_id, visitante_nome)
 
     cur.execute(
         "SELECT id, arbitro, datahora_jogo FROM jogos "
-        "WHERE data_jogo = %s AND mandante_id = %s AND visitante_id = %s",
-        (data_jogo, mandante_id, visitante_id),
+        "WHERE data_jogo = %s AND mandante_id = %s AND visitante_id = %s AND nosso_time_id = %s",
+        (data_jogo, mandante_id, visitante_id, nosso_time_id),
     )
     row = cur.fetchone()
 
@@ -358,15 +376,16 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
         # duplicar um jogo legítimo enquanto algum registro assim existir)
         cur.execute(
             "SELECT id, arbitro, datahora_jogo FROM jogos "
-            "WHERE data_jogo = %s AND adversario = %s AND (mandante_id IS NULL OR visitante_id IS NULL)",
-            (data_jogo, adversario),
+            "WHERE data_jogo = %s AND adversario = %s AND nosso_time_id = %s "
+            "AND (mandante_id IS NULL OR visitante_id IS NULL)",
+            (data_jogo, adversario, nosso_time_id),
         )
         row = cur.fetchone()
 
     if row:
         jogo_id, arbitro_salvo, datahora_salva = row
         if arbitro_salvo is None:
-            fixture = buscar_fixture_api_football(data_jogo)
+            fixture = buscar_fixture_api_football(data_jogo, nosso_time_api_football_id)
             arbitro = fixture["fixture"].get("referee") if fixture else None
             if arbitro:
                 cur.execute("UPDATE jogos SET arbitro = %s WHERE id = %s", (arbitro, jogo_id))
@@ -388,7 +407,7 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
             )
         return jogo_id
 
-    fixture = buscar_fixture_api_football(data_jogo)
+    fixture = buscar_fixture_api_football(data_jogo, nosso_time_api_football_id)
     arbitro = fixture["fixture"].get("referee") if fixture else None
     fixture_id_real = fixture["fixture"]["id"] if fixture else None
     if arbitro:
@@ -396,14 +415,17 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
 
     if fixture_id_real is not None:
         # tenta usar o ID real da API-Football, com uma rede de segurança
-        # (savepoint) caso esse ID já esteja em uso por outro caminho
+        # (savepoint) caso esse ID já esteja em uso por outro caminho -
+        # inclusive pela visão de OUTRO time rastreado nesse mesmo jogo real.
         cur.execute("SAVEPOINT antes_de_inserir_jogo")
         try:
             cur.execute(
-                """INSERT INTO jogos (id, data_jogo, datahora_jogo, adversario, mandante, competicao,
+                """INSERT INTO jogos (id, fixture_id_api, nosso_time_id, data_jogo, datahora_jogo,
+                                       adversario, mandante, competicao,
                                        arbitro, mandante_id, visitante_id)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-                (fixture_id_real, data_jogo, datahora_jogo, adversario, mandante, "Brasileirão Série A",
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                (fixture_id_real, fixture_id_real, nosso_time_id, data_jogo, datahora_jogo,
+                 adversario, mandante, "Brasileirão Série A",
                  arbitro, mandante_id, visitante_id),
             )
             return cur.fetchone()[0]
@@ -412,27 +434,34 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
             print(f"  Aviso: ID real {fixture_id_real} já em uso por outro registro - "
                   "criando esse jogo com ID automático (verificar depois se não duplicou).")
 
+    # NOVO: fixture_id_api é obrigatório agora - se a API-Football não
+    # confirmou o fixture real (ex: chave ausente, falha de rede), usa um
+    # valor sintético negativo (nunca colide com um fixture_id real, que é
+    # sempre positivo) só pra não violar a coluna obrigatória.
+    fixture_id_para_salvar = fixture_id_real if fixture_id_real is not None else -int(time.time() * 1000)
+
     cur.execute(
-        """INSERT INTO jogos (data_jogo, datahora_jogo, adversario, mandante, competicao, arbitro,
+        """INSERT INTO jogos (fixture_id_api, nosso_time_id, data_jogo, datahora_jogo,
+                               adversario, mandante, competicao, arbitro,
                                mandante_id, visitante_id)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-        (data_jogo, datahora_jogo, adversario, mandante, "Brasileirão Série A", arbitro,
-         mandante_id, visitante_id),
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+        (fixture_id_para_salvar, nosso_time_id, data_jogo, datahora_jogo, adversario, mandante,
+         "Brasileirão Série A", arbitro, mandante_id, visitante_id),
     )
     return cur.fetchone()[0]
 
 
-def nome_time_por_posicao(mandante, adversario, posicao):
+def nome_time_por_posicao(mandante, adversario, posicao, nosso_nome):
     """NOVO: traduz "Equipe 1"/"Equipe 2" (nomenclatura genérica que a
     OddsPapi usa pra mercados de time) pro nome real do time. Convenção da
     OddsPapi: Equipe 1 = mandante do jogo, Equipe 2 = visitante."""
-    corinthians_eh_equipe_1 = mandante
+    nosso_time_eh_equipe_1 = mandante
     if posicao == "1":
-        return "Corinthians" if corinthians_eh_equipe_1 else adversario
-    return adversario if corinthians_eh_equipe_1 else "Corinthians"
+        return nosso_nome if nosso_time_eh_equipe_1 else adversario
+    return adversario if nosso_time_eh_equipe_1 else nosso_nome
 
 
-def montar_descricao_mercado(nome_mercado, linha, direcao, mandante, adversario, player_name=None):
+def montar_descricao_mercado(nome_mercado, linha, direcao, mandante, adversario, nosso_nome, player_name=None):
     """NOVO: monta uma descrição legível e ESPECÍFICA da odd, resolvendo
     "Equipe 1"/"Equipe 2" pro nome real do time e incluindo a linha
     (handicap) e a direção escolhida (Mais/Menos/Sim/Não).
@@ -444,7 +473,7 @@ def montar_descricao_mercado(nome_mercado, linha, direcao, mandante, adversario,
     descricao = nome_mercado
 
     def substituir(match):
-        return nome_time_por_posicao(mandante, adversario, match.group(1))
+        return nome_time_por_posicao(mandante, adversario, match.group(1), nosso_nome)
 
     descricao = re.sub(r"Equipe\s*([12])", substituir, descricao, flags=re.IGNORECASE)
 
@@ -503,7 +532,7 @@ def existem_odds_utilizaveis(dados_odds):
     return False
 
 
-def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, adversario):
+def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, adversario, nosso_nome):
     """Percorre as odds de todas as casas/mercados retornados e salva só os
     mercados de interesse (cartão de jogador + escanteios do time), incluindo
     a linha (handicap) e a direção (Mais/Menos/Sim/Não) de cada odd.
@@ -558,7 +587,7 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, a
                         jogador_id = get_or_create_jogador(cur, player_name)
 
                     descricao_mercado = montar_descricao_mercado(
-                        nome_mercado, linha, direcao, mandante, adversario, player_name
+                        nome_mercado, linha, direcao, mandante, adversario, nosso_nome, player_name
                     )
 
                     cur.execute(
@@ -582,66 +611,76 @@ def main():
     cur = conn.cursor()
 
     try:
-        jogos = buscar_proximos_jogos()
-
-        if not jogos:
-            print(f"Nenhum jogo do Corinthians nos próximos {DIAS_ANTECEDENCIA} dias. Nada a fazer hoje.")
+        times_rastreados = buscar_times_rastreados(cur)
+        if not times_rastreados:
+            print("Nenhum time com oddspapi_participant_id + api_football_team_id "
+                  "preenchidos na tabela `times` - nada a fazer.")
             return
 
         print("Carregando catálogo de mercados...")
         catalogo_mercados = buscar_catalogo_mercados()
 
-        for jogo in jogos:
-            eh_mandante = jogo["participant1Id"] == PARTICIPANT_ID
-            adversario = jogo["participant2Name"] if eh_mandante else jogo["participant1Name"]
-            adversario_oddspapi_id = jogo.get("participant2Id") if eh_mandante else jogo.get("participant1Id")
-            data_jogo = jogo["startTime"][:10]
-            datahora_jogo = jogo["startTime"]  # NOVO: timestamp completo, não só a data
+        for time_id, time_nome, time_participant_id, time_api_football_id in times_rastreados:
+            print(f"\n========== {time_nome} ==========")
 
-            print(f"\nJogo encontrado: Corinthians x {adversario} em {data_jogo}")
+            jogos = buscar_proximos_jogos(time_participant_id)
 
-            if eh_mandante:
-                mandante_nome, visitante_nome = "Corinthians", adversario
-                mandante_oddspapi_id, visitante_oddspapi_id = PARTICIPANT_ID, adversario_oddspapi_id
-            else:
-                mandante_nome, visitante_nome = adversario, "Corinthians"
-                mandante_oddspapi_id, visitante_oddspapi_id = adversario_oddspapi_id, PARTICIPANT_ID
-
-            jogo_id = get_or_create_jogo(
-                cur, data_jogo, adversario, eh_mandante,
-                mandante_nome, visitante_nome,
-                mandante_oddspapi_id, visitante_oddspapi_id,
-                datahora_jogo=datahora_jogo,
-            )
-            conn.commit()
-
-            # NOVO: se a busca de odds falhar pra ESSE jogo específico (ex: 403,
-            # jogo fora da cobertura da OddsPapi, competição não suportada),
-            # não deixa isso travar o restante do pipeline - avisa e segue pro
-            # próximo jogo. Sem isso, um único jogo problemático derrubava o
-            # script inteiro e, por consequência, todos os scripts seguintes
-            # do cron (motor_padroes, motor_recomendacoes etc.) deixavam de rodar.
-            try:
-                dados_odds = buscar_odds(jogo["fixtureId"])
-            except Exception as e:
-                print(f"  Aviso: não foi possível buscar odds desse jogo ({e}). Pulando pro próximo.")
+            if not jogos:
+                print(f"Nenhum jogo do {time_nome} nos próximos {DIAS_ANTECEDENCIA} dias.")
                 continue
 
-            # NOVO: só apaga as odds antigas se a resposta nova realmente
-            # trouxer algo aproveitável (evita zerar odds boas quando a
-            # casa suspende temporariamente os mercados, comum perto/durante
-            # o jogo - antes disso, isso deixava o jogo sem NENHUMA odd
-            # depois, mesmo tendo tido odds válidas na coleta anterior).
-            if existem_odds_utilizaveis(dados_odds):
-                cur.execute("DELETE FROM odds WHERE jogo_id = %s", (jogo_id,))
-                salvos = salvar_odds_do_jogo(
-                    cur, jogo_id, dados_odds, catalogo_mercados, eh_mandante, adversario
+            for jogo in jogos:
+                eh_mandante = jogo["participant1Id"] == time_participant_id
+                adversario = jogo["participant2Name"] if eh_mandante else jogo["participant1Name"]
+                adversario_oddspapi_id = jogo.get("participant2Id") if eh_mandante else jogo.get("participant1Id")
+                data_jogo = jogo["startTime"][:10]
+                datahora_jogo = jogo["startTime"]  # NOVO: timestamp completo, não só a data
+
+                print(f"\nJogo encontrado: {time_nome} x {adversario} em {data_jogo}")
+
+                if eh_mandante:
+                    mandante_nome, visitante_nome = time_nome, adversario
+                    mandante_oddspapi_id, visitante_oddspapi_id = time_participant_id, adversario_oddspapi_id
+                else:
+                    mandante_nome, visitante_nome = adversario, time_nome
+                    mandante_oddspapi_id, visitante_oddspapi_id = adversario_oddspapi_id, time_participant_id
+
+                jogo_id = get_or_create_jogo(
+                    cur, data_jogo, adversario, eh_mandante,
+                    mandante_nome, visitante_nome,
+                    mandante_oddspapi_id, visitante_oddspapi_id,
+                    time_id, time_api_football_id,
+                    datahora_jogo=datahora_jogo,
                 )
-                print(f"  -> {salvos} odds salvas.")
-            else:
-                print("  Aviso: nenhuma odd utilizável nessa resposta (mercados suspensos/vazios) - "
-                      "mantendo as odds já salvas desse jogo.")
-            conn.commit()
+                conn.commit()
+
+                # NOVO: se a busca de odds falhar pra ESSE jogo específico (ex: 403,
+                # jogo fora da cobertura da OddsPapi, competição não suportada),
+                # não deixa isso travar o restante do pipeline - avisa e segue pro
+                # próximo jogo. Sem isso, um único jogo problemático derrubava o
+                # script inteiro e, por consequência, todos os scripts seguintes
+                # do cron (motor_padroes, motor_recomendacoes etc.) deixavam de rodar.
+                try:
+                    dados_odds = buscar_odds(jogo["fixtureId"])
+                except Exception as e:
+                    print(f"  Aviso: não foi possível buscar odds desse jogo ({e}). Pulando pro próximo.")
+                    continue
+
+                # NOVO: só apaga as odds antigas se a resposta nova realmente
+                # trouxer algo aproveitável (evita zerar odds boas quando a
+                # casa suspende temporariamente os mercados, comum perto/durante
+                # o jogo - antes disso, isso deixava o jogo sem NENHUMA odd
+                # depois, mesmo tendo tido odds válidas na coleta anterior).
+                if existem_odds_utilizaveis(dados_odds):
+                    cur.execute("DELETE FROM odds WHERE jogo_id = %s", (jogo_id,))
+                    salvos = salvar_odds_do_jogo(
+                        cur, jogo_id, dados_odds, catalogo_mercados, eh_mandante, adversario, time_nome
+                    )
+                    print(f"  -> {salvos} odds salvas.")
+                else:
+                    print("  Aviso: nenhuma odd utilizável nessa resposta (mercados suspensos/vazios) - "
+                          "mantendo as odds já salvas desse jogo.")
+                conn.commit()
 
     except Exception as e:
         conn.rollback()
