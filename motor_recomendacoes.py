@@ -419,11 +419,17 @@ def calcular_recomendacoes(cur):
     media_geral_cartoes = buscar_media_geral_cartoes(cur)
     media_geral_faltas = buscar_media_geral_faltas(cur)
 
-    # NOVO (multi-time): nome de cada time, usado pra montar a descrição do
-    # resultado final com o nome certo (ex: "Vitória do Athletico
-    # Paranaense"), em vez de sempre "Corinthians" fixo no texto.
-    cur.execute("SELECT id, nome FROM times")
-    nomes_times = dict(cur.fetchall())
+    # NOVO (multi-time): nome de cada time (+ apelidos conhecidos, já que o
+    # mesmo time pode aparecer com nomes diferentes em partes diferentes da
+    # resposta da OddsPapi), usado pra montar a descrição do resultado
+    # final com o nome certo e pra identificar de quem é um mercado de
+    # escanteio_time (ver uso mais abaixo).
+    cur.execute("SELECT id, nome, apelidos FROM times")
+    variantes_times = {}
+    nomes_times = {}
+    for time_id_row, nome_row, apelidos_row in cur.fetchall():
+        nomes_times[time_id_row] = nome_row
+        variantes_times[time_id_row] = {nome_row.lower()} | {a.lower() for a in (apelidos_row or [])}
 
     for (odd_id, jogo_id, jogador_id, casa, mercado, valor_odd,
          linha, direcao, data_jogo, adversario, mandante, arbitro,
@@ -508,23 +514,33 @@ def calcular_recomendacoes(cur):
 
         elif tipo == "escanteio_time" and not jogador_id \
                 and direcao_normalizada in ("mais", "menos") and linha is not None:
-            # NOVO (multi-time): o mercado de escanteio_time da Superbet é
-            # nomeado com o nome real do time (ex: "Escanteios - Mais/Menos
-            # Corinthians" ou "...CA Paranaense PR"). Antes a checagem era
-            # fixa em "corinthians" no texto - isso funcionava com um time
-            # só, mas quebrava com dois: no jogo do Athletico Paranaense
-            # contra o Corinthians, o mercado de escanteio DO ADVERSÁRIO
-            # (Corinthians) também contém a palavra "corinthians", e a
-            # checagem fixa aplicava por engano a frequência/mercado do
-            # Corinthians como se fosse do Athletico Paranaense.
-            # Em vez de tentar confirmar "é o nosso time" (frágil - o nome
-            # salvo em `times.nome` nem sempre bate exatamente com o texto
-            # que a Superbet usa no mercado, como já vimos antes com nomes
-            # tipo "CA Paranaense PR"), EXCLUI quando o mercado bate com o
-            # nome do ADVERSÁRIO - esse nome já vem resolvido corretamente
-            # por ID (não por texto) em `adversario`, então é mais confiável.
-            eh_mercado_do_adversario = adversario and adversario.lower() in mercado.lower()
-            if not eh_mercado_do_adversario:
+            # NOVO (multi-time): descobrimos que o MESMO time aparece com
+            # nomes DIFERENTES em partes diferentes da resposta da OddsPapi
+            # (ex: Athletico Paranaense é "CA Paranaense PR" na lista de
+            # jogos, mas "Atletico Paranaense" dentro do texto do mercado
+            # de escanteio) - o mesmo tipo de divergência de nome que já
+            # vimos entre times/jogadores em outras partes do projeto.
+            # Comparar com um nome só (nem o nosso, nem o do adversário) não
+            # é confiável sozinho - testa vários candidatos de cada lado:
+            # o nome salvo em `times` pra cada time (via mandante_id/
+            # visitante_id) e o texto de `adversario` já resolvido antes.
+            mercado_lower = mercado.lower()
+            adversario_id_calc = None
+            if mandante_id is not None and visitante_id is not None:
+                adversario_id_calc = visitante_id if mandante_id == nosso_time_id else mandante_id
+
+            candidatos_nosso_time = variantes_times.get(nosso_time_id, set())
+            candidatos_adversario = variantes_times.get(adversario_id_calc, set()) | {(adversario or "").lower()}
+
+            bate_nosso_time = any(c and c in mercado_lower for c in candidatos_nosso_time)
+            bate_adversario = any(c and c in mercado_lower for c in candidatos_adversario)
+
+            # só aplica quando bate com A GENTE e não bate com o adversário -
+            # se dermos match nos dois (nomes parecidos) ou nenhum (nome
+            # totalmente diferente dos dois, formato desconhecido ainda),
+            # não arrisca aplicar errado - fica sem recomendação por
+            # segurança, em vez de aplicar a frequência do time errado.
+            if bate_nosso_time and not bate_adversario:
                 frequencia_bruta = buscar_frequencia_escanteio_time(cur, linha, nosso_time_id)
                 if frequencia_bruta is not None:
                     frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
