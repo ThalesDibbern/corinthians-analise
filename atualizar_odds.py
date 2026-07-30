@@ -93,10 +93,24 @@ def get_com_retry_429(url, params, tentativas=5, espera_segundos=20):
     (limite de requisição por minuto) - ficou mais comum agora que o script
     processa vários times rastreados em sequência rápida, uma execução
     atrás da outra. Espera um tempo fixo e tenta de novo, até um número
-    máximo de tentativas, antes de desistir de vez."""
+    máximo de tentativas, antes de desistir de vez.
+    NOVO: também tenta de novo em caso de erro de CONEXÃO (não só 429) -
+    ex: "IncompleteRead"/"ChunkedEncodingError", quando a conexão cai no
+    meio do download de uma resposta grande (o catálogo de mercados tem
+    ~600KB) - antes disso derrubava o script inteiro, sem nenhuma segunda
+    tentativa, mesmo sendo uma falha de rede passageira."""
     resp = None
     for tentativa in range(tentativas):
-        resp = requests.get(url, params=params)
+        try:
+            resp = requests.get(url, params=params, timeout=30)
+        except requests.exceptions.RequestException as e:
+            if tentativa == tentativas - 1:
+                raise
+            print(f"  Aviso: erro de conexão com a OddsPapi ({e.__class__.__name__}) - "
+                  f"esperando {espera_segundos}s e tentando de novo...")
+            time.sleep(espera_segundos)
+            continue
+
         if resp.status_code == 429:
             if tentativa == tentativas - 1:
                 resp.raise_for_status()
