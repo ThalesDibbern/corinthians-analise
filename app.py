@@ -1451,7 +1451,7 @@ PAGINA_JOGADORES = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Estatísticas de Jogadores - Análise de Apostas</title>
+    <title>Clubes - Análise de Apostas</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -1460,30 +1460,9 @@ PAGINA_JOGADORES = """
             margin: 0 auto; padding: 32px 20px 80px;
         }
         h1 { font-size: 1.5rem; margin: 0 0 4px; }
-        .subtitulo { color: #8b949e; margin: 0 0 20px; font-size: 0.88rem; }
+        .subtitulo { color: #8b949e; margin: 0 0 24px; font-size: 0.88rem; }
         .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
         .link-voltar:hover { text-decoration: underline; }
-        .busca {
-            width: 100%; padding: 10px 14px; margin: 16px 0 24px;
-            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
-            border-radius: 8px; font-size: 0.9rem;
-        }
-        .cartao {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 16px 20px; margin-bottom: 12px;
-        }
-        .nome-jogador { font-weight: 700; font-size: 1rem; margin-bottom: 10px; }
-        .bloco { margin-bottom: 10px; }
-        .bloco-titulo { color: #8b949e; font-size: 0.78rem; text-transform: uppercase;
-            letter-spacing: 0.03em; margin-bottom: 6px; }
-        .linhas-grid { display: flex; gap: 10px; flex-wrap: wrap; }
-        .linha-item {
-            background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
-            padding: 6px 12px; font-size: 0.82rem;
-        }
-        .linha-item b { color: #3fb950; }
-        .binario-texto { font-size: 0.88rem; color: #c9d1d9; }
-        .binario-texto b { color: #3fb950; }
         .vazio {
             text-align: center; color: #8b949e; padding: 32px 24px;
             background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
@@ -1491,7 +1470,7 @@ PAGINA_JOGADORES = """
         .clube-btn {
             display: flex; align-items: center; gap: 12px;
             background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 14px 20px; margin-bottom: 24px; text-decoration: none;
+            padding: 14px 20px; margin-bottom: 12px; text-decoration: none;
             color: #e6edf3; transition: border-color 0.15s;
         }
         .clube-btn:hover { border-color: #58a6ff; }
@@ -1507,71 +1486,25 @@ PAGINA_JOGADORES = """
 <body>
     <a href="/" class="link-voltar">← Voltar</a>
     <h1>📈 Estatísticas de Jogadores</h1>
-    <p class="subtitulo">Frequência histórica de cada jogador, direto dos padrões calculados - sem depender de odd disponível na casa de apostas.</p>
+    <p class="subtitulo">Selecione um clube pra ver o elenco, última escalação e frequência histórica de cada jogador.</p>
 
-    <a href="/clube/corinthians" class="clube-btn">
-        {% if escudo_url %}
-        <img src="{{ escudo_url }}" alt="Corinthians" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
-        {% else %}
-        <div class="clube-selo"></div>
-        {% endif %}
-        <div>
-            <div class="clube-nome">Corinthians</div>
-            <div class="clube-sub">Ver elenco e última escalação →</div>
-        </div>
-    </a>
-
-    <input type="text" class="busca" id="busca" placeholder="Buscar jogador..." onkeyup="filtrar()">
-
-    <div id="lista">
-    {% if jogadores %}
-        {% for j in jogadores %}
-        <div class="cartao jogador-card">
-            <div class="nome-jogador">{{ j.nome }}</div>
-
-            {% if j.cartao %}
-            <div class="bloco">
-                <div class="bloco-titulo">Cartão</div>
-                <div class="binario-texto">Recebeu cartão em <b>{{ j.cartao.frequencia }}%</b> dos últimos
-                    {{ j.cartao.jogos_analisados }} jogos</div>
-            </div>
+    {% if clubes %}
+        {% for c in clubes %}
+        <a href="/clube/{{ c.id }}" class="clube-btn">
+            {% if c.escudo_url %}
+            <img src="{{ c.escudo_url }}" alt="{{ c.nome }}" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
+            {% else %}
+            <div class="clube-selo"></div>
             {% endif %}
-
-            {% for bloco in j.blocos_linha %}
-            <div class="bloco">
-                <div class="bloco-titulo">{{ bloco.titulo }}</div>
-                <div class="linhas-grid">
-                    {% for item in bloco.itens %}
-                    <div class="linha-item">+{{ item.linha }}: <b>{{ item.frequencia }}%</b></div>
-                    {% endfor %}
-                </div>
+            <div>
+                <div class="clube-nome">{{ c.nome }}</div>
+                <div class="clube-sub">Ver elenco e última escalação →</div>
             </div>
-            {% endfor %}
-
-            {% if j.impedimento %}
-            <div class="bloco">
-                <div class="bloco-titulo">Impedimento</div>
-                <div class="binario-texto">Ficou em impedimento em <b>{{ j.impedimento.frequencia }}%</b> dos
-                    últimos {{ j.impedimento.jogos_analisados }} jogos</div>
-            </div>
-            {% endif %}
-        </div>
+        </a>
         {% endfor %}
     {% else %}
-        <div class="vazio">Ainda não há padrões calculados pra nenhum jogador (o motor_padroes.py
-        precisa de pelo menos alguns jogos analisados por jogador).</div>
+        <div class="vazio">Nenhum clube rastreado ainda.</div>
     {% endif %}
-    </div>
-
-    <script>
-        function filtrar() {
-            const termo = document.getElementById('busca').value.toLowerCase();
-            document.querySelectorAll('.jogador-card').forEach(function(card) {
-                const nome = card.querySelector('.nome-jogador').textContent.toLowerCase();
-                card.style.display = nome.includes(termo) ? '' : 'none';
-            });
-        }
-    </script>
 </body>
 </html>
 """
@@ -1829,7 +1762,7 @@ PAGINA_CLUBE = """
                 <input type="hidden" name="odd_combinada" id="campo-odd">
                 <input type="hidden" name="probabilidade_combinada" id="campo-probabilidade">
                 <input type="hidden" name="pernas" id="campo-pernas">
-                <input type="hidden" name="voltar" value="/clube/corinthians">
+                <input type="hidden" name="voltar" value="/clube/{{ time_id }}">
                 <div class="modal-form-linha">
                     <input type="number" step="0.01" min="0.01" id="input-valor" placeholder="Valor apostado (R$)" required>
                     <input type="number" step="0.01" min="1.01" id="input-odd" placeholder="Odd dada pela casa" required>
@@ -1977,7 +1910,7 @@ PAGINA_CLUBE = """
                         <input type="hidden" name="casa_aposta" value="Anotado manualmente">
                         <input type="hidden" name="probabilidade_combinada" value="${probPct}">
                         <input type="hidden" name="pernas" value='${pernasJson}'>
-                        <input type="hidden" name="voltar" value="/clube/corinthians">
+                        <input type="hidden" name="voltar" value="/clube/{{ time_id }}">
                         <div style="display:flex; gap:10px; width:100%;">
                             <input type="number" step="0.01" min="0.01" name="valor_apostado" placeholder="Valor (R$)" required>
                             <input type="number" step="0.01" min="1.01" name="odd_combinada" placeholder="Odd da casa" required>
@@ -2080,11 +2013,13 @@ def escudo(team_id):
     return "", 404
 
 
-def buscar_estatisticas_jogadores(cur):
+def buscar_estatisticas_jogadores(cur, time_id):
     """NOVO: monta a frequência histórica de cada jogador (cartão, faltas,
     desarmes, chutes no gol, impedimento), lendo direto das tabelas de
     padrão já calculadas pelo motor_padroes.py - não depende de nenhuma
-    odd estar disponível na casa de apostas."""
+    odd estar disponível na casa de apostas.
+    NOVO (multi-time): filtra por time_atual_id - cada clube só mostra o
+    próprio elenco, sem misturar jogadores de outro time rastreado."""
     jogadores_dict = {}
 
     def garantir(jogador_id, nome):
@@ -2096,8 +2031,9 @@ def buscar_estatisticas_jogadores(cur):
         """
         SELECT j.id, j.nome, p.jogos_analisados, p.frequencia
         FROM padroes_jogador_cartao p
-        JOIN jogadores j ON j.id = p.jogador_id AND j.ativo = TRUE
-        """
+        JOIN jogadores j ON j.id = p.jogador_id AND j.ativo = TRUE AND j.time_atual_id = %s
+        """,
+        (time_id,),
     )
     for jogador_id, nome, jogos_analisados, frequencia in cur.fetchall():
         garantir(jogador_id, nome)
@@ -2109,9 +2045,10 @@ def buscar_estatisticas_jogadores(cur):
         """
         SELECT j.id, j.nome, p.tipo, p.linha, p.jogos_analisados, p.frequencia
         FROM padroes_jogador_linha p
-        JOIN jogadores j ON j.id = p.jogador_id AND j.ativo = TRUE
+        JOIN jogadores j ON j.id = p.jogador_id AND j.ativo = TRUE AND j.time_atual_id = %s
         ORDER BY p.linha
-        """
+        """,
+        (time_id,),
     )
     for jogador_id, nome, tipo, linha, jogos_analisados, frequencia in cur.fetchall():
         garantir(jogador_id, nome)
@@ -2123,9 +2060,10 @@ def buscar_estatisticas_jogadores(cur):
         """
         SELECT j.id, j.nome, p.jogos_analisados, p.frequencia
         FROM padroes_jogador_frequencia p
-        JOIN jogadores j ON j.id = p.jogador_id AND j.ativo = TRUE
+        JOIN jogadores j ON j.id = p.jogador_id AND j.ativo = TRUE AND j.time_atual_id = %s
         WHERE p.tipo = 'impedimento'
-        """
+        """,
+        (time_id,),
     )
     for jogador_id, nome, jogos_analisados, frequencia in cur.fetchall():
         garantir(jogador_id, nome)
@@ -2151,20 +2089,23 @@ def buscar_estatisticas_jogadores(cur):
     return lista
 
 
-def buscar_ultima_escalacao_titular(cur):
-    """NOVO: busca os titulares do último jogo já concluído do Corinthians,
+def buscar_ultima_escalacao_titular(cur, time_id):
+    """NOVO: busca os titulares do último jogo já concluído DESSE time,
     cruzando escalacoes com jogador_estatisticas_jogo.lado (pra saber se
-    aquele titular jogava pelo Corinthians ou pelo adversário naquele
-    jogo específico) e jogos.mandante (pra saber qual lado é o do
-    Corinthians nesse jogo)."""
+    aquele titular jogava pelo time ou pelo adversário naquele jogo
+    específico) e jogos.mandante (pra saber qual lado é o do time nesse
+    jogo).
+    NOVO (multi-time): filtra por nosso_time_id."""
     cur.execute(
         """
         SELECT id, data_jogo, adversario FROM jogos
-        WHERE (datahora_jogo IS NOT NULL AND datahora_jogo < NOW())
-           OR (datahora_jogo IS NULL AND data_jogo < CURRENT_DATE)
+        WHERE nosso_time_id = %s
+          AND ((datahora_jogo IS NOT NULL AND datahora_jogo < NOW())
+           OR (datahora_jogo IS NULL AND data_jogo < CURRENT_DATE))
         ORDER BY COALESCE(datahora_jogo, data_jogo::timestamp) DESC
         LIMIT 1
-        """
+        """,
+        (time_id,),
     )
     ultimo_jogo = cur.fetchone()
     if not ultimo_jogo:
@@ -2221,36 +2162,48 @@ def jogadores():
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
-        lista = buscar_estatisticas_jogadores(cur)
-        escudo_url = buscar_escudo_url(cur, "Corinthians")
+        cur.execute("SELECT id, nome FROM times WHERE rastreado = TRUE ORDER BY nome")
+        times_rastreados = cur.fetchall()
+        clubes = [
+            {"id": time_id, "nome": nome, "escudo_url": buscar_escudo_url(cur, nome)}
+            for time_id, nome in times_rastreados
+        ]
         cur.close()
     finally:
         conn.close()
 
-    return render_template_string(PAGINA_JOGADORES, jogadores=lista, escudo_url=escudo_url)
+    return render_template_string(PAGINA_JOGADORES, clubes=clubes)
 
 
-@app.route("/clube/corinthians")
-def clube_corinthians():
-    """NOVO: página específica do clube - hoje só existe o Corinthians, mas
-    a estrutura já fica pronta pra quando outros clubes forem adicionados
-    (cada um com sua própria rota /clube/<slug>). Mostra todos os
-    jogadores ativos do clube + a última escalação titular confirmada +
-    o próximo jogo (usado pra montar apostas manuais de estatística)."""
+@app.route("/clube/<int:time_id>")
+def clube(time_id):
+    """NOVO (multi-time): página específica do clube - antes só existia
+    /clube/corinthians fixo; agora funciona pra qualquer time rastreado,
+    identificado pelo id. Mostra todos os jogadores ativos DESSE clube +
+    a última escalação titular confirmada + o próximo jogo (usado pra
+    montar apostas manuais de estatística)."""
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
-        lista = buscar_estatisticas_jogadores(cur)
-        ultima_escalacao = buscar_ultima_escalacao_titular(cur)
-        proximo_jogo = buscar_proximo_jogo(cur, "Corinthians")
-        escudo_url = buscar_escudo_url(cur, "Corinthians")
+        cur.execute("SELECT nome FROM times WHERE id = %s AND rastreado = TRUE", (time_id,))
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            return "Clube não encontrado.", 404
+        nome_clube = row[0]
+
+        lista = buscar_estatisticas_jogadores(cur, time_id)
+        ultima_escalacao = buscar_ultima_escalacao_titular(cur, time_id)
+        proximo_jogo = buscar_proximo_jogo(cur, nome_clube)
+        escudo_url = buscar_escudo_url(cur, nome_clube)
         cur.close()
     finally:
         conn.close()
 
     return render_template_string(
         PAGINA_CLUBE, jogadores=lista, ultima_escalacao=ultima_escalacao,
-        proximo_jogo=proximo_jogo, nome_clube="Corinthians", escudo_url=escudo_url,
+        proximo_jogo=proximo_jogo, nome_clube=nome_clube, escudo_url=escudo_url,
+        time_id=time_id,
     )
 
 
