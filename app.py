@@ -265,7 +265,7 @@ PAGINA = """
             {% for c in combinacoes %}
             <div class="cartao">
                 <div class="cartao-topo">
-                    <span class="jogo">{{ c.data_jogo }} · Corinthians x {{ c.adversario }}</span>
+                    <span class="jogo">{{ c.data_jogo }} · {{ c.nosso_time }} x {{ c.adversario }}</span>
                     <span class="casa">{{ c.casa_aposta }}</span>
                     <span class="odd-tag">ODD {{ c.odd_combinada }}</span>
                 </div>
@@ -306,9 +306,10 @@ def buscar_recomendacoes(cur):
         """
         SELECT r.jogo_id, r.jogador_id, r.descricao, r.casa_aposta,
                r.odd_oferecida, r.probabilidade_historica, j.adversario, j.data_jogo,
-               r.tipo_padrao, r.linha, r.direcao
+               r.tipo_padrao, r.linha, r.direcao, t.nome
         FROM recomendacoes r
         JOIN jogos j ON j.id = r.jogo_id
+        JOIN times t ON t.id = j.nosso_time_id
         """
     )
     return cur.fetchall()
@@ -318,7 +319,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
     grupos = {}
     for rec in recomendacoes:
         (jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo,
-         tipo_padrao, linha, direcao) = rec
+         tipo_padrao, linha, direcao, nosso_time) = rec
 
         # resultado final (1X2) só entra como candidato quando a faixa pedida
         # permite odds acima de 5.0 (mercado de alta variância)
@@ -336,6 +337,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
             "direcao": (direcao or "").strip().lower(),
             "adversario": adversario,
             "data_jogo": data_jogo,
+            "nosso_time": nosso_time,
         })
 
     resultado = []
@@ -449,6 +451,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                     "valor_esperado": valor_esperado,
                     "adversario": combo[0]["adversario"],
                     "data_jogo": combo[0]["data_jogo"],
+                    "nosso_time": combo[0]["nosso_time"],
                     "pernas": [
                         {
                             "jogo_id": jogo_id,
@@ -643,7 +646,7 @@ PAGINA_HISTORICO = """
         {% for i in itens %}
         <div class="cartao">
             <div class="cartao-topo">
-                <span class="jogo">{{ i.data_jogo }} · Corinthians x {{ i.adversario }}</span>
+                <span class="jogo">{{ i.data_jogo }} · {{ i.nosso_time }} x {{ i.adversario }}</span>
                 <span class="badge badge-{{ i.resultado }}">{{ i.resultado }}</span>
             </div>
             <div class="descricao">{{ i.descricao }}</div>
@@ -663,7 +666,7 @@ PAGINA_HISTORICO = """
     {% for c in multiplas_destaque %}
         <div class="cartao">
             <div class="cartao-topo">
-                <span class="jogo">{{ c.data_jogo }} · Corinthians x {{ c.adversario }}</span>
+                <span class="jogo">{{ c.data_jogo }} · {{ c.nosso_time }} x {{ c.adversario }}</span>
                 <span class="badge badge-{{ c.resultado }}">{{ c.resultado }}</span>
             </div>
             <div class="descricao">{{ c.descricao }}</div>
@@ -684,16 +687,17 @@ def buscar_historico(cur, limite=100):
     cur.execute(
         """
         SELECT h.data_jogo, j.adversario, h.descricao, h.casa_aposta,
-               h.odd_oferecida, h.probabilidade_historica, h.valor_esperado, h.resultado
+               h.odd_oferecida, h.probabilidade_historica, h.valor_esperado, h.resultado, t.nome
         FROM historico_recomendacoes h
         JOIN jogos j ON j.id = h.jogo_id
+        JOIN times t ON t.id = j.nosso_time_id
         ORDER BY h.data_jogo DESC, h.id DESC
         LIMIT %s
         """,
         (limite,),
     )
     colunas = ["data_jogo", "adversario", "descricao", "casa_aposta",
-               "odd_oferecida", "probabilidade_historica", "valor_esperado", "resultado"]
+               "odd_oferecida", "probabilidade_historica", "valor_esperado", "resultado", "nosso_time"]
     return [dict(zip(colunas, row)) for row in cur.fetchall()]
 
 
@@ -778,9 +782,10 @@ def buscar_recomendacoes_historico(cur):
         """
         SELECT h.jogo_id, h.jogador_id, h.descricao, h.casa_aposta,
                h.odd_oferecida, h.probabilidade_historica, j.adversario, j.data_jogo,
-               h.tipo_padrao, h.resultado
+               h.tipo_padrao, h.resultado, t.nome
         FROM historico_recomendacoes h
         JOIN jogos j ON j.id = h.jogo_id
+        JOIN times t ON t.id = j.nosso_time_id
         """
     )
     return cur.fetchall()
@@ -796,7 +801,7 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
     grupos = {}
     for rec in recomendacoes:
         (jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo,
-         tipo_padrao, resultado_perna) = rec
+         tipo_padrao, resultado_perna, nosso_time) = rec
 
         chave = (jogo_id, casa)
         grupos.setdefault(chave, []).append({
@@ -808,6 +813,7 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
             "adversario": adversario,
             "data_jogo": data_jogo,
             "resultado": resultado_perna,
+            "nosso_time": nosso_time,
         })
 
     resultado_final = []
@@ -850,6 +856,7 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
                     "valor_esperado": valor_esperado,
                     "adversario": combo[0]["adversario"],
                     "data_jogo": combo[0]["data_jogo"],
+                    "nosso_time": combo[0]["nosso_time"],
                     "resultado": resultado_combo,
                 })
 
