@@ -301,18 +301,53 @@ PAGINA = """
 """
 
 
+MERCADOS_JOGO_INTEIRO = {"escanteio_total", "cartao_total"}
+
+
+def deduplicar_mercados_jogo_inteiro(recomendacoes, colunas_a_manter):
+    """NOVO (multi-time): mercados "do jogo inteiro" (escanteio total,
+    cartão total) descrevem a partida real inteira, não um lado específico
+    - quando os DOIS times de um jogo são rastreados (ex: Corinthians x
+    Athletico Paranaense), o mesmo jogo real gera uma linha separada por
+    time (visões diferentes, por desenho), mas pra ESSES mercados
+    específicos é literalmente A MESMA aposta real (mesma odd, mesmo
+    evento) - só a estimativa de probabilidade diverge, vinda do histórico
+    de times diferentes. Sem essa deduplicação, a mesma odd real aparecia
+    duas vezes na tela, com "já apostado" compartilhado entre as duas
+    cópias por engano (mesma descrição+casa, jogo_id diferente).
+    Mantém só uma cópia por (fixture_id_api, descricao, casa) - a de maior
+    probabilidade histórica, quando há divergência entre as duas visões.
+    `colunas_a_manter` é quantas colunas manter no resultado final (a
+    última coluna da query sempre precisa ser fixture_id_api, usado só
+    aqui pra deduplicar e descartado depois)."""
+    melhores = {}
+    resultado = []
+    for rec in recomendacoes:
+        tipo_padrao = rec[8]
+        if tipo_padrao not in MERCADOS_JOGO_INTEIRO:
+            resultado.append(rec[:colunas_a_manter])
+            continue
+        fixture_id_api, descricao, casa, prob = rec[-1], rec[2], rec[3], rec[5]
+        chave = (fixture_id_api, descricao, casa)
+        if chave not in melhores or prob > melhores[chave][5]:
+            melhores[chave] = rec
+
+    resultado.extend(rec[:colunas_a_manter] for rec in melhores.values())
+    return resultado
+
+
 def buscar_recomendacoes(cur):
     cur.execute(
         """
         SELECT r.jogo_id, r.jogador_id, r.descricao, r.casa_aposta,
                r.odd_oferecida, r.probabilidade_historica, j.adversario, j.data_jogo,
-               r.tipo_padrao, r.linha, r.direcao, t.nome
+               r.tipo_padrao, r.linha, r.direcao, t.nome, j.fixture_id_api
         FROM recomendacoes r
         JOIN jogos j ON j.id = r.jogo_id
         JOIN times t ON t.id = j.nosso_time_id
         """
     )
-    return cur.fetchall()
+    return deduplicar_mercados_jogo_inteiro(cur.fetchall(), colunas_a_manter=12)
 
 
 def montar_combinacoes(recomendacoes, odd_min, odd_max):
@@ -687,7 +722,8 @@ def buscar_historico(cur, limite=100):
     cur.execute(
         """
         SELECT h.data_jogo, j.adversario, h.descricao, h.casa_aposta,
-               h.odd_oferecida, h.probabilidade_historica, h.valor_esperado, h.resultado, t.nome
+               h.odd_oferecida, h.probabilidade_historica, h.valor_esperado, h.resultado, t.nome,
+               h.tipo_padrao, j.fixture_id_api
         FROM historico_recomendacoes h
         JOIN jogos j ON j.id = h.jogo_id
         JOIN times t ON t.id = j.nosso_time_id
@@ -697,8 +733,25 @@ def buscar_historico(cur, limite=100):
         (limite,),
     )
     colunas = ["data_jogo", "adversario", "descricao", "casa_aposta",
-               "odd_oferecida", "probabilidade_historica", "valor_esperado", "resultado", "nosso_time"]
-    return [dict(zip(colunas, row)) for row in cur.fetchall()]
+               "odd_oferecida", "probabilidade_historica", "valor_esperado", "resultado", "nosso_time",
+               "tipo_padrao", "fixture_id_api"]
+    itens = [dict(zip(colunas, row)) for row in cur.fetchall()]
+
+    # NOVO (multi-time): mesma deduplicação de mercados "do jogo inteiro"
+    # aplicada em buscar_recomendacoes - ver docstring de
+    # deduplicar_mercados_jogo_inteiro pra entender o motivo.
+    melhores = {}
+    resultado = []
+    for item in itens:
+        if item["tipo_padrao"] not in MERCADOS_JOGO_INTEIRO:
+            resultado.append(item)
+            continue
+        chave = (item["fixture_id_api"], item["descricao"], item["casa_aposta"])
+        if chave not in melhores or item["probabilidade_historica"] > melhores[chave]["probabilidade_historica"]:
+            melhores[chave] = item
+    resultado.extend(melhores.values())
+    resultado.sort(key=lambda i: i["data_jogo"], reverse=True)
+    return resultado
 
 
 def buscar_resumo_historico(cur):
@@ -782,13 +835,13 @@ def buscar_recomendacoes_historico(cur):
         """
         SELECT h.jogo_id, h.jogador_id, h.descricao, h.casa_aposta,
                h.odd_oferecida, h.probabilidade_historica, j.adversario, j.data_jogo,
-               h.tipo_padrao, h.resultado, t.nome
+               h.tipo_padrao, h.resultado, t.nome, j.fixture_id_api
         FROM historico_recomendacoes h
         JOIN jogos j ON j.id = h.jogo_id
         JOIN times t ON t.id = j.nosso_time_id
         """
     )
-    return cur.fetchall()
+    return deduplicar_mercados_jogo_inteiro(cur.fetchall(), colunas_a_manter=11)
 
 
 def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
