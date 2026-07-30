@@ -699,7 +699,15 @@ def calcular_padrao_linha_jogador(cur, coluna, linhas_testadas):
     NOVO: mesmo filtro de lado usado em calcular_padroes_cartao - só conta
     jogos em que o jogador estava jogando pelo time dele.
     NOVO (multi-time): também filtra por nosso_time_id, mesmo motivo de
-    calcular_padroes_cartao."""
+    calcular_padroes_cartao.
+    NOVO (bug corrigido): a API-Football manda `null` pra essas colunas
+    quando o valor real é ZERO (ex: 0 chutes no gol), não quando falta
+    dado - confirmado comparando com outras colunas do mesmo jogador que
+    nunca vêm vazias (como `passes`) nos mesmos jogos. Antes, esses jogos
+    eram EXCLUÍDOS da amostra (como se não tivéssemos o dado), inflando a
+    frequência pra cima (só sobravam os jogos em que ele teve pelo menos 1
+    ocorrência). Agora trata `null` como 0 de verdade (COALESCE), incluindo
+    esses jogos na amostra."""
     cur.execute("SELECT id, nome, time_atual_id FROM jogadores WHERE ativo = TRUE")
     jogadores = cur.fetchall()
 
@@ -708,10 +716,10 @@ def calcular_padrao_linha_jogador(cur, coluna, linhas_testadas):
     for jogador_id, nome, time_atual_id in jogadores:
         cur.execute(
             f"""
-            SELECT jeg.{coluna}
+            SELECT COALESCE(jeg.{coluna}, 0)
             FROM jogador_estatisticas_jogo jeg
             JOIN jogos j ON j.id = jeg.jogo_id
-            WHERE jeg.jogador_id = %s AND jeg.{coluna} IS NOT NULL AND j.nosso_time_id = %s
+            WHERE jeg.jogador_id = %s AND j.nosso_time_id = %s
               AND ((jeg.lado = 'mandante' AND j.mandante = TRUE)
                 OR (jeg.lado = 'visitante' AND j.mandante = FALSE))
             ORDER BY j.data_jogo DESC
@@ -757,7 +765,11 @@ def calcular_padrao_frequencia_jogador(cur, coluna):
     NOVO: mesmo filtro de lado usado em calcular_padroes_cartao - só conta
     jogos em que o jogador estava jogando pelo time dele.
     NOVO (multi-time): também filtra por nosso_time_id, mesmo motivo de
-    calcular_padroes_cartao."""
+    calcular_padroes_cartao.
+    NOVO (bug corrigido): mesmo problema e mesma correção de
+    calcular_padrao_linha_jogador - a API-Football manda `null` quando o
+    valor real é zero, não quando falta dado. Trata como 0 (COALESCE) em
+    vez de excluir esses jogos da amostra."""
     cur.execute("SELECT id, nome, time_atual_id FROM jogadores WHERE ativo = TRUE")
     jogadores = cur.fetchall()
 
@@ -766,10 +778,10 @@ def calcular_padrao_frequencia_jogador(cur, coluna):
     for jogador_id, nome, time_atual_id in jogadores:
         cur.execute(
             f"""
-            SELECT jeg.{coluna}
+            SELECT COALESCE(jeg.{coluna}, 0)
             FROM jogador_estatisticas_jogo jeg
             JOIN jogos j ON j.id = jeg.jogo_id
-            WHERE jeg.jogador_id = %s AND jeg.{coluna} IS NOT NULL AND j.nosso_time_id = %s
+            WHERE jeg.jogador_id = %s AND j.nosso_time_id = %s
               AND ((jeg.lado = 'mandante' AND j.mandante = TRUE)
                 OR (jeg.lado = 'visitante' AND j.mandante = FALSE))
             ORDER BY j.data_jogo DESC
