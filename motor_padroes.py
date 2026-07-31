@@ -105,6 +105,24 @@ PADROES_LINHA_TIME_ESTATISTICA = {
     "chute": ("finalizacoes", LINHAS_CHUTE_TIME),
 }
 
+# NOVO (estatísticas de time - mais completas): essas três não têm coluna
+# pronta em estatisticas_jogo (a API não manda um total agregado por lado
+# pra elas) - são calculadas somando a estatística individual de cada
+# jogador do NOSSO time que entrou em campo, jogo a jogo, usando
+# jogador_estatisticas_jogo (que já coleta isso por jogador desde o início
+# do projeto). Ex: chutes no gol do time = soma dos chutes no gol de todos
+# os jogadores do time naquele jogo.
+LINHAS_CHUTE_NO_GOL_TIME = [3.5, 4.5, 5.5, 6.5]
+LINHAS_IMPEDIMENTO_TIME = [0.5, 1.5, 2.5]
+LINHAS_DESARME_TIME = [12.5, 15.5, 18.5, 21.5]
+
+# padrões novos por TIME (soma das estatísticas de jogador): nome do tipo -> (coluna em jogador_estatisticas_jogo, linhas testadas)
+PADROES_LINHA_TIME_SOMA_JOGADOR = {
+    "chute_no_gol": ("chutes_no_gol", LINHAS_CHUTE_NO_GOL_TIME),
+    "impedimento": ("impedimentos", LINHAS_IMPEDIMENTO_TIME),
+    "desarme": ("desarmes", LINHAS_DESARME_TIME),
+}
+
 # padrões simples (sim/não teve pelo menos 1 no jogo)
 PADROES_FREQUENCIA_JOGADOR = {
     "impedimento": "impedimentos",
@@ -420,6 +438,99 @@ def salvar_padrao_linha_time(cur, tipo, resultados, time_id):
             (time_id, tipo, linha, jogos_analisados, jogos_acima, frequencia, media),
         )
         print(f"  [{tipo}] Mais de {linha}: {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
+
+
+def calcular_padrao_linha_time_soma_jogadores(cur, time_id, coluna, linhas_testadas):
+    """NOVO (estatísticas de time): soma a estatística individual de TODOS
+    os jogadores do NOSSO time que entraram em campo, jogo a jogo (ex:
+    soma de chutes no gol de todo mundo = chutes no gol do time naquele
+    jogo) - usa jogador_estatisticas_jogo porque não existe um total
+    agregado por lado salvo pra essas métricas (diferente de escanteio/
+    falta/chute, que vêm prontos de estatisticas_jogo). O `lado` em
+    jogador_estatisticas_jogo também é baseado no mandante/visitante REAL
+    do jogo (ver popular_banco.py/salvar_estatisticas_jogadores), então
+    precisa da mesma tradução via jogos.mandante que os outros padrões de
+    time (baseados em estatisticas_jogo) já usam."""
+    cur.execute(
+        f"""
+        SELECT SUM(jeg.{coluna})
+        FROM jogador_estatisticas_jogo jeg
+        JOIN jogos j ON j.id = jeg.jogo_id
+        WHERE j.nosso_time_id = %s
+          AND ((j.mandante = TRUE AND jeg.lado = 'mandante')
+           OR (j.mandante = FALSE AND jeg.lado = 'visitante'))
+          AND jeg.{coluna} IS NOT NULL
+        GROUP BY jeg.jogo_id, j.data_jogo
+        ORDER BY j.data_jogo DESC
+        LIMIT %s
+        """,
+        (time_id, JANELA_MAXIMA_DE_JOGOS),
+    )
+    valores = [row[0] for row in cur.fetchall()]
+
+    jogos_analisados = len(valores)
+    if jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR:
+        return None, jogos_analisados
+
+    media = round(sum(float(v) for v in valores) / jogos_analisados, 2)
+
+    resultados = []
+    for linha in linhas_testadas:
+        jogos_acima = sum(1 for v in valores if float(v) > linha)
+        frequencia = round(100 * jogos_acima / jogos_analisados, 2)
+        resultados.append((linha, jogos_analisados, jogos_acima, frequencia, media))
+
+    return resultados, jogos_analisados
+
+
+def calcular_posse_time(cur, time_id):
+    """NOVO (estatísticas de time): média de posse de bola do time - coluna
+    já coletada desde o início (estatisticas_jogo.posse_de_bola), nunca
+    tinha virado estatística visível em lugar nenhum. Diferente dos outros
+    padrões de time, não faz sentido testar "linha" (não é uma contagem,
+    já é um percentual) - só guarda a média mesmo."""
+    cur.execute(
+        """
+        SELECT eg.posse_de_bola
+        FROM estatisticas_jogo eg
+        JOIN jogos j ON j.id = eg.jogo_id
+        WHERE j.nosso_time_id = %s
+          AND ((j.mandante = TRUE AND eg.lado = 'mandante')
+           OR (j.mandante = FALSE AND eg.lado = 'visitante'))
+          AND eg.posse_de_bola IS NOT NULL
+        ORDER BY j.data_jogo DESC
+        LIMIT %s
+        """,
+        (time_id, JANELA_MAXIMA_DE_JOGOS),
+    )
+    valores = [row[0] for row in cur.fetchall()]
+
+    jogos_analisados = len(valores)
+    if jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR:
+        return None, jogos_analisados
+
+    media = round(sum(float(v) for v in valores) / jogos_analisados, 1)
+    return media, jogos_analisados
+
+
+def salvar_posse_time(cur, media, jogos_analisados, time_id):
+    """NOVO: salva a posse média em padroes_time_linha com um `linha`
+    sentinela (0) e jogos_acima/frequencia sem uso real - o template só lê
+    o campo `media` pra esse tipo (ver buscar_estatisticas_time em app.py,
+    que não gera nenhum "item de linha" pro tipo 'posse')."""
+    cur.execute(
+        """
+        INSERT INTO padroes_time_linha
+            (time_id, tipo, linha, jogos_analisados, jogos_acima, frequencia, media, atualizado_em)
+        VALUES (%s, 'posse', 0, %s, 0, 0, %s, NOW())
+        ON CONFLICT (time_id, tipo, linha) DO UPDATE SET
+            jogos_analisados = EXCLUDED.jogos_analisados,
+            media = EXCLUDED.media,
+            atualizado_em = NOW()
+        """,
+        (time_id, jogos_analisados, media),
+    )
+    print(f"  [posse] Média: {media}% ({jogos_analisados} jogos)")
 
 
 def calcular_padroes_escanteio_total(cur, time_id):
@@ -1277,6 +1388,29 @@ def main():
                       f"mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
             else:
                 salvar_padrao_linha_time(cur, "cartao", resultados_cartao_time, time_id)
+                conn.commit()
+
+            # NOVO (estatísticas de time - mais completas): chutes no gol,
+            # impedimentos e desarmes do time, somando a estatística
+            # individual de cada jogador em campo (ver docstring de
+            # calcular_padrao_linha_time_soma_jogadores).
+            print("Calculando padrões de chute no gol, impedimento e desarme do time...")
+            for tipo, (coluna, linhas) in PADROES_LINHA_TIME_SOMA_JOGADOR.items():
+                resultados_soma, jogos_soma = calcular_padrao_linha_time_soma_jogadores(cur, time_id, coluna, linhas)
+                if not resultados_soma:
+                    print(f"  [{tipo}] Dados insuficientes ainda ({jogos_soma} jogos analisados, "
+                          f"mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+                else:
+                    salvar_padrao_linha_time(cur, tipo, resultados_soma, time_id)
+                    conn.commit()
+
+            print("Calculando posse de bola média do time...")
+            media_posse, jogos_posse = calcular_posse_time(cur, time_id)
+            if media_posse is None:
+                print(f"  Dados insuficientes ainda para posse de bola ({jogos_posse} jogos analisados, "
+                      f"mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+            else:
+                salvar_posse_time(cur, media_posse, jogos_posse, time_id)
                 conn.commit()
 
             print("Calculando padrões de resultado final (vitória/empate/derrota)...")
