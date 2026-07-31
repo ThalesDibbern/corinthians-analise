@@ -725,6 +725,31 @@ PAGINA_HISTORICO = """
             background: #1f6feb22; color: #58a6ff; font-size: 0.72rem; padding: 3px 10px;
             border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em;
         }
+        .colunas-resultado {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start;
+            margin-bottom: 28px;
+        }
+        @media (max-width: 640px) {
+            .colunas-resultado { grid-template-columns: 1fr; }
+        }
+        .coluna-cabecalho {
+            border-radius: 10px; padding: 10px 16px; font-weight: 700; font-size: 0.92rem;
+            margin-bottom: 12px; text-align: center;
+        }
+        .coluna-verde { background: #23863633; color: #3fb950; border: 1px solid #3fb95055; }
+        .coluna-vermelha { background: #f8514933; color: #f85149; border: 1px solid #f8514955; }
+        .coluna-cinza { background: #8b949e22; color: #8b949e; border: 1px solid #8b949e55; }
+        .secao-pendentes { margin-bottom: 28px; }
+        .paginacao {
+            display: flex; align-items: center; justify-content: center; gap: 14px;
+            margin-top: 4px; font-size: 0.82rem; color: #8b949e;
+        }
+        .btn-pagina {
+            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+            border-radius: 8px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer;
+        }
+        .btn-pagina:hover:not(:disabled) { border-color: #58a6ff; }
+        .btn-pagina:disabled { opacity: 0.35; cursor: default; }
     </style>
 </head>
 <body>
@@ -778,9 +803,8 @@ PAGINA_HISTORICO = """
     </div>
     {% endif %}
 
-    {% if itens %}
-        {% for i in itens %}
-        <div class="cartao">
+    {% macro cartao_item(i) %}
+        <div class="cartao item-pagina">
             <div class="cartao-topo">
                 <span class="jogo">{{ i.data_jogo }} · {{ i.nosso_time }} x {{ i.adversario }}</span>
                 <span class="badge badge-{{ i.resultado }}">{{ i.resultado }}</span>
@@ -793,11 +817,98 @@ PAGINA_HISTORICO = """
                 <span>VE: <b>{{ i.valor_esperado }}</b></span>
             </div>
         </div>
-        {% endfor %}
-    {% else %}
-        <div class="vazio">Ainda não há recomendações avaliadas - isso acontece automaticamente
-        depois que um jogo termina e o script de arquivamento processa o resultado.</div>
-    {% endif %}
+    {% endmacro %}
+
+    <div class="colunas-resultado">
+        <div class="coluna">
+            <div class="coluna-cabecalho coluna-verde">✅ Acertou ({{ acertos|length }})</div>
+            <div id="lista-acertou">
+                {% if acertos %}
+                    {% for i in acertos %}{{ cartao_item(i) }}{% endfor %}
+                {% else %}
+                    <div class="vazio">Nenhum acerto ainda.</div>
+                {% endif %}
+            </div>
+            {% if acertos|length > 10 %}
+            <div class="paginacao">
+                <button class="btn-pagina" id="anterior-lista-acertou" onclick="mudarPagina('lista-acertou', -1)">← Anterior</button>
+                <span id="label-lista-acertou"></span>
+                <button class="btn-pagina" id="proximo-lista-acertou" onclick="mudarPagina('lista-acertou', 1)">Próxima →</button>
+            </div>
+            {% endif %}
+        </div>
+        <div class="coluna">
+            <div class="coluna-cabecalho coluna-vermelha">❌ Errou ({{ erros|length }})</div>
+            <div id="lista-errou">
+                {% if erros %}
+                    {% for i in erros %}{{ cartao_item(i) }}{% endfor %}
+                {% else %}
+                    <div class="vazio">Nenhum erro ainda.</div>
+                {% endif %}
+            </div>
+            {% if erros|length > 10 %}
+            <div class="paginacao">
+                <button class="btn-pagina" id="anterior-lista-errou" onclick="mudarPagina('lista-errou', -1)">← Anterior</button>
+                <span id="label-lista-errou"></span>
+                <button class="btn-pagina" id="proximo-lista-errou" onclick="mudarPagina('lista-errou', 1)">Próxima →</button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="secao-pendentes">
+        <div class="coluna-cabecalho coluna-cinza">⏳ Pendente ({{ pendentes|length }})</div>
+        <div id="lista-pendente">
+            {% if pendentes %}
+                {% for i in pendentes %}{{ cartao_item(i) }}{% endfor %}
+            {% else %}
+                <div class="vazio">Nenhuma recomendação pendente no momento.</div>
+            {% endif %}
+        </div>
+        {% if pendentes|length > 10 %}
+        <div class="paginacao">
+            <button class="btn-pagina" id="anterior-lista-pendente" onclick="mudarPagina('lista-pendente', -1)">← Anterior</button>
+            <span id="label-lista-pendente"></span>
+            <button class="btn-pagina" id="proximo-lista-pendente" onclick="mudarPagina('lista-pendente', 1)">Próxima →</button>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        const TAMANHO_PAGINA = 10;
+        const paginaAtual = {};
+
+        function totalPaginas(listaId) {
+            const n = document.querySelectorAll('#' + listaId + ' .item-pagina').length;
+            return Math.max(1, Math.ceil(n / TAMANHO_PAGINA));
+        }
+
+        function renderizarPagina(listaId) {
+            const pagina = paginaAtual[listaId] || 0;
+            const itens = document.querySelectorAll('#' + listaId + ' .item-pagina');
+            itens.forEach(function(item, i) {
+                const paginaDoItem = Math.floor(i / TAMANHO_PAGINA);
+                item.style.display = (paginaDoItem === pagina) ? '' : 'none';
+            });
+            const total = totalPaginas(listaId);
+            const label = document.getElementById('label-' + listaId);
+            if (label) label.textContent = 'Página ' + (pagina + 1) + ' de ' + total;
+            const btnAnterior = document.getElementById('anterior-' + listaId);
+            const btnProximo = document.getElementById('proximo-' + listaId);
+            if (btnAnterior) btnAnterior.disabled = (pagina === 0);
+            if (btnProximo) btnProximo.disabled = (pagina >= total - 1);
+        }
+
+        function mudarPagina(listaId, direcao) {
+            const total = totalPaginas(listaId);
+            let pagina = (paginaAtual[listaId] || 0) + direcao;
+            pagina = Math.max(0, Math.min(total - 1, pagina));
+            paginaAtual[listaId] = pagina;
+            renderizarPagina(listaId);
+        }
+
+        ['lista-acertou', 'lista-errou', 'lista-pendente'].forEach(renderizarPagina);
+    </script>
 
     {% for c in multiplas_destaque %}
         <div class="cartao">
@@ -1041,8 +1152,16 @@ def historico():
     finally:
         conn.close()
 
+    # NOVO: separa acertos, erros e pendentes em listas próprias, uma pra
+    # cada coluna (ver PAGINA_HISTORICO) - antes vinham todos misturados na
+    # ordem cronológica, dificultando enxergar o padrão de acerto/erro.
+    acertos = [i for i in itens if i["resultado"] == "acertou"]
+    erros = [i for i in itens if i["resultado"] == "errou"]
+    pendentes = [i for i in itens if i["resultado"] == "pendente"]
+
     return render_template_string(
-        PAGINA_HISTORICO, itens=itens, resumo=resumo, calibracao=calibracao,
+        PAGINA_HISTORICO, acertos=acertos, erros=erros, pendentes=pendentes,
+        resumo=resumo, calibracao=calibracao,
         multiplas_destaque=multiplas_destaque,
         piso=PISO_PROBABILIDADE_MULTIPLAS_DESTAQUE,
     )
