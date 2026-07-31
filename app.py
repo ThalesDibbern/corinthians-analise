@@ -25,7 +25,7 @@ from itertools import combinations
 
 import requests
 import psycopg2
-from flask import Flask, render_template_string, request, redirect, Response, session, url_for
+from flask import Flask, render_template_string, request, redirect, Response, session, url_for, flash, get_flashed_messages
 from werkzeug.security import generate_password_hash, check_password_hash
 
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -36,6 +36,44 @@ app = Flask(__name__)
 # isso, a sessão de todo mundo seria invalidada (logout forçado) toda vez
 # que o serviço reiniciar/fizer novo deploy.
 app.secret_key = os.environ.get("SECRET_KEY", "troque-essa-chave-numa-variavel-de-ambiente-SECRET_KEY")
+
+
+# ---------- Banca (dinheiro fictício, não real) ----------
+#
+# Cada usuário tem uma banca própria (usuarios.banca_atual). Ela SÓ muda em
+# 4 situações, sempre através de registrar_movimento_banca (que também
+# grava o extrato em banca_movimentos, pra dar pra conferir depois):
+#   - "deposito"/"resgate": o usuário mexe manualmente, na página de ROI
+#   - "aposta": sai da banca o valor apostado, no momento em que a aposta
+#     é salva (dinheiro "reservado" pra aposta, igual acontece de verdade
+#     numa casa de apostas)
+#   - "retorno": quando uma aposta pendente é resolvida como "acertou",
+#     volta pra banca o valor apostado x a odd (stake + lucro). Se
+#     "errou", não volta nada (o valor já tinha saído quando a aposta foi
+#     salva) - não precisa de nenhum movimento extra nesse caso.
+#   - "cancelamento": se uma aposta pendente é cancelada, devolve o valor
+#     que tinha saído quando ela foi salva.
+def buscar_banca(cur, usuario_id):
+    cur.execute("SELECT banca_atual FROM usuarios WHERE id = %s", (usuario_id,))
+    row = cur.fetchone()
+    return float(row[0]) if row else 0.0
+
+
+def registrar_movimento_banca(cur, usuario_id, tipo, valor, aposta_id=None):
+    """Aplica `valor` (pode ser negativo) na banca do usuário e grava a
+    linha correspondente no extrato, já com o saldo resultante - facilita
+    conferir depois se algo parecer errado, sem precisar recalcular tudo."""
+    cur.execute(
+        "UPDATE usuarios SET banca_atual = banca_atual + %s WHERE id = %s RETURNING banca_atual",
+        (valor, usuario_id),
+    )
+    novo_saldo = cur.fetchone()[0]
+    cur.execute(
+        """INSERT INTO banca_movimentos (usuario_id, tipo, valor, aposta_id, saldo_apos)
+           VALUES (%s, %s, %s, %s, %s)""",
+        (usuario_id, tipo, valor, aposta_id, novo_saldo),
+    )
+    return float(novo_saldo)
 
 
 PAGINA = """
@@ -227,6 +265,11 @@ PAGINA = """
         .badge-acertou { background: #23863622; color: #3fb950; }
         .badge-errou { background: #f8514922; color: #f85149; }
         .badge-pendente { background: #8b949e22; color: #8b949e; }
+        .flash {
+            padding: 12px 16px; border-radius: 10px; margin-bottom: 18px; font-size: 0.85rem;
+        }
+        .flash-erro { background: #f8514922; color: #f85149; border: 1px solid #f8514955; }
+        .flash-sucesso { background: #23863622; color: #3fb950; border: 1px solid #23863655; }
     </style>
 </head>
 <body>
@@ -239,10 +282,18 @@ PAGINA = """
         &nbsp;·&nbsp;
         <a href="/jogadores" class="link-historico">📈 Estatísticas de jogadores</a>
         &nbsp;·&nbsp;
+        <span style="color:#8b949e; font-size:0.85rem;">🏦 Banca: R$ {{ "%.2f"|format(banca_atual) }}</span>
+        &nbsp;·&nbsp;
         <span style="color:#8b949e; font-size:0.85rem;">Olá, {{ session.usuario_nome }}</span>
         &nbsp;·&nbsp;
         <a href="/logout" class="link-historico">🚪 Sair</a>
     </p>
+
+    {% with mensagens = get_flashed_messages(with_categories=true) %}
+        {% for categoria, texto in mensagens %}
+        <div class="flash flash-{{ categoria }}">{{ texto }}</div>
+        {% endfor %}
+    {% endwith %}
 
     <div class="painel">
         <form method="GET" action="/">
@@ -1158,14 +1209,32 @@ def salvar_aposta():
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
+
+        # NOVO (banca): não deixa salvar uma aposta com valor maior do que
+        # o que sobrou na banca - mesma trava que uma casa de apostas real
+        # teria. Se a banca ainda não foi depositada (0), toda aposta cai
+        # aqui também, o que é o comportamento certo.
+        banca_atual = buscar_banca(cur, session["usuario_id"])
+        if valor_apostado > banca_atual:
+            cur.close()
+            flash(
+                f"Banca insuficiente: você tem R$ {banca_atual:.2f} na banca e tentou "
+                f"apostar R$ {valor_apostado:.2f}. Deposite mais na banca (em Minhas "
+                "apostas) ou aposte um valor menor.",
+                "erro",
+            )
+            return redirect(voltar)
+
         cur.execute(
             """INSERT INTO apostas_salvas
                (descricao, casa_aposta, odd_combinada, probabilidade_combinada,
                 valor_apostado, pernas, usuario_id)
-               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
             (descricao, casa_aposta, odd_combinada, probabilidade_combinada,
              valor_apostado, pernas_json, session["usuario_id"]),
         )
+        aposta_id = cur.fetchone()[0]
+        registrar_movimento_banca(cur, session["usuario_id"], "aposta", -valor_apostado, aposta_id)
         conn.commit()
         cur.close()
     finally:
@@ -1186,10 +1255,73 @@ def cancelar_aposta():
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
+        # NOVO (banca): busca o valor ANTES de apagar (precisa existir
+        # ainda quando o movimento é gravado, já que banca_movimentos.
+        # aposta_id referencia apostas_salvas.id). Só devolve/apaga se a
+        # aposta realmente existe, está pendente e é desse usuário.
+        cur.execute(
+            "SELECT valor_apostado FROM apostas_salvas "
+            "WHERE id = %s AND resultado = 'pendente' AND usuario_id = %s",
+            (aposta_id, session["usuario_id"]),
+        )
+        row = cur.fetchone()
+
+        if row:
+            registrar_movimento_banca(cur, session["usuario_id"], "cancelamento", float(row[0]), aposta_id)
+
         cur.execute(
             "DELETE FROM apostas_salvas WHERE id = %s AND resultado = 'pendente' AND usuario_id = %s",
             (aposta_id, session["usuario_id"]),
         )
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+    return redirect("/minhas-apostas")
+
+
+@app.route("/banca-movimento", methods=["POST"])
+def banca_movimento():
+    """NOVO (banca): deposita ou resgata um valor (fictício, não é dinheiro
+    real) na banca do usuário logado - é a única forma de mexer na banca
+    diretamente (fora os movimentos automáticos de aposta/retorno). Usado
+    pelo usuário pra "igualar" a banca do app com o saldo real dele na casa
+    de apostas."""
+    tipo = request.form.get("tipo")
+    if tipo not in ("deposito", "resgate"):
+        flash("Tipo de movimento inválido.", "erro")
+        return redirect("/minhas-apostas")
+
+    try:
+        valor = float(request.form["valor"])
+    except (KeyError, ValueError):
+        flash("Valor inválido.", "erro")
+        return redirect("/minhas-apostas")
+
+    if valor <= 0:
+        flash("O valor precisa ser maior que zero.", "erro")
+        return redirect("/minhas-apostas")
+
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+
+        if tipo == "resgate":
+            banca_atual = buscar_banca(cur, session["usuario_id"])
+            if valor > banca_atual:
+                cur.close()
+                flash(
+                    f"Não dá pra resgatar R$ {valor:.2f} - a banca só tem R$ {banca_atual:.2f}.",
+                    "erro",
+                )
+                return redirect("/minhas-apostas")
+            novo_saldo = registrar_movimento_banca(cur, session["usuario_id"], "resgate", -valor)
+            flash(f"R$ {valor:.2f} resgatado(s). Nova banca: R$ {novo_saldo:.2f}.", "sucesso")
+        else:
+            novo_saldo = registrar_movimento_banca(cur, session["usuario_id"], "deposito", valor)
+            flash(f"R$ {valor:.2f} depositado(s). Nova banca: R$ {novo_saldo:.2f}.", "sucesso")
+
         conn.commit()
         cur.close()
     finally:
@@ -1267,12 +1399,117 @@ PAGINA_ROI = """
             text-align: center; color: #8b949e; padding: 32px 24px;
             background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
         }
+        .flash {
+            padding: 12px 16px; border-radius: 10px; margin-bottom: 18px; font-size: 0.85rem;
+        }
+        .flash-erro { background: #f8514922; color: #f85149; border: 1px solid #f8514955; }
+        .flash-sucesso { background: #23863622; color: #3fb950; border: 1px solid #23863655; }
+        .banca-box {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 18px 22px; margin-bottom: 24px;
+        }
+        .banca-topo { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+        .banca-valor { font-size: 1.7rem; font-weight: 700; }
+        .banca-label { color: #8b949e; font-size: 0.78rem; margin-top: 2px; }
+        .banca-botoes { display: flex; gap: 8px; }
+        .btn-banca {
+            border-radius: 8px; padding: 7px 14px; font-size: 0.8rem; font-weight: 600;
+            cursor: pointer; border: 1px solid #30363d; background: #21262d; color: #e6edf3;
+        }
+        .btn-banca:hover { background: #30363d; }
+        .banca-forma {
+            display: none; gap: 8px; align-items: center; margin-top: 14px;
+            padding-top: 14px; border-top: 1px solid #21262d;
+        }
+        .banca-forma.aberta { display: flex; flex-wrap: wrap; }
+        .banca-forma input[type=number] {
+            background: #0d1117; border: 1px solid #30363d; color: #e6edf3;
+            border-radius: 8px; padding: 8px 10px; width: 140px;
+        }
+        .btn-confirmar-deposito { background: #23863622; color: #3fb950; border: 1px solid #3fb95055; }
+        .btn-confirmar-resgate { background: #f8514922; color: #f85149; border: 1px solid #f8514955; }
+        .extrato-box {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 6px 20px; margin-bottom: 28px;
+        }
+        .extrato-titulo {
+            font-size: 0.82rem; color: #8b949e; padding: 12px 0; cursor: pointer; user-select: none;
+        }
+        .extrato-lista { display: none; padding-bottom: 10px; }
+        .extrato-lista.aberta { display: block; }
+        .extrato-linha {
+            display: flex; justify-content: space-between; font-size: 0.8rem;
+            padding: 7px 0; border-top: 1px solid #21262d; color: #8b949e;
+        }
+        .extrato-linha b { color: #e6edf3; }
     </style>
+    <script>
+        function alternarFormaBanca(tipo) {
+            document.getElementById('forma-deposito').classList.remove('aberta');
+            document.getElementById('forma-resgate').classList.remove('aberta');
+            document.getElementById('forma-' + tipo).classList.add('aberta');
+        }
+        function alternarExtrato() {
+            document.getElementById('extrato-lista').classList.toggle('aberta');
+        }
+    </script>
 </head>
 <body>
     <a href="/" class="link-voltar">← Voltar</a>
     <h1>💰 Minhas Apostas</h1>
     <p class="subtitulo">Só o que você salvou com valor apostado - não inclui recomendações não salvas</p>
+
+    {% with mensagens = get_flashed_messages(with_categories=true) %}
+        {% for categoria, texto in mensagens %}
+        <div class="flash flash-{{ categoria }}">{{ texto }}</div>
+        {% endfor %}
+    {% endwith %}
+
+    <div class="banca-box">
+        <div class="banca-topo">
+            <div>
+                <div class="banca-valor {{ 'retorno-positivo' if banca_atual >= 0 else 'retorno-negativo' }}">
+                    R$ {{ "%.2f"|format(banca_atual) }}
+                </div>
+                <div class="banca-label">🏦 Banca atual (dinheiro fictício, não real)</div>
+            </div>
+            <div class="banca-botoes">
+                <button type="button" class="btn-banca" onclick="alternarFormaBanca('deposito')">➕ Depositar</button>
+                <button type="button" class="btn-banca" onclick="alternarFormaBanca('resgate')">➖ Resgatar</button>
+            </div>
+        </div>
+        <form method="POST" action="/banca-movimento" class="banca-forma" id="forma-deposito">
+            <input type="hidden" name="tipo" value="deposito">
+            <input type="number" step="0.01" min="0.01" name="valor" placeholder="Valor a depositar (R$)" required>
+            <button type="submit" class="btn-banca btn-confirmar-deposito">Confirmar depósito</button>
+        </form>
+        <form method="POST" action="/banca-movimento" class="banca-forma" id="forma-resgate">
+            <input type="hidden" name="tipo" value="resgate">
+            <input type="number" step="0.01" min="0.01" name="valor" placeholder="Valor a resgatar (R$)" required>
+            <button type="submit" class="btn-banca btn-confirmar-resgate">Confirmar resgate</button>
+        </form>
+    </div>
+
+    {% if movimentos_banca %}
+    <div class="extrato-box">
+        <div class="extrato-titulo" onclick="alternarExtrato()">📜 Extrato da banca ({{ movimentos_banca|length }} últimos) - clique pra ver</div>
+        <div class="extrato-lista" id="extrato-lista">
+            {% for m in movimentos_banca %}
+            <div class="extrato-linha">
+                <span>{{ m.criado_em }} · {{ {"deposito": "➕ Depósito", "resgate": "➖ Resgate",
+                    "aposta": "🎯 Aposta salva", "retorno": "🏆 Retorno (aposta ganha)",
+                    "cancelamento": "↩️ Cancelamento"}.get(m.tipo, m.tipo) }}</span>
+                <span>
+                    <b class="{{ 'retorno-positivo' if m.valor >= 0 else 'retorno-negativo' }}">
+                        {{ "+" if m.valor >= 0 else "" }}R$ {{ "%.2f"|format(m.valor) }}</b>
+                    &nbsp;→&nbsp; saldo R$ {{ "%.2f"|format(m.saldo_apos) }}
+                </span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
 
     <div class="resumo-grid">
         <div class="resumo-card">
@@ -1409,10 +1646,13 @@ def resolver_apostas_pendentes(cur):
     pernas dela já têm resultado em historico_recomendacoes - só resolve
     (acertou/errou) quando não sobrar nenhuma perna pendente, já que uma
     múltipla só acerta se todas as pernas acertarem."""
-    cur.execute("SELECT id, pernas, odd_combinada, valor_apostado FROM apostas_salvas WHERE resultado = 'pendente'")
+    cur.execute(
+        "SELECT id, pernas, odd_combinada, valor_apostado, usuario_id "
+        "FROM apostas_salvas WHERE resultado = 'pendente'"
+    )
     pendentes = cur.fetchall()
 
-    for aposta_id, pernas_json, odd_combinada, valor_apostado in pendentes:
+    for aposta_id, pernas_json, odd_combinada, valor_apostado, usuario_id in pendentes:
         pernas = pernas_json if isinstance(pernas_json, list) else json.loads(pernas_json)
 
         resultados_pernas = []
@@ -1447,6 +1687,16 @@ def resolver_apostas_pendentes(cur):
             "UPDATE apostas_salvas SET resultado = %s, retorno = %s, resolvido_em = NOW() WHERE id = %s",
             (resultado_final, retorno, aposta_id),
         )
+
+        # NOVO (banca): se acertou, volta pra banca o valor apostado x a
+        # odd (stake + lucro) - stake + retorno é exatamente isso, já que
+        # retorno = valor_apostado * (odd - 1). Se errou, não volta nada -
+        # o valor já saiu da banca no momento em que a aposta foi salva,
+        # não precisa de nenhum movimento extra aqui.
+        if resultado_final == "acertou":
+            registrar_movimento_banca(
+                cur, usuario_id, "retorno", float(valor_apostado) + retorno, aposta_id
+            )
 
 
 def buscar_apostas_salvas(cur, usuario_id):
@@ -1491,6 +1741,19 @@ def montar_svg_grafico(pontos):
     </svg>'''
 
 
+def buscar_movimentos_banca(cur, usuario_id, limite=20):
+    """NOVO (banca): últimos movimentos da banca do usuário, pra mostrar um
+    extrato simples na página de ROI (depósito, resgate, aposta, retorno,
+    cancelamento)."""
+    cur.execute(
+        """SELECT tipo, valor, saldo_apos, criado_em FROM banca_movimentos
+           WHERE usuario_id = %s ORDER BY criado_em DESC LIMIT %s""",
+        (usuario_id, limite),
+    )
+    colunas = ["tipo", "valor", "saldo_apos", "criado_em"]
+    return [dict(zip(colunas, row)) for row in cur.fetchall()]
+
+
 @app.route("/minhas-apostas")
 def minhas_apostas():
     conn = psycopg2.connect(DATABASE_URL)
@@ -1500,6 +1763,8 @@ def minhas_apostas():
         conn.commit()
 
         apostas = buscar_apostas_salvas(cur, session["usuario_id"])
+        banca_atual = buscar_banca(cur, session["usuario_id"])
+        movimentos_banca = buscar_movimentos_banca(cur, session["usuario_id"])
         cur.close()
     finally:
         conn.close()
@@ -1532,6 +1797,7 @@ def minhas_apostas():
     return render_template_string(
         PAGINA_ROI, resumo=resumo, apostas=apostas,
         pontos_grafico=pontos_grafico, svg_grafico=svg_grafico,
+        banca_atual=round(banca_atual, 2), movimentos_banca=movimentos_banca,
     )
 
 
@@ -1736,10 +2002,22 @@ PAGINA_CLUBE = """
             font-size: 0.82rem; color: #3fb950; font-weight: 700; margin-bottom: 10px;
         }
         .retangulo-vazio { color: #8b949e; font-size: 0.82rem; font-style: italic; }
+        .flash {
+            padding: 12px 16px; border-radius: 10px; margin-bottom: 18px; font-size: 0.85rem;
+        }
+        .flash-erro { background: #f8514922; color: #f85149; border: 1px solid #f8514955; }
+        .flash-sucesso { background: #23863622; color: #3fb950; border: 1px solid #23863655; }
     </style>
 </head>
 <body>
     <a href="/jogadores" class="link-voltar">← Voltar</a>
+
+    {% with mensagens = get_flashed_messages(with_categories=true) %}
+        {% for categoria, texto in mensagens %}
+        <div class="flash flash-{{ categoria }}">{{ texto }}</div>
+        {% endfor %}
+    {% endwith %}
+
     <h1>
         {% if escudo_url %}
         <img src="{{ escudo_url }}" alt="{{ nome_clube }}" class="selo-titulo" onerror="this.outerHTML='<span class=&quot;selo-titulo&quot;></span>'">
@@ -2323,22 +2601,23 @@ def index():
 
     combinacoes = []
     motivo = ""
-    if buscou:
-        conn = psycopg2.connect(DATABASE_URL)
-        try:
-            cur = conn.cursor()
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        banca_atual = buscar_banca(cur, session["usuario_id"])
+        if buscou:
             recomendacoes = buscar_recomendacoes(cur)
             combinacoes = montar_combinacoes(recomendacoes, float(odd_min), float(odd_max))
             aplicar_totais_apostados(combinacoes, buscar_totais_apostados(cur, session["usuario_id"]))
             if not combinacoes:
                 motivo = descobrir_motivo(cur)
-            cur.close()
-        finally:
-            conn.close()
+        cur.close()
+    finally:
+        conn.close()
 
     return render_template_string(
         PAGINA, odd_min=odd_min, odd_max=odd_max, buscou=buscou,
-        combinacoes=combinacoes, motivo=motivo,
+        combinacoes=combinacoes, motivo=motivo, banca_atual=round(banca_atual, 2),
     )
 
 
