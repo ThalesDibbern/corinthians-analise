@@ -1784,9 +1784,17 @@ def minhas_apostas():
         "total_apostas": len(apostas),
     }
 
-    # pontos do gráfico: retorno acumulado, em ordem cronológica (mais antiga primeiro)
+    # pontos do gráfico: retorno acumulado, em ordem cronológica (mais antiga primeiro).
+    # NOVO: começa com um ponto artificial em R$ 0 (a "linha de partida", antes
+    # da primeira aposta resolvida) - antes o gráfico só aparecia a partir da
+    # SEGUNDA aposta resolvida (precisa de 2 pontos pra desenhar uma linha),
+    # então com só 1 aposta resolvida nada aparecia, mesmo já tendo resultado
+    # pra mostrar. Com o ponto de partida, já dá pra ver a linha (zero até o
+    # resultado da primeira aposta) assim que a primeira for resolvida.
     resolvidas_ordem_cronologica = sorted(resolvidas, key=lambda a: a["criado_em"])
     pontos_grafico = []
+    if resolvidas_ordem_cronologica:
+        pontos_grafico.append(("Início", 0))
     acumulado = 0
     for a in resolvidas_ordem_cronologica:
         acumulado += float(a["retorno"])
