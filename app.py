@@ -282,6 +282,8 @@ PAGINA = """
         &nbsp;·&nbsp;
         <a href="/jogadores" class="link-historico">📈 Estatísticas de jogadores</a>
         &nbsp;·&nbsp;
+        <a href="/times" class="link-historico">🏟️ Estatísticas de times</a>
+        &nbsp;·&nbsp;
         <span style="color:#8b949e; font-size:0.85rem;">🏦 Banca: R$ {{ "%.2f"|format(banca_atual) }}</span>
         &nbsp;·&nbsp;
         <span style="color:#8b949e; font-size:0.85rem;">Olá, {{ session.usuario_nome }}</span>
@@ -1863,29 +1865,107 @@ PAGINA_JOGADORES = """
         }
         .clube-nome { font-weight: 700; font-size: 1rem; }
         .clube-sub { color: #8b949e; font-size: 0.78rem; }
+        .busca-form { display: flex; gap: 8px; margin-bottom: 8px; }
+        .busca {
+            flex: 1; padding: 10px 14px;
+            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+            border-radius: 8px; font-size: 0.9rem;
+        }
+        .btn-buscar {
+            background: #1f6feb; color: white; border: none; border-radius: 8px;
+            padding: 10px 18px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+        }
+        .btn-buscar:hover { background: #388bfd; }
+        .link-limpar { color: #8b949e; font-size: 0.8rem; margin: 0 0 24px; display: inline-block; }
+        .cartao {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 16px 20px; margin-bottom: 12px;
+        }
+        .nome-jogador { font-weight: 700; font-size: 1rem; margin-bottom: 4px; }
+        .nome-jogador-time { color: #8b949e; font-weight: 400; font-size: 0.8rem; }
+        .bloco { margin-bottom: 10px; margin-top: 10px; }
+        .bloco-titulo { color: #8b949e; font-size: 0.78rem; text-transform: uppercase;
+            letter-spacing: 0.03em; margin-bottom: 6px; }
+        .linhas-grid { display: flex; gap: 10px; flex-wrap: wrap; }
+        .linha-item {
+            background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
+            padding: 6px 12px; font-size: 0.82rem;
+        }
+        .linha-item b { color: #3fb950; }
+        .binario-texto { font-size: 0.88rem; color: #c9d1d9; }
+        .binario-texto b { color: #3fb950; }
+        .separador { border: none; border-top: 1px solid #21262d; margin: 28px 0; }
     </style>
 </head>
 <body>
     <a href="/" class="link-voltar">← Voltar</a>
     <h1>📈 Estatísticas de Jogadores</h1>
-    <p class="subtitulo">Selecione um clube pra ver o elenco, última escalação e frequência histórica de cada jogador.</p>
+    <p class="subtitulo">Busque um jogador direto (qualquer clube rastreado) ou selecione um clube pra ver o elenco inteiro.
+        Procurando estatística do TIME inteiro? <a href="/times" class="link-voltar" style="text-decoration:underline;">Ver Estatísticas de Times →</a></p>
 
-    {% if clubes %}
-        {% for c in clubes %}
-        <a href="/clube/{{ c.id }}" class="clube-btn">
-            {% if c.escudo_url %}
-            <img src="{{ c.escudo_url }}" alt="{{ c.nome }}" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
-            {% else %}
-            <div class="clube-selo"></div>
-            {% endif %}
-            <div>
-                <div class="clube-nome">{{ c.nome }}</div>
-                <div class="clube-sub">Ver elenco e última escalação →</div>
+    <form method="GET" action="/jogadores" class="busca-form">
+        <input type="text" class="busca" name="busca" value="{{ busca }}"
+               placeholder="Buscar jogador por nome (ex: Leo Pereira)...">
+        <button type="submit" class="btn-buscar">🔎 Buscar</button>
+    </form>
+
+    {% if busca %}
+        <a href="/jogadores" class="link-limpar">✕ Limpar busca e ver clubes</a>
+
+        {% if resultados_busca %}
+            {% for j in resultados_busca %}
+            <div class="cartao">
+                <div class="nome-jogador">{{ j.nome }} <span class="nome-jogador-time">· {{ j.time_nome }}</span></div>
+
+                {% if j.cartao %}
+                <div class="bloco">
+                    <div class="bloco-titulo">Cartão</div>
+                    <div class="binario-texto">Recebeu cartão em <b>{{ j.cartao.frequencia }}%</b> dos últimos
+                        {{ j.cartao.jogos_analisados }} jogos</div>
+                </div>
+                {% endif %}
+
+                {% for bloco in j.blocos_linha %}
+                <div class="bloco">
+                    <div class="bloco-titulo">{{ bloco.titulo }}</div>
+                    <div class="linhas-grid">
+                        {% for item in bloco.itens %}
+                        <div class="linha-item">+{{ item.linha }}: <b>{{ item.frequencia }}%</b></div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endfor %}
+
+                {% if j.impedimento %}
+                <div class="bloco">
+                    <div class="bloco-titulo">Impedimento</div>
+                    <div class="binario-texto">Ficou em impedimento em <b>{{ j.impedimento.frequencia }}%</b> dos
+                        últimos {{ j.impedimento.jogos_analisados }} jogos</div>
+                </div>
+                {% endif %}
             </div>
-        </a>
-        {% endfor %}
+            {% endfor %}
+        {% else %}
+            <div class="vazio">Nenhum jogador ativo (em clube rastreado) encontrado com esse nome.</div>
+        {% endif %}
     {% else %}
-        <div class="vazio">Nenhum clube rastreado ainda.</div>
+        {% if clubes %}
+            {% for c in clubes %}
+            <a href="/clube/{{ c.id }}" class="clube-btn">
+                {% if c.escudo_url %}
+                <img src="{{ c.escudo_url }}" alt="{{ c.nome }}" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
+                {% else %}
+                <div class="clube-selo"></div>
+                {% endif %}
+                <div>
+                    <div class="clube-nome">{{ c.nome }}</div>
+                    <div class="clube-sub">Ver elenco e última escalação →</div>
+                </div>
+            </a>
+            {% endfor %}
+        {% else %}
+            <div class="vazio">Nenhum clube rastreado ainda.</div>
+        {% endif %}
     {% endif %}
 </body>
 </html>
@@ -2364,6 +2444,149 @@ PAGINA_CLUBE = """
 </html>
 """
 
+PAGINA_TIMES = """
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estatísticas de Times - Análise de Apostas</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+            background: #0d1117; color: #e6edf3; max-width: 900px;
+            margin: 0 auto; padding: 32px 20px 80px;
+        }
+        h1 { font-size: 1.5rem; margin: 0 0 4px; }
+        .subtitulo { color: #8b949e; margin: 0 0 24px; font-size: 0.88rem; }
+        .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
+        .link-voltar:hover { text-decoration: underline; }
+        .vazio {
+            text-align: center; color: #8b949e; padding: 32px 24px;
+            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
+        }
+        .clube-btn {
+            display: flex; align-items: center; gap: 12px;
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 14px 20px; margin-bottom: 12px; text-decoration: none;
+            color: #e6edf3; transition: border-color 0.15s;
+        }
+        .clube-btn:hover { border-color: #58a6ff; }
+        .clube-selo {
+            width: 40px; height: 40px; border-radius: 50%;
+            background: linear-gradient(135deg, #333 50%, #eee 50%);
+            flex-shrink: 0; object-fit: contain;
+        }
+        .clube-nome { font-weight: 700; font-size: 1rem; }
+        .clube-sub { color: #8b949e; font-size: 0.78rem; }
+    </style>
+</head>
+<body>
+    <a href="/" class="link-voltar">← Voltar</a>
+    <h1>🏟️ Estatísticas de Times</h1>
+    <p class="subtitulo">Selecione um clube pra ver a frequência histórica de escanteios, faltas, chutes e cartões do
+        time inteiro (não depende de nenhuma odd disponível na casa de apostas).</p>
+
+    {% if clubes %}
+        {% for c in clubes %}
+        <a href="/time/{{ c.id }}" class="clube-btn">
+            {% if c.escudo_url %}
+            <img src="{{ c.escudo_url }}" alt="{{ c.nome }}" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
+            {% else %}
+            <div class="clube-selo"></div>
+            {% endif %}
+            <div>
+                <div class="clube-nome">{{ c.nome }}</div>
+                <div class="clube-sub">Ver estatísticas do time →</div>
+            </div>
+        </a>
+        {% endfor %}
+    {% else %}
+        <div class="vazio">Nenhum clube rastreado ainda.</div>
+    {% endif %}
+</body>
+</html>
+"""
+
+PAGINA_TIME = """
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ nome_time }} - Estatísticas de Time</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+            background: #0d1117; color: #e6edf3; max-width: 900px;
+            margin: 0 auto; padding: 32px 20px 80px;
+        }
+        h1 { font-size: 1.5rem; margin: 0 0 4px; display: flex; align-items: center; gap: 12px; }
+        .selo-titulo {
+            width: 34px; height: 34px; border-radius: 50%;
+            background: linear-gradient(135deg, #333 50%, #eee 50%);
+            flex-shrink: 0; object-fit: contain;
+        }
+        .subtitulo { color: #8b949e; margin: 0 0 24px; font-size: 0.88rem; }
+        .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
+        .link-voltar:hover { text-decoration: underline; }
+        .cartao {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 18px 22px; margin-bottom: 14px;
+        }
+        .bloco-topo { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; flex-wrap: wrap; gap: 6px; }
+        .bloco-titulo { font-weight: 700; font-size: 1rem; }
+        .bloco-media { color: #8b949e; font-size: 0.8rem; }
+        .bloco-media b { color: #e6edf3; }
+        .linhas-grid { display: flex; gap: 10px; flex-wrap: wrap; }
+        .linha-item {
+            background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
+            padding: 6px 12px; font-size: 0.85rem;
+        }
+        .linha-item b { color: #3fb950; }
+        .vazio {
+            text-align: center; color: #8b949e; padding: 32px 24px;
+            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <a href="/times" class="link-voltar">← Voltar</a>
+    <h1>
+        {% if escudo_url %}
+        <img src="{{ escudo_url }}" alt="{{ nome_time }}" class="selo-titulo" onerror="this.outerHTML='<span class=&quot;selo-titulo&quot;></span>'">
+        {% else %}
+        <span class="selo-titulo"></span>
+        {% endif %}
+        {{ nome_time }}
+    </h1>
+    <p class="subtitulo">Frequência histórica do time inteiro (últimos jogos, só o lado do {{ nome_time }}) -
+        cobre faltas e chutes, que não têm odd real disponível hoje pra nenhum mercado.</p>
+
+    {% if blocos %}
+        {% for bloco in blocos %}
+        <div class="cartao">
+            <div class="bloco-topo">
+                <div class="bloco-titulo">{{ bloco.titulo }}</div>
+                <div class="bloco-media">Média: <b>{{ bloco.media }}</b> por jogo · últimos {{ bloco.jogos_analisados }} jogo(s)</div>
+            </div>
+            <div class="linhas-grid">
+                {% for item in bloco.itens %}
+                <div class="linha-item">+{{ item.linha }}: <b>{{ item.frequencia }}%</b></div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="vazio">Ainda não há dados suficientes pra calcular as estatísticas desse time
+            (precisa de pelo menos 5 jogos concluídos).</div>
+    {% endif %}
+</body>
+</html>
+"""
+
 NOMES_TIPO_LINHA = {
     "falta_cometida": "Faltas cometidas",
     "desarme": "Desarmes",
@@ -2371,6 +2594,55 @@ NOMES_TIPO_LINHA = {
     "chute_total": "Chutes (total)",
     "falta_sofrida": "Faltas sofridas",
 }
+
+# NOVO (estatísticas de time)
+NOMES_TIPO_LINHA_TIME = {
+    "escanteio": "Escanteios do time",
+    "falta": "Faltas do time",
+    "chute": "Chutes (finalizações) do time",
+    "cartao": "Cartões do time (amarelo + vermelho)",
+}
+ORDEM_BLOCOS_TIME = ["escanteio", "falta", "chute", "cartao"]
+
+
+def buscar_estatisticas_time(cur, time_id):
+    """NOVO (estatísticas de time): monta a frequência histórica de
+    escanteios, faltas, chutes (finalizações) e cartões do time, lendo
+    direto das tabelas de padrão já calculadas pelo motor_padroes.py -
+    mesmo espírito de buscar_estatisticas_jogadores, mas em nível de time.
+    Cobre justamente os mercados sem odd real disponível hoje (faltas e
+    chutes de time), do mesmo jeito que /jogadores já cobre pro jogador
+    (ver seção 2 da documentação - confirmação oficial da OddsPapi de que
+    não existe preço real pra prop bet de jogador na Superbet; o mesmo
+    vale a fortiori pra estatística de time inteiro, que nunca teve odd)."""
+    blocos_dict = {}
+
+    def adicionar(tipo, linha, jogos_analisados, frequencia, media):
+        bloco = blocos_dict.setdefault(tipo, {
+            "titulo": NOMES_TIPO_LINHA_TIME.get(tipo, tipo),
+            "tipo": tipo, "itens": [], "media": media, "jogos_analisados": jogos_analisados,
+        })
+        bloco["itens"].append({"linha": linha, "frequencia": frequencia})
+
+    cur.execute(
+        """SELECT linha, jogos_analisados, frequencia, media
+           FROM padroes_time_escanteio WHERE time_id = %s ORDER BY linha""",
+        (time_id,),
+    )
+    for linha, jogos_analisados, frequencia, media in cur.fetchall():
+        adicionar("escanteio", float(linha), jogos_analisados, float(frequencia), float(media))
+
+    cur.execute(
+        """SELECT tipo, linha, jogos_analisados, frequencia, media
+           FROM padroes_time_linha WHERE time_id = %s ORDER BY tipo, linha""",
+        (time_id,),
+    )
+    for tipo, linha, jogos_analisados, frequencia, media in cur.fetchall():
+        adicionar(tipo, float(linha), jogos_analisados, float(frequencia), float(media))
+
+    blocos = [blocos_dict[tipo] for tipo in ORDEM_BLOCOS_TIME if tipo in blocos_dict]
+    blocos += [b for tipo, b in blocos_dict.items() if tipo not in ORDEM_BLOCOS_TIME]
+    return blocos
 
 
 def buscar_escudo_url(cur, nome_time):
@@ -2407,60 +2679,82 @@ def escudo(team_id):
     return "", 404
 
 
-def buscar_estatisticas_jogadores(cur, time_id):
-    """NOVO: monta a frequência histórica de cada jogador (cartão, faltas,
+def buscar_estatisticas_jogadores(cur, time_id=None, busca=None):
+    """Monta a frequência histórica de cada jogador (cartão, faltas,
     desarmes, chutes no gol, impedimento), lendo direto das tabelas de
     padrão já calculadas pelo motor_padroes.py - não depende de nenhuma
     odd estar disponível na casa de apostas.
     NOVO (multi-time): filtra por time_atual_id - cada clube só mostra o
-    próprio elenco, sem misturar jogadores de outro time rastreado."""
+    próprio elenco, sem misturar jogadores de outro time rastreado.
+    NOVO (busca global): agora aceita `busca` (nome, substring, sem
+    diferenciar maiúscula/minúscula) - se informado, ignora `time_id` e
+    procura em TODOS os clubes rastreados de uma vez, sem precisar entrar
+    no clube primeiro. Cada jogador retornado inclui `time_nome`, útil
+    pra saber de qual clube é quando o resultado vem de vários times."""
+    condicoes = ["j.ativo = TRUE", "t.rastreado = TRUE"]
+    params_base = []
+    if busca:
+        condicoes.append("j.nome ILIKE %s")
+        params_base.append(f"%{busca}%")
+    elif time_id is not None:
+        condicoes.append("j.time_atual_id = %s")
+        params_base.append(time_id)
+    else:
+        return []
+    condicao_sql = " AND ".join(condicoes)
+
     jogadores_dict = {}
 
-    def garantir(jogador_id, nome):
+    def garantir(jogador_id, nome, time_nome):
         jogadores_dict.setdefault(jogador_id, {
-            "nome": nome, "cartao": None, "linhas": {}, "impedimento": None,
+            "nome": nome, "time_nome": time_nome, "cartao": None, "linhas": {}, "impedimento": None,
         })
 
     cur.execute(
-        """
-        SELECT j.id, j.nome, p.jogos_analisados, p.frequencia
+        f"""
+        SELECT j.id, j.nome, t.nome, p.jogos_analisados, p.frequencia
         FROM padroes_jogador_cartao p
-        JOIN jogadores j ON j.id = p.jogador_id AND j.ativo = TRUE AND j.time_atual_id = %s
+        JOIN jogadores j ON j.id = p.jogador_id
+        JOIN times t ON t.id = j.time_atual_id
+        WHERE {condicao_sql}
         """,
-        (time_id,),
+        params_base,
     )
-    for jogador_id, nome, jogos_analisados, frequencia in cur.fetchall():
-        garantir(jogador_id, nome)
+    for jogador_id, nome, time_nome, jogos_analisados, frequencia in cur.fetchall():
+        garantir(jogador_id, nome, time_nome)
         jogadores_dict[jogador_id]["cartao"] = {
             "jogos_analisados": jogos_analisados, "frequencia": float(frequencia),
         }
 
     cur.execute(
-        """
-        SELECT j.id, j.nome, p.tipo, p.linha, p.jogos_analisados, p.frequencia
+        f"""
+        SELECT j.id, j.nome, t.nome, p.tipo, p.linha, p.jogos_analisados, p.frequencia
         FROM padroes_jogador_linha p
-        JOIN jogadores j ON j.id = p.jogador_id AND j.ativo = TRUE AND j.time_atual_id = %s
+        JOIN jogadores j ON j.id = p.jogador_id
+        JOIN times t ON t.id = j.time_atual_id
+        WHERE {condicao_sql}
         ORDER BY p.linha
         """,
-        (time_id,),
+        params_base,
     )
-    for jogador_id, nome, tipo, linha, jogos_analisados, frequencia in cur.fetchall():
-        garantir(jogador_id, nome)
+    for jogador_id, nome, time_nome, tipo, linha, jogos_analisados, frequencia in cur.fetchall():
+        garantir(jogador_id, nome, time_nome)
         jogadores_dict[jogador_id]["linhas"].setdefault(tipo, []).append({
             "linha": float(linha), "frequencia": float(frequencia),
         })
 
     cur.execute(
-        """
-        SELECT j.id, j.nome, p.jogos_analisados, p.frequencia
+        f"""
+        SELECT j.id, j.nome, t.nome, p.jogos_analisados, p.frequencia
         FROM padroes_jogador_frequencia p
-        JOIN jogadores j ON j.id = p.jogador_id AND j.ativo = TRUE AND j.time_atual_id = %s
-        WHERE p.tipo = 'impedimento'
+        JOIN jogadores j ON j.id = p.jogador_id
+        JOIN times t ON t.id = j.time_atual_id
+        WHERE {condicao_sql} AND p.tipo = 'impedimento'
         """,
-        (time_id,),
+        params_base,
     )
-    for jogador_id, nome, jogos_analisados, frequencia in cur.fetchall():
-        garantir(jogador_id, nome)
+    for jogador_id, nome, time_nome, jogos_analisados, frequencia in cur.fetchall():
+        garantir(jogador_id, nome, time_nome)
         jogadores_dict[jogador_id]["impedimento"] = {
             "jogos_analisados": jogos_analisados, "frequencia": float(frequencia),
         }
@@ -2474,6 +2768,7 @@ def buscar_estatisticas_jogadores(cur, time_id):
         lista.append({
             "jogador_id": jogador_id,
             "nome": dados["nome"],
+            "time_nome": dados["time_nome"],
             "cartao": dados["cartao"],
             "impedimento": dados["impedimento"],
             "blocos_linha": blocos_linha,
@@ -2553,9 +2848,16 @@ def buscar_proximo_jogo(cur, nome_time):
 
 @app.route("/jogadores")
 def jogadores():
+    busca = request.args.get("busca", "").strip()
+
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
+
+        resultados_busca = []
+        if busca:
+            resultados_busca = buscar_estatisticas_jogadores(cur, busca=busca)
+
         cur.execute("SELECT id, nome FROM times WHERE rastreado = TRUE ORDER BY nome")
         times_rastreados = cur.fetchall()
         clubes = [
@@ -2566,7 +2868,9 @@ def jogadores():
     finally:
         conn.close()
 
-    return render_template_string(PAGINA_JOGADORES, clubes=clubes)
+    return render_template_string(
+        PAGINA_JOGADORES, clubes=clubes, busca=busca, resultados_busca=resultados_busca,
+    )
 
 
 @app.route("/clube/<int:time_id>")
@@ -2598,6 +2902,52 @@ def clube(time_id):
         PAGINA_CLUBE, jogadores=lista, ultima_escalacao=ultima_escalacao,
         proximo_jogo=proximo_jogo, nome_clube=nome_clube, escudo_url=escudo_url,
         time_id=time_id,
+    )
+
+
+@app.route("/times")
+def times_lista():
+    """NOVO (estatísticas de time): igual a /jogadores, mas mostra o grid
+    de clubes pra ver estatística de TIME (escanteio, falta, chute,
+    cartão) em vez de jogador."""
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id, nome FROM times WHERE rastreado = TRUE ORDER BY nome")
+        times_rastreados = cur.fetchall()
+        clubes = [
+            {"id": time_id, "nome": nome, "escudo_url": buscar_escudo_url(cur, nome)}
+            for time_id, nome in times_rastreados
+        ]
+        cur.close()
+    finally:
+        conn.close()
+
+    return render_template_string(PAGINA_TIMES, clubes=clubes)
+
+
+@app.route("/time/<int:time_id>")
+def time_detalhe(time_id):
+    """NOVO (estatísticas de time): página com a frequência histórica de
+    escanteios, faltas, chutes e cartões de UM time rastreado."""
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT nome FROM times WHERE id = %s AND rastreado = TRUE", (time_id,))
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            return "Time não encontrado.", 404
+        nome_time = row[0]
+
+        blocos = buscar_estatisticas_time(cur, time_id)
+        escudo_url = buscar_escudo_url(cur, nome_time)
+        cur.close()
+    finally:
+        conn.close()
+
+    return render_template_string(
+        PAGINA_TIME, blocos=blocos, nome_time=nome_time, escudo_url=escudo_url,
     )
 
 
