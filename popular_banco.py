@@ -47,6 +47,19 @@ estatísticas por jogador + escalação). Com esse volume, o histórico completo
 mas o script continua seguro pra rodar em mais de um dia se precisar - ele
 continua de onde parou.
 
+NOVO (correção de performance - jogos futuros): antes, o script tentava
+buscar eventos/estatísticas/escalação de TODO jogo do calendário da
+temporada, incluindo os que ainda não aconteceram - como esses endpoints
+sempre voltam vazios pra jogo futuro, isso nunca ficava "resolvido" e o
+script pagava as 4 chamadas + ~28s de sleep por jogo futuro, TODA execução,
+pra CADA time. Agora ele olha `fixture.status.short` da API-Football: só
+busca o detalhe completo se o jogo estiver realmente finalizado (FT, AET ou
+PEN). Jogo que ainda não rolou, foi adiado, cancelado ou está em andamento
+só tem a linha em `jogos` criada/atualizada (rápido, sem chamada extra) e é
+pulado. Isso é o que fazia a cadeia pesada durar cada vez mais ao adicionar
+times - o tempo gasto agora escala com jogos que JÁ ACONTECERAM desde a
+última execução, não com o calendário inteiro da temporada.
+
 Variáveis de ambiente necessárias (configuradas no Railway, aba "Variables"):
   - API_FOOTBALL_KEY   -> sua chave da API-Football (api-sports.io)
   - DATABASE_URL       -> a URL de conexão do Postgres (o Railway já cria essa
@@ -68,6 +81,19 @@ HEADERS = {"x-apisports-key": API_KEY}
 LEAGUE_ID = 71                    # Brasileirão Série A
 TEMPORADAS = [2022, 2023, 2024, 2025, 2026]  # histórico + temporada atual (plano pago libera 2025/2026)
 LIMITE_REQUISICOES_DIA = 7000      # margem de segurança abaixo do limite de 7.500/dia do plano novo
+
+# NOVO (correção de performance): status da API-Football (campo
+# fixture.status.short) que indicam jogo REALMENTE finalizado, com
+# estatísticas/eventos disponíveis pra buscar. Qualquer outro status
+# (NS = not started, TBD, 1H, HT, 2H, ET, P, LIVE, PST = postponed,
+# CANC = cancelado, ABD = abandonado etc.) significa que não existe
+# dado real pra buscar ainda - antes o script tentava os 4 endpoints
+# (eventos, estatísticas, estatísticas de jogador, escalação) pra TODO
+# jogo futuro do calendário inteiro da temporada, em todo time, todo
+# dia, sempre voltando vazio e ainda assim pagando os 4x 7s de sleep
+# (~28s por jogo futuro) - com N times isso virava N x 38 jogos x 28s
+# de tempo jogado fora, e crescia sem limite ao adicionar mais times.
+STATUS_JOGO_FINALIZADO = {"FT", "AET", "PEN"}
 
 # NOVO (multi-time): os times rastreados vêm da própria tabela `times`
 # (marcados com `rastreado = TRUE`) - adicionar um time novo é: preencher
@@ -682,6 +708,7 @@ def main():
     try:
         total_processados = 0
         total_pulados = 0
+        total_futuros = 0
 
         times_rastreados = buscar_times_rastreados(cur)
         if not times_rastreados:
@@ -697,6 +724,7 @@ def main():
                 for fixture in jogos:
                     fixture_id = fixture["fixture"]["id"]
                     home_team_id = fixture["teams"]["home"]["id"]
+                    status_jogo = fixture["fixture"]["status"]["short"]
 
                     # NOVO (multi-time): get_or_create_jogo roda ANTES das
                     # checagens de "já processado" agora, porque o `jogo_id`
@@ -705,6 +733,20 @@ def main():
                     # rastreados jogarem entre si).
                     jogo_id = get_or_create_jogo(cur, fixture, time_id, time_api_id)
                     conn.commit()
+
+                    # NOVO (correção de performance): se o jogo ainda não
+                    # aconteceu (ou não terminou de verdade - adiado,
+                    # cancelado, em andamento etc.), não existe evento,
+                    # estatística ou escalação real pra buscar ainda. Cria/
+                    # atualiza a linha do jogo (acima, pra `atualizar_odds.py`
+                    # conseguir casar a odd com o jogo) e pula pro próximo,
+                    # sem gastar as 4 chamadas de API + 28s de sleep por
+                    # jogo futuro - isso é o que fazia a cadeia pesada durar
+                    # cada vez mais ao adicionar times, processando o
+                    # calendário inteiro da temporada todo santo dia.
+                    if status_jogo not in STATUS_JOGO_FINALIZADO:
+                        total_futuros += 1
+                        continue
 
                     falta_eventos = not jogo_ja_processado(cur, jogo_id)
                     falta_estatisticas = not jogo_tem_estatisticas(cur, jogo_id)
@@ -756,7 +798,8 @@ def main():
             print(f"  Concluído {time_nome}.")
 
         print(f"\nConcluído! {total_processados} jogos novos processados, "
-              f"{total_pulados} já existiam no banco e foram pulados.")
+              f"{total_pulados} já existiam no banco e foram pulados, "
+              f"{total_futuros} ainda não aconteceram (ou não terminaram) e foram ignorados.")
 
     except LimiteDiarioAtingido as e:
         conn.commit()  # garante que o que já foi processado nessa execução fica salvo
