@@ -87,6 +87,24 @@ PADROES_LINHA_JOGADOR = {
     "falta_sofrida": ("faltas_sofridas", [0.5, 1.5, 2.5]),
 }
 
+# NOVO (estatísticas de time): linhas testadas pros padrões de TIME que
+# faltavam - faltas, chutes (finalizações) e cartões, sempre só do NOSSO
+# lado (diferente de LINHAS_FALTA_TOTAL/LINHAS_CHUTE_TOTAL/LINHAS_CARTAO_TOTAL,
+# que somam os dois times do jogo). Servem pra alimentar a página
+# "Estatísticas de Times" (igual a de jogadores, mas por time) - não
+# dependem de odd disponível em lugar nenhum, então cobrem justamente os
+# mercados que não têm preço real na Superbet (faltas, chutes), do mesmo
+# jeito que /jogadores já faz pra jogador.
+LINHAS_FALTA_TIME = [9.5, 11.5, 13.5, 15.5, 17.5]
+LINHAS_CHUTE_TIME = [8.5, 10.5, 12.5, 14.5, 16.5]
+LINHAS_CARTAO_TIME = [0.5, 1.5, 2.5, 3.5]
+
+# padrões novos por TIME: nome do tipo -> (coluna em estatisticas_jogo, linhas testadas)
+PADROES_LINHA_TIME_ESTATISTICA = {
+    "falta": ("faltas", LINHAS_FALTA_TIME),
+    "chute": ("finalizacoes", LINHAS_CHUTE_TIME),
+}
+
 # padrões simples (sim/não teve pelo menos 1 no jogo)
 PADROES_FREQUENCIA_JOGADOR = {
     "impedimento": "impedimentos",
@@ -296,6 +314,112 @@ def salvar_padroes_escanteio(cur, resultados, time_id):
             (time_id, linha, jogos_analisados, jogos_acima, frequencia, media),
         )
         print(f"  Mais de {linha} escanteios: {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
+
+
+def calcular_padrao_linha_time_estatistica(cur, time_id, coluna, linhas_testadas):
+    """NOVO (estatísticas de time): generaliza calcular_padroes_escanteio pra
+    qualquer coluna de estatisticas_jogo (faltas, finalizações) - mesma
+    lógica: só o lado do NOSSO time, traduzindo o lado real (mandante/
+    visitante da API-Football) pra "nosso time" via jogos.mandante (ver
+    docstring de calcular_padroes_escanteio pra mais detalhe dessa
+    tradução)."""
+    cur.execute(
+        f"""
+        SELECT eg.{coluna}
+        FROM estatisticas_jogo eg
+        JOIN jogos j ON j.id = eg.jogo_id
+        WHERE j.nosso_time_id = %s
+          AND ((j.mandante = TRUE AND eg.lado = 'mandante')
+           OR (j.mandante = FALSE AND eg.lado = 'visitante'))
+          AND eg.{coluna} IS NOT NULL
+        ORDER BY j.data_jogo DESC
+        LIMIT %s
+        """,
+        (time_id, JANELA_MAXIMA_DE_JOGOS),
+    )
+    valores = [row[0] for row in cur.fetchall()]
+
+    jogos_analisados = len(valores)
+    if jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR:
+        return None, jogos_analisados
+
+    media = round(sum(float(v) for v in valores) / jogos_analisados, 2)
+
+    resultados = []
+    for linha in linhas_testadas:
+        jogos_acima = sum(1 for v in valores if float(v) > linha)
+        frequencia = round(100 * jogos_acima / jogos_analisados, 2)
+        resultados.append((linha, jogos_analisados, jogos_acima, frequencia, media))
+
+    return resultados, jogos_analisados
+
+
+def calcular_padrao_cartao_time(cur, time_id, linhas_testadas):
+    """NOVO (estatísticas de time): cartões (amarelo + vermelho) recebidos
+    por jogadores do NOSSO time em cada jogo - diferente de
+    padroes_cartao_total (que soma os dois times do jogo). Usa a tabela
+    `cartoes` diretamente: o campo `lado` ali já é gravado relativo ao
+    NOSSO time (ver popular_banco.py/salvar_eventos - `lado = "mandante"
+    if ev["team"]["id"] == nosso_time_api_id else "visitante"`), não ao
+    mandante/visitante real do jogo - por isso, diferente da função acima,
+    não precisa de nenhuma tradução via jogos.mandante."""
+    cur.execute(
+        """
+        SELECT contagem.total_cartoes
+        FROM (
+            SELECT j.id AS jogo_id, j.data_jogo,
+                   COUNT(c.id) FILTER (WHERE c.lado = 'mandante') AS total_cartoes,
+                   COUNT(DISTINCT eg.lado) AS lados
+            FROM jogos j
+            JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
+            LEFT JOIN cartoes c ON c.jogo_id = j.id
+            WHERE j.nosso_time_id = %s AND j.data_jogo < CURRENT_DATE
+            GROUP BY j.id, j.data_jogo
+        ) contagem
+        WHERE contagem.lados = 2
+        ORDER BY contagem.data_jogo DESC
+        LIMIT %s
+        """,
+        (time_id, JANELA_MAXIMA_DE_JOGOS),
+    )
+    valores = [row[0] for row in cur.fetchall()]
+
+    jogos_analisados = len(valores)
+    if jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR:
+        return None, jogos_analisados
+
+    media = round(sum(float(v) for v in valores) / jogos_analisados, 2)
+
+    resultados = []
+    for linha in linhas_testadas:
+        jogos_acima = sum(1 for v in valores if float(v) > linha)
+        frequencia = round(100 * jogos_acima / jogos_analisados, 2)
+        resultados.append((linha, jogos_analisados, jogos_acima, frequencia, media))
+
+    return resultados, jogos_analisados
+
+
+def salvar_padrao_linha_time(cur, tipo, resultados, time_id):
+    """NOVO (estatísticas de time): salva em `padroes_time_linha` - tabela
+    nova, separada de padroes_time_escanteio (que já existia antes e
+    continua do jeito que estava, pra não quebrar nada que já dependia
+    dela). tipo diferencia falta/chute/cartão dentro da mesma tabela."""
+    for linha, jogos_analisados, jogos_acima, frequencia, media in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_time_linha
+                (time_id, tipo, linha, jogos_analisados, jogos_acima, frequencia, media, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, tipo, linha) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                jogos_acima = EXCLUDED.jogos_acima,
+                frequencia = EXCLUDED.frequencia,
+                media = EXCLUDED.media,
+                atualizado_em = NOW()
+            """,
+            (time_id, tipo, linha, jogos_analisados, jogos_acima, frequencia, media),
+        )
+        print(f"  [{tipo}] Mais de {linha}: {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
 
 
 def calcular_padroes_escanteio_total(cur, time_id):
@@ -1130,6 +1254,30 @@ def main():
                 conn.commit()
                 print(f"  Concluído! Padrões de cartão total calculados com base em "
                       f"{jogos_analisados_cartao_total} jogo(s).")
+
+            # NOVO (estatísticas de time): faltas e chutes só do NOSSO lado
+            # (não confundir com falta_total/chute_total, que somam os dois
+            # times) - alimenta a página "Estatísticas de Times".
+            print("Calculando padrões de faltas e chutes do time (nosso lado)...")
+            for tipo, (coluna, linhas) in PADROES_LINHA_TIME_ESTATISTICA.items():
+                resultados_linha_time, jogos_linha_time = calcular_padrao_linha_time_estatistica(
+                    cur, time_id, coluna, linhas
+                )
+                if not resultados_linha_time:
+                    print(f"  [{tipo}] Dados insuficientes ainda ({jogos_linha_time} jogos analisados, "
+                          f"mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+                else:
+                    salvar_padrao_linha_time(cur, tipo, resultados_linha_time, time_id)
+                    conn.commit()
+
+            print("Calculando padrões de cartão do time (nosso lado)...")
+            resultados_cartao_time, jogos_cartao_time = calcular_padrao_cartao_time(cur, time_id, LINHAS_CARTAO_TIME)
+            if not resultados_cartao_time:
+                print(f"  Dados insuficientes ainda para cartão do time ({jogos_cartao_time} jogos analisados, "
+                      f"mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+            else:
+                salvar_padrao_linha_time(cur, "cartao", resultados_cartao_time, time_id)
+                conn.commit()
 
             print("Calculando padrões de resultado final (vitória/empate/derrota)...")
             resultados_finais = calcular_padroes_resultado(cur, time_id)
