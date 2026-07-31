@@ -1901,6 +1901,24 @@ PAGINA_JOGADORES = """
 
     <input type="text" class="busca" id="busca" placeholder="Buscar jogador por nome (ex: Yuri Alberto)..." onkeyup="filtrar()">
 
+    {% if clubes %}
+    <div class="clubes-titulo">Ou navegue por clube (elenco completo + última escalação):</div>
+        {% for c in clubes %}
+        <a href="/clube/{{ c.id }}" class="clube-btn">
+            {% if c.escudo_url %}
+            <img src="{{ c.escudo_url }}" alt="{{ c.nome }}" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
+            {% else %}
+            <div class="clube-selo"></div>
+            {% endif %}
+            <div>
+                <div class="clube-nome">{{ c.nome }}</div>
+                <div class="clube-sub">Ver elenco e última escalação →</div>
+            </div>
+        </a>
+        {% endfor %}
+    <hr class="separador">
+    {% endif %}
+
     <div id="lista">
     {% if jogadores %}
         {% for j in jogadores %}
@@ -1940,24 +1958,6 @@ PAGINA_JOGADORES = """
     {% endif %}
     </div>
     <div class="vazio nenhum-resultado" id="nenhum-resultado">Nenhum jogador encontrado com esse nome.</div>
-
-    {% if clubes %}
-    <hr class="separador">
-    <div class="clubes-titulo">Ou navegue por clube (elenco completo + última escalação):</div>
-        {% for c in clubes %}
-        <a href="/clube/{{ c.id }}" class="clube-btn">
-            {% if c.escudo_url %}
-            <img src="{{ c.escudo_url }}" alt="{{ c.nome }}" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
-            {% else %}
-            <div class="clube-selo"></div>
-            {% endif %}
-            <div>
-                <div class="clube-nome">{{ c.nome }}</div>
-                <div class="clube-sub">Ver elenco e última escalação →</div>
-            </div>
-        </a>
-        {% endfor %}
-    {% endif %}
 
     <script>
         function filtrar() {
