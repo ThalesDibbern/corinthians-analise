@@ -350,6 +350,17 @@ def buscar_recomendacoes(cur):
     return deduplicar_mercados_jogo_inteiro(cur.fetchall(), colunas_a_manter=12)
 
 
+# NOVO: largura mínima de uma faixa, em "unidades de linha" (como as linhas
+# são sempre .5, isso equivale ao número mínimo de valores inteiros que a
+# faixa precisa cobrir pra ser aceita). Ex: "mais de 9.5" + "menos de 11.5"
+# cobre só {10, 11} -> largura 2, fica de fora com o padrão de 3. Existe
+# pra pegar o caso em que a casa só oferece linhas próximas mesmo pra faixa
+# mais ampla possível - sem essa trava, uma faixa "tecnicamente a mais
+# ampla disponível" ainda pode ser estreita demais pra ser uma aposta
+# realista.
+LARGURA_MINIMA_FAIXA = 3.0
+
+
 def montar_combinacoes(recomendacoes, odd_min, odd_max):
     grupos = {}
     for rec in recomendacoes:
@@ -377,6 +388,34 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
 
     resultado = []
     for (jogo_id, casa), pernas in grupos.items():
+
+        # NOVO: pra cada mercado (tipo_padrao + jogador_id) desse jogo, se a
+        # casa oferece mais de uma linha "mais" e/ou mais de uma linha
+        # "menos" pro mesmo mercado, a ÚNICA combinação de faixa permitida é
+        # a mais ampla possível - o corte "mais" mais baixo disponível
+        # combinado com o corte "menos" mais alto disponível. Isso evita
+        # janelas estreitas tipo "mais de 9.5 + menos de 11.5" (só acerta
+        # com 10 ou 11 escanteios exatos) quando a casa também oferecia,
+        # por exemplo, "mais de 4.5" e "menos de 12.5" pro mesmo jogo - a
+        # faixa estreita simplesmente não é gerada mais, só a ampla (e só se
+        # ela também passar da largura mínima abaixo).
+        faixa_permitida_por_mercado = {}
+        pernas_por_mercado = {}
+        for p in pernas:
+            chave_mercado = (p["tipo_padrao"], p["jogador_id"])
+            pernas_por_mercado.setdefault(chave_mercado, []).append(p)
+
+        for chave_mercado, legs in pernas_por_mercado.items():
+            candidatos_mais = [p for p in legs if p["direcao"] == "mais" and p["linha"] is not None]
+            candidatos_menos = [p for p in legs if p["direcao"] == "menos" and p["linha"] is not None]
+            if not candidatos_mais or not candidatos_menos:
+                continue
+            leg_mais = min(candidatos_mais, key=lambda p: p["linha"])
+            leg_menos = max(candidatos_menos, key=lambda p: p["linha"])
+            if leg_mais["linha"] < leg_menos["linha"] \
+                    and (leg_menos["linha"] - leg_mais["linha"]) >= LARGURA_MINIMA_FAIXA:
+                faixa_permitida_por_mercado[chave_mercado] = {id(leg_mais), id(leg_menos)}
+
         for tamanho in (1, 2, 3, 4, 5):
             if len(pernas) < tamanho:
                 continue
@@ -418,6 +457,15 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                     a, b = pernas_do_mercado
                     if a["linha"] is None or b["linha"] is None or a["direcao"] == b["direcao"] \
                             or {a["direcao"], b["direcao"]} != {"mais", "menos"}:
+                        valido = False
+                        break
+
+                    # NOVO: só aceita esse par se ele for exatamente o par
+                    # mais amplo (e largo o suficiente) calculado acima pra
+                    # esse mercado - qualquer outro par "mais"/"menos" do
+                    # mesmo mercado (mais estreito) é descartado aqui.
+                    par_permitido = faixa_permitida_por_mercado.get(chave_mercado)
+                    if par_permitido is None or {id(a), id(b)} != par_permitido:
                         valido = False
                         break
 
