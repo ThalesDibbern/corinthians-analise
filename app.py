@@ -739,6 +739,7 @@ PAGINA_HISTORICO = """
         .coluna-verde { background: #23863633; color: #3fb950; border: 1px solid #3fb95055; }
         .coluna-vermelha { background: #f8514933; color: #f85149; border: 1px solid #f8514955; }
         .coluna-cinza { background: #8b949e22; color: #8b949e; border: 1px solid #8b949e55; }
+        .coluna-roxa { background: #a371f722; color: #a371f7; border: 1px solid #a371f755; }
         .secao-pendentes { margin-bottom: 28px; }
         .paginacao {
             display: flex; align-items: center; justify-content: center; gap: 14px;
@@ -910,6 +911,12 @@ PAGINA_HISTORICO = """
         ['lista-acertou', 'lista-errou', 'lista-pendente'].forEach(renderizarPagina);
     </script>
 
+    {% if multiplas_destaque %}
+    <div class="coluna-cabecalho coluna-roxa" style="margin-top: 8px;">🎯 Múltiplas em Destaque ({{ multiplas_destaque|length }})</div>
+    <p class="secao-subtitulo">Combinações de 2+ apostas com probabilidade histórica de {{ piso }}% ou mais, SÓ de jogos
+        que já terminaram - é uma lista de referência pra ver como essas combinações teriam saído, não tem relação
+        com sua banca/ROI nem botão de salvar (não dá pra apostar num jogo que já aconteceu).</p>
+    {% endif %}
     {% for c in multiplas_destaque %}
         <div class="cartao">
             <div class="cartao-topo">
@@ -930,7 +937,16 @@ PAGINA_HISTORICO = """
 """
 
 
-def buscar_historico(cur, limite=100):
+def buscar_historico(cur, limite=5000):
+    """NOVO: limite subiu de 100 pra 5000 (na prática, "tudo") - agora que
+    /historico pagina de 10 em 10 por coluna, não tem mais motivo pra
+    cortar em 100. Isso também elimina a causa de um problema real: o
+    resumo no topo da página contava TODAS as linhas do banco (sem
+    limite), enquanto as colunas só mostravam as últimas 100 já
+    deduplicadas - com o limite alto, as duas contagens usam a mesma base
+    e nunca mais discordam (ver montar_resumo_historico, que agora deriva
+    os números do MESMO `itens` que alimenta as colunas, em vez de rodar
+    uma contagem separada no banco)."""
     cur.execute(
         """
         SELECT h.data_jogo, j.adversario, h.descricao, h.casa_aposta,
@@ -966,12 +982,16 @@ def buscar_historico(cur, limite=100):
     return resultado
 
 
-def buscar_resumo_historico(cur):
-    cur.execute("SELECT resultado, COUNT(*) FROM historico_recomendacoes GROUP BY resultado")
-    contagem = dict(cur.fetchall())
-    acertou = contagem.get("acertou", 0)
-    errou = contagem.get("errou", 0)
-    pendente = contagem.get("pendente", 0)
+def montar_resumo_historico(itens):
+    """NOVO: substitui buscar_resumo_historico (que fazia um COUNT(*) bruto,
+    direto no banco, contando TODAS as linhas sem aplicar a deduplicação de
+    "mercados do jogo inteiro" nem respeitar o mesmo recorte que as colunas
+    mostram - por isso o número do topo às vezes não batia com a soma das
+    colunas). Agora recebe o MESMO `itens` (já deduplicado) que alimenta as
+    colunas Acertou/Errou/Pendente, então os números sempre batem."""
+    acertou = sum(1 for i in itens if i["resultado"] == "acertou")
+    errou = sum(1 for i in itens if i["resultado"] == "errou")
+    pendente = sum(1 for i in itens if i["resultado"] == "pendente")
     total_avaliado = acertou + errou
     taxa = round(100 * acertou / total_avaliado, 1) if total_avaliado else 0
     return {"acertou": acertou, "errou": errou, "pendente": pendente, "taxa": taxa}
@@ -1145,7 +1165,6 @@ def historico():
     try:
         cur = conn.cursor()
         itens = buscar_historico(cur)
-        resumo = buscar_resumo_historico(cur)
         calibracao = buscar_calibracao(cur)
         multiplas_destaque = buscar_multiplas_destaque(cur)
         cur.close()
@@ -1158,6 +1177,12 @@ def historico():
     acertos = [i for i in itens if i["resultado"] == "acertou"]
     erros = [i for i in itens if i["resultado"] == "errou"]
     pendentes = [i for i in itens if i["resultado"] == "pendente"]
+
+    # NOVO (corrige contagem que não batia): o resumo do topo agora é
+    # calculado a partir do MESMO `itens` que alimenta as colunas (ver
+    # montar_resumo_historico), em vez de uma contagem separada no banco -
+    # os números do topo e das colunas nunca mais vão discordar.
+    resumo = montar_resumo_historico(itens)
 
     return render_template_string(
         PAGINA_HISTORICO, acertos=acertos, erros=erros, pendentes=pendentes,
