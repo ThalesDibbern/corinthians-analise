@@ -23,6 +23,7 @@ import json
 from functools import wraps
 from itertools import combinations
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 import psycopg2
@@ -88,6 +89,13 @@ def registrar_movimento_banca(cur, usuario_id, tipo, valor, aposta_id=None):
 # permite forçar manualmente a qualquer momento.
 INTERVALO_MINIMO_ATUALIZACAO_ODDS = timedelta(hours=1)
 RAILWAY_GRAPHQL_URL = "https://backboard.railway.com/graphql/v2"
+
+# NOVO: corrige bug de fuso horário - o container do Railway roda em UTC
+# por padrão, então `.astimezone()` sem argumento (que converte pro fuso
+# LOCAL do servidor) não convertia nada de verdade, ficava mostrando a
+# hora em UTC mesmo (ex: 18:27 UTC em vez de 15:27 horário de Brasília).
+# Fixando o fuso explicitamente aqui, não depende mais do fuso do servidor.
+FUSO_BRASIL = ZoneInfo("America/Sao_Paulo")
 
 
 def buscar_ultima_atualizacao_odds(cur):
@@ -212,6 +220,9 @@ PAGINA = """
             gap: 16px;
             align-items: flex-end;
             flex-wrap: wrap;
+        }
+        .nota-espera {
+            color: #8b949e; font-size: 0.76rem; margin: 8px 0 0;
         }
         .linha-atualizacao {
             display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
@@ -421,6 +432,8 @@ PAGINA = """
                 </div>
                 <button type="submit">Gerar recomendações da rodada</button>
             </div>
+            <p class="nota-espera">Se fizer mais de 1h desde a última atualização, pode demorar alguns segundos
+                (o app aciona a busca de odds mais recentes antes de mostrar o resultado).</p>
         </form>
         {% if ultima_atualizacao_odds %}
         <div class="linha-atualizacao">
@@ -3255,11 +3268,11 @@ def index():
             ultima = processar_atualizacao_odds(cur, session["usuario_id"], forcar_atualizacao)
             conn.commit()
             if ultima:
-                ultima_atualizacao_odds = ultima.astimezone().strftime("%H:%M")
+                ultima_atualizacao_odds = ultima.astimezone(FUSO_BRASIL).strftime("%H:%M")
         else:
             ultima = buscar_ultima_atualizacao_odds(cur)
             if ultima:
-                ultima_atualizacao_odds = ultima.astimezone().strftime("%H:%M")
+                ultima_atualizacao_odds = ultima.astimezone(FUSO_BRASIL).strftime("%H:%M")
 
         if buscou:
             recomendacoes = buscar_recomendacoes(cur)
