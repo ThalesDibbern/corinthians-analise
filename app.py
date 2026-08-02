@@ -22,6 +22,7 @@ import os
 import json
 from functools import wraps
 from itertools import combinations
+from datetime import datetime, timedelta, timezone
 
 import requests
 import psycopg2
@@ -76,6 +77,104 @@ def registrar_movimento_banca(cur, usuario_id, tipo, valor, aposta_id=None):
     return float(novo_saldo)
 
 
+# ---------- Atualização de odds sob demanda (Railway API) ----------
+#
+# Em vez de deixar o serviço de odds (`refreshing-freedom`) rodando de hora
+# em hora o dia inteiro (inclusive de madrugada e em dias sem jogo, gastando
+# cota da OddsPapi à toa), o app dispara um "Run Now" desse serviço via API
+# do Railway na primeira vez que alguém clica em "Gerar recomendações da
+# rodada" depois de 1 hora sem nenhum disparo. Cliques dentro dessa 1 hora
+# não disparam de novo sozinhos - mas o botão "🔄 Atualizar recomendações"
+# permite forçar manualmente a qualquer momento.
+INTERVALO_MINIMO_ATUALIZACAO_ODDS = timedelta(hours=1)
+RAILWAY_GRAPHQL_URL = "https://backboard.railway.com/graphql/v2"
+
+
+def buscar_ultima_atualizacao_odds(cur):
+    """Retorna o horário (com timezone) do último disparo registrado, ou
+    None se nunca disparou ainda nessa instalação."""
+    cur.execute("SELECT criado_em FROM atualizacoes_odds ORDER BY criado_em DESC LIMIT 1")
+    row = cur.fetchone()
+    if not row:
+        return None
+    return row[0].replace(tzinfo=timezone.utc) if row[0].tzinfo is None else row[0]
+
+
+def registrar_atualizacao_odds(cur, usuario_id, forcado):
+    cur.execute(
+        "INSERT INTO atualizacoes_odds (usuario_id, forcado) VALUES (%s, %s)",
+        (usuario_id, forcado),
+    )
+
+
+def disparar_atualizacao_odds_railway():
+    """Chama a API do Railway pra rodar o serviço `refreshing-freedom`
+    (atualizar_odds.py + motor_recomendacoes.py) agora, fora do horário
+    programado - o mesmo efeito de clicar "Run Now" no dashboard, só que
+    automático. Precisa de 3 variáveis de ambiente configuradas no serviço
+    da INTERFACE (não no refreshing-freedom):
+      - RAILWAY_API_TOKEN: token de conta/workspace criado em
+        railway.app -> account settings -> tokens (token de PROJETO não
+        funciona pra disparar deploy, tem que ser de conta ou workspace)
+      - RAILWAY_SERVICE_ID_ODDS: o ID do serviço `refreshing-freedom`
+        (Settings do serviço no Railway -> mostra o ID, ou copia da URL)
+      - RAILWAY_ENVIRONMENT_ID_ODDS: o ID do ambiente (geralmente "production") -
+        NÃO usar o nome "RAILWAY_ENVIRONMENT_ID" puro, porque o próprio Railway
+        já injeta automaticamente uma variável com esse nome exato em todo
+        serviço (o ambiente do PRÓPRIO serviço) - usar esse nome causaria
+        conflito/sobrescrita da variável reservada do Railway
+    Se qualquer uma faltar, ou a chamada falhar, só loga no console e
+    retorna False - a página continua funcionando normalmente com o que
+    já estiver no banco, só sem conseguir disparar a atualização."""
+    token = os.environ.get("RAILWAY_API_TOKEN")
+    service_id = os.environ.get("RAILWAY_SERVICE_ID_ODDS")
+    environment_id = os.environ.get("RAILWAY_ENVIRONMENT_ID_ODDS")
+
+    if not (token and service_id and environment_id):
+        print("[atualizacao_odds] RAILWAY_API_TOKEN/RAILWAY_SERVICE_ID_ODDS/RAILWAY_ENVIRONMENT_ID_ODDS "
+              "não configurados - não é possível disparar o Run Now automaticamente.")
+        return False
+
+    query = """
+        mutation Redeploy($serviceId: String!, $environmentId: String!) {
+            serviceInstanceRedeploy(serviceId: $serviceId, environmentId: $environmentId)
+        }
+    """
+    try:
+        resposta = requests.post(
+            RAILWAY_GRAPHQL_URL,
+            json={"query": query, "variables": {"serviceId": service_id, "environmentId": environment_id}},
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            timeout=15,
+        )
+        resposta.raise_for_status()
+        dados = resposta.json()
+        if dados.get("errors"):
+            print(f"[atualizacao_odds] API do Railway retornou erro: {dados['errors']}")
+            return False
+        return True
+    except requests.RequestException as e:
+        print(f"[atualizacao_odds] Falha ao chamar a API do Railway: {e}")
+        return False
+
+
+def processar_atualizacao_odds(cur, usuario_id, forcar):
+    """Decide se dispara o Run Now do refreshing-freedom (dispara se nunca
+    rodou, se já faz mais de 1h do último disparo, ou se `forcar=True`) e
+    devolve o horário (local, string HH:MM) do último disparo conhecido pra
+    mostrar na tela - já considerando o disparo que acabou de acontecer
+    nessa mesma chamada, se for o caso."""
+    ultima = buscar_ultima_atualizacao_odds(cur)
+    ja_passou_1h = ultima is None or (datetime.now(timezone.utc) - ultima) >= INTERVALO_MINIMO_ATUALIZACAO_ODDS
+
+    if forcar or ja_passou_1h:
+        if disparar_atualizacao_odds_railway():
+            registrar_atualizacao_odds(cur, usuario_id, forcar)
+            ultima = datetime.now(timezone.utc)
+
+    return ultima
+
+
 PAGINA = """
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -114,6 +213,18 @@ PAGINA = """
             align-items: flex-end;
             flex-wrap: wrap;
         }
+        .linha-atualizacao {
+            display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+            margin-top: 14px; padding-top: 14px; border-top: 1px solid #21262d;
+            font-size: 0.82rem; color: #8b949e;
+        }
+        .linha-atualizacao b { color: #e6edf3; }
+        .link-atualizar {
+            background: #21262d; border: 1px solid #30363d; color: #58a6ff;
+            border-radius: 8px; padding: 6px 14px; font-size: 0.8rem; font-weight: 600;
+            text-decoration: none;
+        }
+        .link-atualizar:hover { border-color: #58a6ff; }
         label {
             display: block;
             font-size: 0.8rem;
@@ -311,6 +422,12 @@ PAGINA = """
                 <button type="submit">Gerar recomendações da rodada</button>
             </div>
         </form>
+        {% if ultima_atualizacao_odds %}
+        <div class="linha-atualizacao">
+            <span>🔄 Última atualização de odds gerada às <b>{{ ultima_atualizacao_odds }}</b></span>
+            <a href="/?odd_min={{ odd_min }}&odd_max={{ odd_max }}&forcar=1" class="link-atualizar">Atualizar recomendações</a>
+        </div>
+        {% endif %}
     </div>
 
     {% if buscou %}
@@ -3120,13 +3237,30 @@ def index():
     odd_min = request.args.get("odd_min", "1.5")
     odd_max = request.args.get("odd_max", "5.0")
     buscou = "odd_min" in request.args
+    forcar_atualizacao = request.args.get("forcar") == "1"
 
     combinacoes = []
     motivo = ""
+    ultima_atualizacao_odds = None
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
         banca_atual = buscar_banca(cur, session["usuario_id"])
+
+        # NOVO: só mexe na atualização de odds quando a pessoa realmente
+        # pediu recomendações (buscou=True) ou clicou em "Atualizar
+        # recomendações" (forcar=True) - só entrar na página sem clicar em
+        # nada não dispara nenhum Run Now.
+        if buscou or forcar_atualizacao:
+            ultima = processar_atualizacao_odds(cur, session["usuario_id"], forcar_atualizacao)
+            conn.commit()
+            if ultima:
+                ultima_atualizacao_odds = ultima.astimezone().strftime("%H:%M")
+        else:
+            ultima = buscar_ultima_atualizacao_odds(cur)
+            if ultima:
+                ultima_atualizacao_odds = ultima.astimezone().strftime("%H:%M")
+
         if buscou:
             recomendacoes = buscar_recomendacoes(cur)
             combinacoes = montar_combinacoes(recomendacoes, float(odd_min), float(odd_max))
@@ -3140,6 +3274,7 @@ def index():
     return render_template_string(
         PAGINA, odd_min=odd_min, odd_max=odd_max, buscou=buscou,
         combinacoes=combinacoes, motivo=motivo, banca_atual=round(banca_atual, 2),
+        ultima_atualizacao_odds=ultima_atualizacao_odds,
     )
 
 
