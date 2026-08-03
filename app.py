@@ -269,10 +269,11 @@ PAGINA = """
             font-size: 1.6rem;
             display: flex;
             align-items: center;
+            justify-content: center;
             gap: 10px;
             margin: 0;
         }
-        .subtitulo { color: #8b949e; margin: 4px 0 28px; }
+        .subtitulo { color: #8b949e; margin: 4px 0 28px; text-align: center; }
         .painel {
             background: #161b22;
             border: 1px solid #30363d;
@@ -924,8 +925,8 @@ PAGINA_HISTORICO = """
             margin: 0 auto;
             padding: 32px 20px 80px;
         }
-        h1 { font-size: 1.5rem; margin: 0 0 4px; }
-        .subtitulo { color: #8b949e; margin: 0 0 20px; }
+        h1 { font-size: 1.5rem; margin: 0 0 4px; text-align: center; }
+        .subtitulo { color: #8b949e; margin: 0 0 20px; text-align: center; }
         .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
         .link-voltar:hover { text-decoration: underline; }
         .resumo-grid { display: flex; gap: 14px; margin: 20px 0 28px; flex-wrap: wrap; }
@@ -1771,8 +1772,8 @@ PAGINA_ROI = """
             background: #0d1117; color: #e6edf3; max-width: 900px;
             margin: 0 auto; padding: 32px 20px 80px;
         }
-        h1 { font-size: 1.5rem; margin: 0 0 4px; }
-        .subtitulo { color: #8b949e; margin: 0 0 20px; }
+        h1 { font-size: 1.5rem; margin: 0 0 4px; text-align: center; }
+        .subtitulo { color: #8b949e; margin: 0 0 20px; text-align: center; }
         .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
         .link-voltar:hover { text-decoration: underline; }
         .resumo-grid { display: flex; gap: 14px; margin: 20px 0 28px; flex-wrap: wrap; }
@@ -2270,8 +2271,8 @@ PAGINA_JOGADORES = """
             background: #0d1117; color: #e6edf3; max-width: 900px;
             margin: 0 auto; padding: 32px 20px 80px;
         }
-        h1 { font-size: 1.5rem; margin: 0 0 4px; }
-        .subtitulo { color: #8b949e; margin: 0 0 20px; font-size: 0.88rem; }
+        h1 { font-size: 1.5rem; margin: 0 0 4px; text-align: center; }
+        .subtitulo { color: #8b949e; margin: 0 0 20px; font-size: 0.88rem; text-align: center; }
         .subtitulo a { color: #58a6ff; }
         .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
         .link-voltar:hover { text-decoration: underline; }
