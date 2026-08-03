@@ -71,8 +71,11 @@ NAV_CSS = """
             background: #1f6feb33; color: #58a6ff; border: 1px solid #58a6ff88;
         }
         .nav-meta {
-            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+            display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
             margin-bottom: 8px; font-size: 0.82rem; color: #8b949e;
+        }
+        .nav-meta-esquerda, .nav-meta-direita {
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
         }
         .nav-banca {
             background: #161b22; border: 1px solid #30363d; color: #e6edf3;
@@ -105,12 +108,12 @@ def barra_navegacao(pagina_atual, banca_atual=None):
         for chave, href, rotulo in itens
     )
 
-    meta = f'<span>Olá, {session.get("usuario_nome", "")}</span><a href="/logout" class="nav-sair">🚪 Sair</a>'
+    esquerda = f'<span>Olá, {session.get("usuario_nome", "")}</span><a href="/logout" class="nav-sair">🚪 Sair</a>'
+    direita = ""
     if banca_atual is not None:
-        meta = (
-            f'<a href="/minhas-apostas" class="nav-banca">🏦 Banca: R$ {banca_atual:.2f}</a>'
-            + meta
-        )
+        direita = f'<a href="/minhas-apostas" class="nav-banca">🏦 Banca: R$ {banca_atual:.2f}</a>'
+
+    meta = f'<div class="nav-meta-esquerda">{esquerda}</div><div class="nav-meta-direita">{direita}</div>'
 
     return f'<div class="nav-meta">{meta}</div><div class="nav-principal">{botoes}</div>'
 
