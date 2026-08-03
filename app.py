@@ -55,6 +55,65 @@ app.secret_key = os.environ.get("SECRET_KEY", "troque-essa-chave-numa-variavel-d
 #     salva) - não precisa de nenhum movimento extra nesse caso.
 #   - "cancelamento": se uma aposta pendente é cancelada, devolve o valor
 #     que tinha saído quando ela foi salva.
+# ---------- Barra de navegação compartilhada (botões grandes, com destaque na página atual) ----------
+NAV_CSS = """
+        .nav-principal {
+            display: flex; gap: 10px; flex-wrap: wrap; margin: 20px 0 24px;
+        }
+        .nav-btn {
+            background: #161b22; border: 1px solid #30363d; color: #c9d1d9;
+            border-radius: 10px; padding: 10px 18px; font-size: 0.85rem; font-weight: 600;
+            text-decoration: none; transition: border-color 0.15s, background 0.15s;
+        }
+        .nav-btn:hover { border-color: #58a6ff; background: #1c2531; }
+        .nav-btn.nav-ativo {
+            background: #1f6feb33; color: #58a6ff; border: 1px solid #58a6ff88;
+        }
+        .nav-meta {
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+            margin-bottom: 8px; font-size: 0.82rem; color: #8b949e;
+        }
+        .nav-banca {
+            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+            border-radius: 999px; padding: 6px 16px; font-size: 0.8rem; font-weight: 600;
+            text-decoration: none;
+        }
+        .nav-banca:hover { border-color: #58a6ff; }
+        .nav-sair { color: #8b949e; text-decoration: none; font-size: 0.82rem; }
+        .nav-sair:hover { text-decoration: underline; }
+"""
+
+
+def barra_navegacao(pagina_atual, banca_atual=None):
+    """NOVO: barra de navegação compartilhada entre as 5 páginas principais
+    (Gerador de Recomendações, Histórico, Estatísticas de Times,
+    Estatísticas de Jogadores, Minhas Apostas) - botões grandes em vez de
+    link de texto simples, com a página atual destacada em azul, pra
+    sempre dar pra saber onde você está. `banca_atual` é opcional: quando
+    informado, mostra o botão da banca ao lado do nome do usuário (só faz
+    sentido em páginas onde já buscamos a banca mesmo)."""
+    itens = [
+        ("index", "/", "🎯 Gerador de Recomendações"),
+        ("historico", "/historico", "📊 Histórico de Acertos e Erros"),
+        ("times", "/times", "🏟️ Estatísticas de Times"),
+        ("jogadores", "/jogadores", "📈 Estatísticas de Jogadores"),
+        ("roi", "/minhas-apostas", "💰 Minhas Apostas (ROI)"),
+    ]
+    botoes = "".join(
+        f'<a href="{href}" class="nav-btn{" nav-ativo" if chave == pagina_atual else ""}">{rotulo}</a>'
+        for chave, href, rotulo in itens
+    )
+
+    meta = f'<span>Olá, {session.get("usuario_nome", "")}</span><a href="/logout" class="nav-sair">🚪 Sair</a>'
+    if banca_atual is not None:
+        meta = (
+            f'<a href="/minhas-apostas" class="nav-banca">🏦 Banca: R$ {banca_atual:.2f}</a>'
+            + meta
+        )
+
+    return f'<div class="nav-meta">{meta}</div><div class="nav-principal">{botoes}</div>'
+
+
 def buscar_banca(cur, usuario_id):
     cur.execute("SELECT banca_atual FROM usuarios WHERE id = %s", (usuario_id,))
     row = cur.fetchone()
@@ -278,6 +337,7 @@ PAGINA = """
             gap: 8px;
         }
         .jogo { font-weight: 600; font-size: 0.92rem; }
+        """ + NAV_CSS + """
         .colunas-resultado {
             display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start;
             margin-bottom: 28px;
@@ -420,21 +480,7 @@ PAGINA = """
 <body>
     <h1>⚫⚪ Análise de Apostas</h1>
     <p class="subtitulo">Recomendações de múltiplas do Corinthians baseadas em padrões históricos</p>
-    <p>
-        <a href="/historico" class="link-historico">📊 Ver histórico de acertos e erros</a>
-        &nbsp;·&nbsp;
-        <a href="/minhas-apostas" class="link-historico">💰 Minhas apostas (ROI)</a>
-        &nbsp;·&nbsp;
-        <a href="/jogadores" class="link-historico">📈 Estatísticas de jogadores</a>
-        &nbsp;·&nbsp;
-        <a href="/times" class="link-historico">🏟️ Estatísticas de times</a>
-        &nbsp;·&nbsp;
-        <span style="color:#8b949e; font-size:0.85rem;">🏦 Banca: R$ {{ "%.2f"|format(banca_atual) }}</span>
-        &nbsp;·&nbsp;
-        <span style="color:#8b949e; font-size:0.85rem;">Olá, {{ session.usuario_nome }}</span>
-        &nbsp;·&nbsp;
-        <a href="/logout" class="link-historico">🚪 Sair</a>
-    </p>
+    {{ nav_html|safe }}
 
     {% with mensagens = get_flashed_messages(with_categories=true) %}
         {% for categoria, texto in mensagens %}
@@ -977,12 +1023,13 @@ PAGINA_HISTORICO = """
         }
         .btn-pagina:hover:not(:disabled) { border-color: #58a6ff; }
         .btn-pagina:disabled { opacity: 0.35; cursor: default; }
+        """ + NAV_CSS + """
     </style>
 </head>
 <body>
-    <a href="/" class="link-voltar">← Voltar</a>
     <h1>📊 Histórico de Acertos e Erros</h1>
     <p class="subtitulo">Recomendações já avaliadas contra o resultado real dos jogos</p>
+    {{ nav_html|safe }}
 
     <div class="resumo-grid">
         <div class="resumo-card">
@@ -1393,6 +1440,7 @@ def historico():
         itens = buscar_historico(cur)
         calibracao = buscar_calibracao(cur)
         multiplas_destaque = buscar_multiplas_destaque(cur)
+        banca_atual = buscar_banca(cur, session["usuario_id"])
         cur.close()
     finally:
         conn.close()
@@ -1415,6 +1463,7 @@ def historico():
         resumo=resumo, calibracao=calibracao,
         multiplas_destaque=multiplas_destaque,
         piso=PISO_PROBABILIDADE_MULTIPLAS_DESTAQUE,
+        nav_html=barra_navegacao("historico", round(banca_atual, 2)),
     )
 
 
@@ -1814,6 +1863,7 @@ PAGINA_ROI = """
             padding: 7px 0; border-top: 1px solid #21262d; color: #8b949e;
         }
         .extrato-linha b { color: #e6edf3; }
+        """ + NAV_CSS + """
     </style>
     <script>
         function alternarFormaBanca(tipo) {
@@ -1827,9 +1877,9 @@ PAGINA_ROI = """
     </script>
 </head>
 <body>
-    <a href="/" class="link-voltar">← Voltar</a>
     <h1>💰 Minhas Apostas</h1>
     <p class="subtitulo">Só o que você salvou com valor apostado - não inclui recomendações não salvas</p>
+    {{ nav_html|safe }}
 
     {% with mensagens = get_flashed_messages(with_categories=true) %}
         {% for categoria, texto in mensagens %}
@@ -2178,6 +2228,7 @@ def minhas_apostas():
         PAGINA_ROI, resumo=resumo, apostas=apostas,
         pontos_grafico=pontos_grafico, svg_grafico=svg_grafico,
         banca_atual=round(banca_atual, 2), movimentos_banca=movimentos_banca,
+        nav_html=barra_navegacao("roi", round(banca_atual, 2)),
     )
 
 
@@ -2261,13 +2312,14 @@ PAGINA_JOGADORES = """
         .clube-nome { font-weight: 700; font-size: 1rem; }
         .clube-sub { color: #8b949e; font-size: 0.78rem; }
         .nenhum-resultado { display: none; }
+        """ + NAV_CSS + """
     </style>
 </head>
 <body>
-    <a href="/" class="link-voltar">← Voltar</a>
     <h1>📈 Estatísticas de Jogadores</h1>
     <p class="subtitulo">Digite pra filtrar entre todos os jogadores de todos os clubes rastreados, na hora.
         Procurando estatística do TIME inteiro? <a href="/times">Ver Estatísticas de Times →</a></p>
+    {{ nav_html|safe }}
 
     <input type="text" class="busca" id="busca" placeholder="Buscar jogador por nome (ex: Yuri Alberto)..." onkeyup="filtrar()">
 
@@ -2856,13 +2908,14 @@ PAGINA_TIMES = """
         }
         .clube-nome { font-weight: 700; font-size: 1rem; }
         .clube-sub { color: #8b949e; font-size: 0.78rem; }
+        """ + NAV_CSS + """
     </style>
 </head>
 <body>
-    <a href="/" class="link-voltar">← Voltar</a>
     <h1>🏟️ Estatísticas de Times</h1>
     <p class="subtitulo">Selecione um clube pra ver a frequência histórica de escanteios, faltas, chutes e cartões do
         time inteiro (não depende de nenhuma odd disponível na casa de apostas).</p>
+    {{ nav_html|safe }}
 
     {% if clubes %}
         {% for c in clubes %}
@@ -3254,12 +3307,14 @@ def jogadores():
             {"id": time_id, "nome": nome, "escudo_url": buscar_escudo_url(cur, nome)}
             for time_id, nome in times_rastreados
         ]
+        banca_atual = buscar_banca(cur, session["usuario_id"])
         cur.close()
     finally:
         conn.close()
 
     return render_template_string(
         PAGINA_JOGADORES, clubes=clubes, jogadores=jogadores_lista,
+        nav_html=barra_navegacao("jogadores", round(banca_atual, 2)),
     )
 
 
@@ -3309,11 +3364,14 @@ def times_lista():
             {"id": time_id, "nome": nome, "escudo_url": buscar_escudo_url(cur, nome)}
             for time_id, nome in times_rastreados
         ]
+        banca_atual = buscar_banca(cur, session["usuario_id"])
         cur.close()
     finally:
         conn.close()
 
-    return render_template_string(PAGINA_TIMES, clubes=clubes)
+    return render_template_string(
+        PAGINA_TIMES, clubes=clubes, nav_html=barra_navegacao("times", round(banca_atual, 2)),
+    )
 
 
 @app.route("/time/<int:time_id>")
@@ -3391,6 +3449,7 @@ def index():
         PAGINA, odd_min=odd_min, odd_max=odd_max, buscou=buscou,
         individuais=individuais, multiplas=multiplas, motivo=motivo, banca_atual=round(banca_atual, 2),
         ultima_atualizacao_odds=ultima_atualizacao_odds,
+        nav_html=barra_navegacao("index", round(banca_atual, 2)),
     )
 
 
