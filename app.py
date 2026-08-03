@@ -2883,16 +2883,54 @@ PAGINA_TIMES = """
         * { box-sizing: border-box; }
         body {
             font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-            background: #0d1117; color: #e6edf3; max-width: 900px;
-            margin: 0 auto; padding: 32px 20px 80px;
+            background: #0d1117; color: #e6edf3; max-width: 1500px;
+            margin: 0 auto; padding: 32px 24px 80px;
         }
-        h1 { font-size: 1.5rem; margin: 0 0 4px; }
-        .subtitulo { color: #8b949e; margin: 0 0 24px; font-size: 0.88rem; }
-        .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
-        .link-voltar:hover { text-decoration: underline; }
+        h1 { font-size: 1.5rem; margin: 0 0 4px; text-align: center; }
+        .subtitulo { color: #8b949e; margin: 0 0 16px; font-size: 0.88rem; text-align: center; }
         .vazio {
-            text-align: center; color: #8b949e; padding: 32px 24px;
-            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
+            text-align: center; color: #8b949e; padding: 24px; margin-top: 10px;
+            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.85rem;
+        }
+        .titulo-coluna { font-size: 1.05rem; font-weight: 700; margin: 0 0 14px; text-align: center; }
+
+        /* layout de 3 colunas - usa a largura toda da página, não só o meio */
+        .grid-times {
+            display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 22px; align-items: start; margin-top: 24px;
+        }
+        @media (max-width: 1000px) {
+            .grid-times { grid-template-columns: 1fr; }
+        }
+
+        /* coluna 1: tabela de classificação */
+        .tabela-scroll { overflow-x: auto; border: 1px solid #30363d; border-radius: 12px; background: #161b22; }
+        .tabela-classificacao { width: 100%; border-collapse: collapse; font-size: 0.78rem; white-space: nowrap; }
+        .tabela-classificacao th {
+            text-align: center; padding: 10px 8px; color: #8b949e; font-weight: 600;
+            border-bottom: 1px solid #30363d; position: sticky; top: 0; background: #161b22;
+        }
+        .tabela-classificacao td { text-align: center; padding: 8px; border-bottom: 1px solid #21262d; }
+        .tabela-classificacao th:nth-child(2), .tabela-classificacao td:nth-child(2) { text-align: left; }
+        .tabela-classificacao tr:last-child td { border-bottom: none; }
+        .tabela-classificacao tr:hover td { background: #1c2531; }
+        .pos-cel { font-weight: 700; color: #8b949e; }
+        .time-cel { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+        .escudo-mini { width: 20px; height: 20px; object-fit: contain; flex-shrink: 0; }
+        .pts-cel { font-weight: 700; }
+        .forma-cel { display: flex; gap: 3px; justify-content: center; }
+        .bola-forma {
+            width: 18px; height: 18px; border-radius: 50%; display: inline-flex;
+            align-items: center; justify-content: center; font-size: 0.62rem; font-weight: 700; color: white;
+        }
+        .bola-v { background: #238636; }
+        .bola-e { background: #6e7681; }
+        .bola-d { background: #da3633; }
+
+        /* coluna 2: busca + lista de clubes */
+        .busca {
+            width: 100%; padding: 10px 14px; margin-bottom: 14px;
+            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+            border-radius: 8px; font-size: 0.9rem;
         }
         .clube-btn {
             display: flex; align-items: center; gap: 12px;
@@ -2908,32 +2946,144 @@ PAGINA_TIMES = """
         }
         .clube-nome { font-weight: 700; font-size: 1rem; }
         .clube-sub { color: #8b949e; font-size: 0.78rem; }
+
+        /* coluna 3: líderes de estatísticas */
+        .lider-card {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 16px; margin-bottom: 16px;
+        }
+        .lider-titulo {
+            display: inline-block; padding: 4px 14px; border-radius: 999px;
+            font-size: 0.78rem; font-weight: 700; margin-bottom: 12px;
+        }
+        .lider-cor-0 { background: #9e6a0322; color: #d29922; }
+        .lider-cor-1 { background: #a371f722; color: #a371f7; }
+        .lider-cor-2 { background: #39c5cf22; color: #39c5cf; }
+        .lider-cor-3 { background: #3fb95022; color: #3fb950; }
+        .lider-cor-4 { background: #f8514922; color: #f85149; }
+        .lider-cor-5 { background: #db61a222; color: #db61a2; }
+        .tabela-lider { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+        .tabela-lider th { text-align: left; color: #8b949e; font-weight: 600; padding: 4px 6px; }
+        .tabela-lider th:not(:first-child), .tabela-lider td:not(:first-child) { text-align: right; }
+        .tabela-lider td { padding: 6px; font-weight: 600; border-top: 1px solid #21262d; }
+        .vazio-pequeno { color: #8b949e; font-size: 0.8rem; font-style: italic; }
         """ + NAV_CSS + """
     </style>
 </head>
 <body>
     <h1>🏟️ Estatísticas de Times</h1>
-    <p class="subtitulo">Selecione um clube pra ver a frequência histórica de escanteios, faltas, chutes e cartões do
-        time inteiro (não depende de nenhuma odd disponível na casa de apostas).</p>
+    <p class="subtitulo">Tabela oficial do Brasileirão, estatísticas por clube e líderes entre os times rastreados
+        (não depende de nenhuma odd disponível na casa de apostas)</p>
     {{ nav_html|safe }}
 
-    {% if clubes %}
-        {% for c in clubes %}
-        <a href="/time/{{ c.id }}" class="clube-btn">
-            {% if c.escudo_url %}
-            <img src="{{ c.escudo_url }}" alt="{{ c.nome }}" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
-            {% else %}
-            <div class="clube-selo"></div>
-            {% endif %}
-            <div>
-                <div class="clube-nome">{{ c.nome }}</div>
-                <div class="clube-sub">Ver estatísticas do time →</div>
+    <div class="grid-times">
+        <div class="coluna-tabela">
+            <div class="titulo-coluna">Tabela do Brasileirão</div>
+            {% if tabela %}
+            <div class="tabela-scroll">
+                <table class="tabela-classificacao">
+                    <thead>
+                        <tr>
+                            <th>#</th><th>Clube</th><th>Pts</th><th>PJ</th><th>VIT</th><th>E</th><th>DER</th>
+                            <th>GM</th><th>GC</th><th>SG</th><th>Últimas 5</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for l in tabela %}
+                        <tr>
+                            <td class="pos-cel">{{ l.posicao }}</td>
+                            <td class="time-cel">
+                                <img src="/escudo/{{ l.team_id }}.png" class="escudo-mini" onerror="this.style.display='none'">
+                                {{ l.nome }}
+                            </td>
+                            <td class="pts-cel">{{ l.pontos }}</td>
+                            <td>{{ l.jogos }}</td>
+                            <td>{{ l.vitorias }}</td>
+                            <td>{{ l.empates }}</td>
+                            <td>{{ l.derrotas }}</td>
+                            <td>{{ l.gols_pro }}</td>
+                            <td>{{ l.gols_contra }}</td>
+                            <td>{{ l.saldo }}</td>
+                            <td>
+                                <div class="forma-cel">
+                                    {% for r in l.forma %}
+                                    <span class="bola-forma bola-{{ 'v' if r == 'W' else ('e' if r == 'D' else 'd') }}">{{ '✓' if r == 'W' else ('–' if r == 'D' else '✕') }}</span>
+                                    {% endfor %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
-        </a>
-        {% endfor %}
-    {% else %}
-        <div class="vazio">Nenhum clube rastreado ainda.</div>
-    {% endif %}
+            {% else %}
+            <div class="vazio">Não foi possível carregar a tabela agora - tenta de novo em alguns minutos.</div>
+            {% endif %}
+        </div>
+
+        <div class="coluna-lista">
+            <input type="text" class="busca" id="busca-time" placeholder="Buscar por time (ex: Corinthians)..." onkeyup="filtrarTimes()">
+            <div id="lista-times">
+            {% if clubes %}
+                {% for c in clubes %}
+                <a href="/time/{{ c.id }}" class="clube-btn item-time">
+                    {% if c.escudo_url %}
+                    <img src="{{ c.escudo_url }}" alt="{{ c.nome }}" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
+                    {% else %}
+                    <div class="clube-selo"></div>
+                    {% endif %}
+                    <div>
+                        <div class="clube-nome">{{ c.nome }}</div>
+                        <div class="clube-sub">Ver estatísticas do time →</div>
+                    </div>
+                </a>
+                {% endfor %}
+            {% else %}
+                <div class="vazio">Nenhum clube rastreado ainda.</div>
+            {% endif %}
+            </div>
+            <div class="vazio" id="nenhum-resultado-time" style="display:none;">Nenhum time rastreado encontrado com esse nome.</div>
+        </div>
+
+        <div class="coluna-lideres">
+            <div class="titulo-coluna">Líderes de Estatísticas (times rastreados)</div>
+            {% for l in lideres %}
+            <div class="lider-card">
+                <div class="lider-titulo lider-cor-{{ loop.index0 % 6 }}">{{ l.titulo }}</div>
+                {% if l.time_nome %}
+                <table class="tabela-lider">
+                    <thead>
+                        <tr><th>Time</th><th>Média últimos 5</th><th>Média Total</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ l.time_nome }}</td>
+                            <td>{{ l.media_5 if l.media_5 is not none else "-" }}</td>
+                            <td>{{ l.media_total }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="vazio-pequeno">Ainda não há dados suficientes pra essa categoria.</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <script>
+        function filtrarTimes() {
+            const termo = document.getElementById('busca-time').value.toLowerCase();
+            let visiveis = 0;
+            document.querySelectorAll('.item-time').forEach(function(card) {
+                const nome = card.querySelector('.clube-nome').textContent.toLowerCase();
+                const bate = nome.includes(termo);
+                card.style.display = bate ? '' : 'none';
+                if (bate) visiveis++;
+            });
+            document.getElementById('nenhum-resultado-time').style.display = (termo && visiveis === 0) ? '' : 'none';
+        }
+    </script>
 </body>
 </html>
 """
@@ -3042,6 +3192,183 @@ NOMES_TIPO_LINHA_TIME = {
 ORDEM_BLOCOS_TIME = [
     "escanteio", "chute", "chute_no_gol", "falta", "cartao", "impedimento", "desarme", "posse",
 ]
+
+
+# ---------- Tabela do Brasileirão (vem da API-Football, não do nosso banco) ----------
+#
+# A tabela de classificação precisa dos 20 times do campeonato, mas a gente
+# só rastreia alguns (rastrear todos os 20 estouraria a cota mensal da
+# OddsPapi - ver seção 11 da documentação). Por isso essa tabela busca
+# direto na API-Football (endpoint /standings), que já dá a classificação
+# oficial pronta, e guarda em cache por alguns minutos pra não gastar cota
+# à toa a cada vez que alguém abre a página.
+LEAGUE_ID_BRASILEIRAO = 71
+TEMPORADA_ATUAL = 2026
+CACHE_TABELA_TTL = timedelta(minutes=15)
+_cache_tabela_brasileirao = {"dados": None, "buscado_em": None}
+
+
+def buscar_tabela_brasileirao():
+    agora = datetime.now(timezone.utc)
+    cache = _cache_tabela_brasileirao
+    if cache["dados"] is not None and cache["buscado_em"] and (agora - cache["buscado_em"]) < CACHE_TABELA_TTL:
+        return cache["dados"]
+
+    api_key = os.environ.get("API_FOOTBALL_KEY")
+    if not api_key:
+        print("[tabela_brasileirao] API_FOOTBALL_KEY não configurada nesse serviço - "
+              "sem isso não dá pra buscar a tabela do campeonato.")
+        return cache["dados"] or []
+
+    try:
+        resposta = requests.get(
+            "https://v3.football.api-sports.io/standings",
+            params={"league": LEAGUE_ID_BRASILEIRAO, "season": TEMPORADA_ATUAL},
+            headers={"x-apisports-key": api_key},
+            timeout=15,
+        )
+        resposta.raise_for_status()
+        dados = resposta.json()
+        standings = dados["response"][0]["league"]["standings"][0]
+
+        tabela = []
+        for linha in standings:
+            tabela.append({
+                "posicao": linha["rank"],
+                "team_id": linha["team"]["id"],
+                "nome": linha["team"]["name"],
+                "pontos": linha["points"],
+                "jogos": linha["all"]["played"],
+                "vitorias": linha["all"]["win"],
+                "empates": linha["all"]["draw"],
+                "derrotas": linha["all"]["lose"],
+                "gols_pro": linha["all"]["goals"]["for"],
+                "gols_contra": linha["all"]["goals"]["against"],
+                "saldo": linha["goalsDiff"],
+                "forma": list(linha.get("form") or ""),
+            })
+
+        cache["dados"] = tabela
+        cache["buscado_em"] = agora
+        return tabela
+    except (requests.RequestException, KeyError, IndexError) as e:
+        print(f"[tabela_brasileirao] Falha ao buscar/interpretar a tabela: {e}")
+        return cache["dados"] or []
+
+
+# ---------- Líderes de estatísticas (só entre os times rastreados) ----------
+CATEGORIAS_LIDERANCA = [
+    ("chute", "Chutes (Total)"),
+    ("chute_no_gol", "Chutes no Gol"),
+    ("impedimento", "Impedimento"),
+    ("falta", "Faltas Cometidas"),
+    ("desarme", "Desarmes"),
+    ("cartao", "Cartões"),
+]
+
+# de onde vem o dado bruto de cada categoria, pra poder recalcular a média
+# "ao vivo" só dos últimos 5 jogos (padroes_time_linha guarda a média sobre
+# a janela maior, até 50 jogos - ver motor_padroes.py - mas não guarda uma
+# versão separada "últimos 5", então essa parte é calculada na hora aqui)
+FONTE_CATEGORIA_LIDERANCA = {
+    "chute": ("estatisticas_jogo", "finalizacoes"),
+    "falta": ("estatisticas_jogo", "faltas"),
+    "chute_no_gol": ("soma_jogador", "chutes_no_gol"),
+    "impedimento": ("soma_jogador", "impedimentos"),
+    "desarme": ("soma_jogador", "desarmes"),
+    "cartao": ("cartao_time", None),
+}
+
+
+def buscar_media_ultimos_5_jogos(cur, time_id, tipo):
+    fonte, coluna = FONTE_CATEGORIA_LIDERANCA[tipo]
+
+    if fonte == "estatisticas_jogo":
+        cur.execute(
+            f"""
+            SELECT eg.{coluna}
+            FROM estatisticas_jogo eg
+            JOIN jogos j ON j.id = eg.jogo_id
+            WHERE j.nosso_time_id = %s
+              AND ((j.mandante = TRUE AND eg.lado = 'mandante')
+               OR (j.mandante = FALSE AND eg.lado = 'visitante'))
+              AND eg.{coluna} IS NOT NULL
+            ORDER BY j.data_jogo DESC LIMIT 5
+            """,
+            (time_id,),
+        )
+    elif fonte == "soma_jogador":
+        cur.execute(
+            f"""
+            SELECT SUM(jeg.{coluna})
+            FROM jogador_estatisticas_jogo jeg
+            JOIN jogos j ON j.id = jeg.jogo_id
+            WHERE j.nosso_time_id = %s
+              AND ((j.mandante = TRUE AND jeg.lado = 'mandante')
+               OR (j.mandante = FALSE AND jeg.lado = 'visitante'))
+              AND jeg.{coluna} IS NOT NULL
+            GROUP BY jeg.jogo_id, j.data_jogo
+            ORDER BY j.data_jogo DESC LIMIT 5
+            """,
+            (time_id,),
+        )
+    else:  # cartao_time
+        cur.execute(
+            """
+            SELECT contagem.total_cartoes
+            FROM (
+                SELECT j.id AS jogo_id, j.data_jogo,
+                       COUNT(c.id) FILTER (WHERE c.lado = 'mandante') AS total_cartoes,
+                       COUNT(DISTINCT eg.lado) AS lados
+                FROM jogos j
+                JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
+                LEFT JOIN cartoes c ON c.jogo_id = j.id
+                WHERE j.nosso_time_id = %s AND j.data_jogo < CURRENT_DATE
+                GROUP BY j.id, j.data_jogo
+            ) contagem
+            WHERE contagem.lados = 2
+            ORDER BY contagem.data_jogo DESC LIMIT 5
+            """,
+            (time_id,),
+        )
+
+    valores = [row[0] for row in cur.fetchall()]
+    if not valores:
+        return None
+    return round(sum(float(v) for v in valores) / len(valores), 2)
+
+
+def buscar_lideres_estatisticas(cur):
+    """Pra cada categoria, acha qual time RASTREADO tem a maior média
+    "total" (a que o motor_padroes.py já calcula sobre a janela de até 50
+    jogos) e busca ao vivo a média desse time só nos últimos 5 jogos.
+    IMPORTANTE: é liderança só entre os times que a gente rastreia, não o
+    campeonato inteiro - rastrear os 20 times só pra essa tabela estouraria
+    a cota da OddsPapi (ver seção 11 da documentação)."""
+    lideres = []
+    for tipo, titulo in CATEGORIAS_LIDERANCA:
+        cur.execute(
+            """
+            SELECT t.id, t.nome, p.media
+            FROM padroes_time_linha p
+            JOIN times t ON t.id = p.time_id
+            WHERE p.tipo = %s AND t.rastreado = TRUE
+            ORDER BY p.media DESC
+            LIMIT 1
+            """,
+            (tipo,),
+        )
+        row = cur.fetchone()
+        if not row:
+            lideres.append({"titulo": titulo, "tipo": tipo, "time_nome": None})
+            continue
+        time_id, time_nome, media_total = row
+        lideres.append({
+            "titulo": titulo, "tipo": tipo, "time_nome": time_nome,
+            "media_total": float(media_total),
+            "media_5": buscar_media_ultimos_5_jogos(cur, time_id, tipo),
+        })
+    return lideres
 
 
 def buscar_estatisticas_time(cur, time_id):
@@ -3364,13 +3691,17 @@ def times_lista():
             {"id": time_id, "nome": nome, "escudo_url": buscar_escudo_url(cur, nome)}
             for time_id, nome in times_rastreados
         ]
+        lideres = buscar_lideres_estatisticas(cur)
         banca_atual = buscar_banca(cur, session["usuario_id"])
         cur.close()
     finally:
         conn.close()
 
+    tabela = buscar_tabela_brasileirao()
+
     return render_template_string(
-        PAGINA_TIMES, clubes=clubes, nav_html=barra_navegacao("times", round(banca_atual, 2)),
+        PAGINA_TIMES, clubes=clubes, tabela=tabela, lideres=lideres,
+        nav_html=barra_navegacao("times", round(banca_atual, 2)),
     )
 
 
