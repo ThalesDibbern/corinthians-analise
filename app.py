@@ -3106,18 +3106,74 @@ PAGINA_TIME = """
         * { box-sizing: border-box; }
         body {
             font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-            background: #0d1117; color: #e6edf3; max-width: 900px;
-            margin: 0 auto; padding: 32px 20px 80px;
+            background: #0d1117; color: #e6edf3; max-width: 1500px;
+            margin: 0 auto; padding: 32px 24px 80px;
         }
-        h1 { font-size: 1.5rem; margin: 0 0 4px; display: flex; align-items: center; gap: 12px; }
+        h1 { font-size: 1.6rem; margin: 0 0 4px; text-align: center; }
+        .subtitulo { color: #8b949e; margin: 0 0 16px; font-size: 0.88rem; text-align: center; }
+        .vazio {
+            text-align: center; color: #8b949e; padding: 24px; margin-top: 10px;
+            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.85rem;
+        }
+        .titulo-coluna { font-size: 1.05rem; font-weight: 700; margin: 0 0 14px; text-align: center; }
+        """ + NAV_CSS + """
+
+        .grid-time {
+            display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 22px; align-items: start; margin-top: 12px;
+        }
+        @media (max-width: 1000px) {
+            .grid-time { grid-template-columns: 1fr; }
+        }
+
+        /* coluna 1: geral + busca + lista de times */
+        .btn-geral {
+            display: block; text-align: center; background: #161b22; border: 1px solid #30363d;
+            color: #c9d1d9; border-radius: 10px; padding: 10px; margin-bottom: 14px;
+            text-decoration: none; font-weight: 600; font-size: 0.85rem;
+        }
+        .btn-geral:hover { border-color: #58a6ff; }
+        .busca {
+            width: 100%; padding: 10px 14px; margin-bottom: 14px;
+            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+            border-radius: 8px; font-size: 0.9rem;
+        }
+        .clube-btn {
+            display: flex; align-items: center; gap: 12px;
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 12px 16px; margin-bottom: 10px; text-decoration: none;
+            color: #e6edf3; transition: border-color 0.15s;
+        }
+        .clube-btn:hover { border-color: #58a6ff; }
+        .clube-btn.item-ativo { background: #1f6feb26; border: 1px solid #58a6ff88; }
+        .clube-selo {
+            width: 34px; height: 34px; border-radius: 50%;
+            background: linear-gradient(135deg, #333 50%, #eee 50%);
+            flex-shrink: 0; object-fit: contain;
+        }
+        .clube-nome { font-weight: 700; font-size: 0.92rem; }
+        .clube-sub { color: #8b949e; font-size: 0.75rem; }
+        .paginacao {
+            display: flex; align-items: center; justify-content: center; gap: 14px;
+            margin-top: 4px; font-size: 0.82rem; color: #8b949e;
+        }
+        .btn-pagina {
+            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+            border-radius: 8px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer;
+        }
+        .btn-pagina:hover:not(:disabled) { border-color: #58a6ff; }
+        .btn-pagina:disabled { opacity: 0.35; cursor: default; }
+
+        /* coluna 2: cabeçalho do time + blocos de estatística */
         .selo-titulo {
             width: 34px; height: 34px; border-radius: 50%;
             background: linear-gradient(135deg, #333 50%, #eee 50%);
             flex-shrink: 0; object-fit: contain;
         }
-        .subtitulo { color: #8b949e; margin: 0 0 24px; font-size: 0.88rem; }
-        .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
-        .link-voltar:hover { text-decoration: underline; }
+        .cabecalho-time {
+            display: flex; align-items: center; gap: 14px;
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 18px 22px; margin-bottom: 14px; font-size: 1.15rem; font-weight: 700;
+        }
         .cartao {
             background: #161b22; border: 1px solid #30363d; border-radius: 12px;
             padding: 18px 22px; margin-bottom: 14px;
@@ -3132,47 +3188,241 @@ PAGINA_TIME = """
             padding: 6px 12px; font-size: 0.85rem;
         }
         .linha-item b { color: #3fb950; }
-        .vazio {
-            text-align: center; color: #8b949e; padding: 32px 24px;
-            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
+
+        /* coluna 3: posição na tabela + últimos jogos */
+        .tabela-vizinhos { width: 100%; border-collapse: collapse; margin-bottom: 26px; }
+        .linha-vizinho td {
+            padding: 10px 8px; border-bottom: 1px solid #21262d; font-size: 0.92rem;
         }
+        .linha-vizinho.ativa td { background: #1f6feb26; border-radius: 8px; font-weight: 700; }
+        .pos-vizinho { font-size: 1.3rem; font-weight: 700; color: #8b949e; width: 36px; }
+        .linha-vizinho.ativa .pos-vizinho { color: #58a6ff; }
+        .escudo-vizinho { width: 26px; height: 26px; object-fit: contain; vertical-align: middle; margin-right: 8px; }
+        .jogo-card {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            margin-bottom: 10px; cursor: pointer; overflow: hidden;
+        }
+        .jogo-placar-linha {
+            display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            padding: 12px 16px;
+        }
+        .jogo-time { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.88rem; flex: 1; }
+        .jogo-time.jogo-time-direita { justify-content: flex-end; text-align: right; }
+        .escudo-jogo { width: 24px; height: 24px; object-fit: contain; flex-shrink: 0; }
+        .jogo-placar { font-weight: 700; font-size: 1rem; white-space: nowrap; padding: 0 6px; }
+        .jogo-seta { color: #8b949e; transition: transform 0.15s; }
+        .jogo-card.aberto .jogo-seta { transform: rotate(180deg); }
+        .jogo-detalhe { display: none; padding: 0 16px 14px; }
+        .jogo-card.aberto .jogo-detalhe { display: block; }
+        .tabela-detalhe-jogo { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        .tabela-detalhe-jogo th { color: #8b949e; font-weight: 600; padding: 6px 4px; text-align: center; }
+        .tabela-detalhe-jogo th:first-child { text-align: left; }
+        .tabela-detalhe-jogo td { padding: 6px 4px; text-align: center; border-top: 1px solid #21262d; }
+        .tabela-detalhe-jogo td:first-child { text-align: left; color: #8b949e; }
     </style>
 </head>
 <body>
-    <a href="/times" class="link-voltar">← Voltar</a>
     <h1>
         {% if escudo_url %}
-        <img src="{{ escudo_url }}" alt="{{ nome_time }}" class="selo-titulo" onerror="this.outerHTML='<span class=&quot;selo-titulo&quot;></span>'">
-        {% else %}
-        <span class="selo-titulo"></span>
+        <img src="{{ escudo_url }}" alt="{{ nome_time }}" class="selo-titulo" style="display:inline-block; vertical-align:middle; margin-right:8px;" onerror="this.outerHTML='<span class=&quot;selo-titulo&quot;></span>'">
         {% endif %}
-        {{ nome_time }}
+        Estatísticas de Time
     </h1>
-    <p class="subtitulo">Frequência histórica do time inteiro (últimos jogos, só o lado do {{ nome_time }}) -
-        cobre escanteios, chutes (total e no gol), faltas, cartões, impedimentos, desarmes e posse de bola.
-        Faltas, chutes, impedimentos, desarmes e posse não têm odd real disponível hoje pra nenhum mercado.</p>
+    <p class="subtitulo">{{ nome_time }} - frequência histórica (só o lado do {{ nome_time }}), posição no
+        Brasileirão e últimos jogos - estatísticas normais, sem depender de nenhuma odd disponível na casa de apostas.</p>
+    {{ nav_html|safe }}
 
-    {% if blocos %}
-        {% for bloco in blocos %}
-        <div class="cartao">
-            <div class="bloco-topo">
-                <div class="bloco-titulo">{{ bloco.titulo }}</div>
-                <div class="bloco-media">Média: <b>{{ bloco.media }}{{ '%' if bloco.tipo == 'posse' else '' }}</b>
-                    {{ 'por jogo' if bloco.tipo != 'posse' else '' }} · últimos {{ bloco.jogos_analisados }} jogo(s)</div>
-            </div>
-            {% if bloco.itens %}
-            <div class="linhas-grid">
-                {% for item in bloco.itens %}
-                <div class="linha-item">+{{ item.linha }}: <b>{{ item.frequencia }}%</b></div>
+    <div class="grid-time">
+        <div class="coluna-lista">
+            <a href="/times" class="btn-geral">📊 Estatísticas Gerais</a>
+            <input type="text" class="busca" id="busca-time" placeholder="Buscar times..." onkeyup="filtrarTimes()">
+            <div id="lista-times">
+            {% if clubes %}
+                {% for c in clubes %}
+                <a href="/time/{{ c.id }}" class="clube-btn item-time item-pagina{{ ' item-ativo' if c.id == time_id else '' }}">
+                    {% if c.escudo_url %}
+                    <img src="{{ c.escudo_url }}" alt="{{ c.nome }}" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
+                    {% else %}
+                    <div class="clube-selo"></div>
+                    {% endif %}
+                    <div>
+                        <div class="clube-nome">{{ c.nome }}</div>
+                        <div class="clube-sub">Ver elenco e última escalação →</div>
+                    </div>
+                </a>
                 {% endfor %}
+            {% else %}
+                <div class="vazio">Nenhum clube rastreado ainda.</div>
+            {% endif %}
+            </div>
+            <div class="vazio" id="nenhum-resultado-time" style="display:none;">Nenhum time encontrado com esse nome.</div>
+            {% if clubes|length > 10 %}
+            <div class="paginacao">
+                <button class="btn-pagina" id="anterior-lista-times" onclick="mudarPagina('lista-times', -1)">← Anterior</button>
+                <span id="label-lista-times"></span>
+                <button class="btn-pagina" id="proximo-lista-times" onclick="mudarPagina('lista-times', 1)">Próxima →</button>
             </div>
             {% endif %}
         </div>
-        {% endfor %}
-    {% else %}
-        <div class="vazio">Ainda não há dados suficientes pra calcular as estatísticas desse time
-            (precisa de pelo menos 5 jogos concluídos).</div>
-    {% endif %}
+
+        <div class="coluna-principal">
+            <div class="cabecalho-time">
+                {% if escudo_url %}
+                <img src="{{ escudo_url }}" alt="{{ nome_time }}" class="selo-titulo" onerror="this.outerHTML='<span class=&quot;selo-titulo&quot;></span>'">
+                {% else %}
+                <span class="selo-titulo"></span>
+                {% endif %}
+                {{ nome_time }}
+            </div>
+            {% if blocos %}
+                {% for bloco in blocos %}
+                <div class="cartao">
+                    <div class="bloco-topo">
+                        <div class="bloco-titulo">{{ bloco.titulo }}</div>
+                        <div class="bloco-media">Média: <b>{{ bloco.media }}{{ '%' if bloco.tipo == 'posse' else '' }}</b>
+                            {{ 'por jogo' if bloco.tipo != 'posse' else '' }} · últimos {{ bloco.jogos_analisados }} jogo(s)</div>
+                    </div>
+                    {% if bloco.itens %}
+                    <div class="linhas-grid">
+                        {% for item in bloco.itens %}
+                        <div class="linha-item">+{{ item.linha }}: <b>{{ item.frequencia }}%</b></div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="vazio">Ainda não há dados suficientes pra calcular as estatísticas desse time
+                    (precisa de pelo menos 5 jogos concluídos).</div>
+            {% endif %}
+        </div>
+
+        <div class="coluna-lateral">
+            {% if vizinhos_tabela %}
+            <div class="titulo-coluna">Posição no Brasileirão</div>
+            <table class="tabela-vizinhos">
+                {% for l in vizinhos_tabela %}
+                <tr class="linha-vizinho{{ ' ativa' if l.team_id == api_football_team_id else '' }}">
+                    <td class="pos-vizinho">{{ l.posicao }}</td>
+                    <td>
+                        <img src="/escudo/{{ l.team_id }}.png" class="escudo-vizinho" onerror="this.style.display='none'">
+                        {{ l.nome }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </table>
+            {% endif %}
+
+            <div class="titulo-coluna">Últimos Jogos</div>
+            {% if ultimos_jogos %}
+                {% for jogo in ultimos_jogos %}
+                <div class="jogo-card" id="card-jogo-{{ jogo.jogo_id }}" onclick="toggleJogo({{ jogo.jogo_id }})">
+                    <div class="jogo-placar-linha">
+                        {% if jogo.mandante %}
+                            <div class="jogo-time">
+                                {% if escudo_url %}<img src="{{ escudo_url }}" class="escudo-jogo">{% endif %}
+                                {{ nome_time }}
+                            </div>
+                            <div class="jogo-placar">{{ jogo.placar_nosso }} x {{ jogo.placar_adversario }}</div>
+                            <div class="jogo-time jogo-time-direita">
+                                {{ jogo.adversario }}
+                                {% if jogo.escudo_adversario %}<img src="{{ jogo.escudo_adversario }}" class="escudo-jogo">{% endif %}
+                            </div>
+                        {% else %}
+                            <div class="jogo-time">
+                                {% if jogo.escudo_adversario %}<img src="{{ jogo.escudo_adversario }}" class="escudo-jogo">{% endif %}
+                                {{ jogo.adversario }}
+                            </div>
+                            <div class="jogo-placar">{{ jogo.placar_adversario }} x {{ jogo.placar_nosso }}</div>
+                            <div class="jogo-time jogo-time-direita">
+                                {{ nome_time }}
+                                {% if escudo_url %}<img src="{{ escudo_url }}" class="escudo-jogo">{% endif %}
+                            </div>
+                        {% endif %}
+                        <span class="jogo-seta">▾</span>
+                    </div>
+                    <div class="jogo-detalhe">
+                        <table class="tabela-detalhe-jogo">
+                            <thead>
+                                <tr><th>Estatística</th><th>{{ nome_time }}</th><th>{{ jogo.adversario }}</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>Posse de bola</td><td>{{ jogo.estatisticas.nosso.posse if jogo.estatisticas.nosso.posse is not none else "-" }}%</td><td>{{ jogo.estatisticas.adversario.posse if jogo.estatisticas.adversario.posse is not none else "-" }}%</td></tr>
+                                <tr><td>Escanteios</td><td>{{ jogo.estatisticas.nosso.escanteios if jogo.estatisticas.nosso.escanteios is not none else "-" }}</td><td>{{ jogo.estatisticas.adversario.escanteios if jogo.estatisticas.adversario.escanteios is not none else "-" }}</td></tr>
+                                <tr><td>Chutes (total)</td><td>{{ jogo.estatisticas.nosso.chutes if jogo.estatisticas.nosso.chutes is not none else "-" }}</td><td>{{ jogo.estatisticas.adversario.chutes if jogo.estatisticas.adversario.chutes is not none else "-" }}</td></tr>
+                                <tr><td>Chutes no gol</td><td>{{ jogo.estatisticas.nosso.chutes_no_gol if jogo.estatisticas.nosso.chutes_no_gol is not none else "-" }}</td><td>{{ jogo.estatisticas.adversario.chutes_no_gol if jogo.estatisticas.adversario.chutes_no_gol is not none else "-" }}</td></tr>
+                                <tr><td>Faltas</td><td>{{ jogo.estatisticas.nosso.faltas if jogo.estatisticas.nosso.faltas is not none else "-" }}</td><td>{{ jogo.estatisticas.adversario.faltas if jogo.estatisticas.adversario.faltas is not none else "-" }}</td></tr>
+                                <tr><td>Desarmes</td><td>{{ jogo.estatisticas.nosso.desarmes if jogo.estatisticas.nosso.desarmes is not none else "-" }}</td><td>{{ jogo.estatisticas.adversario.desarmes if jogo.estatisticas.adversario.desarmes is not none else "-" }}</td></tr>
+                                <tr><td>Cartões</td><td>{{ jogo.estatisticas.nosso.cartoes }}</td><td>{{ jogo.estatisticas.adversario.cartoes }}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="vazio">Nenhum jogo concluído ainda pra esse time.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        function toggleJogo(jogoId) {
+            document.getElementById('card-jogo-' + jogoId).classList.toggle('aberto');
+        }
+
+        function filtrarTimes() {
+            const termo = document.getElementById('busca-time').value.toLowerCase();
+            let visiveis = 0;
+            document.querySelectorAll('.item-time').forEach(function(card) {
+                const nome = card.querySelector('.clube-nome').textContent.toLowerCase();
+                const bate = nome.includes(termo);
+                card.dataset.escondidoBusca = bate ? '0' : '1';
+                if (bate) visiveis++;
+            });
+            document.getElementById('nenhum-resultado-time').style.display = (termo && visiveis === 0) ? '' : 'none';
+            paginaAtual['lista-times'] = 0;
+            renderizarPagina('lista-times');
+        }
+
+        const TAMANHO_PAGINA = 10;
+        const paginaAtual = {};
+
+        function totalPaginas(listaId) {
+            let n = 0;
+            document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
+                if (item.dataset.escondidoBusca !== '1') n++;
+            });
+            return Math.max(1, Math.ceil(n / TAMANHO_PAGINA));
+        }
+
+        function renderizarPagina(listaId) {
+            const pagina = paginaAtual[listaId] || 0;
+            let visivelIndice = 0;
+            document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
+                if (item.dataset.escondidoBusca === '1') { item.style.display = 'none'; return; }
+                const paginaDoItem = Math.floor(visivelIndice / TAMANHO_PAGINA);
+                item.style.display = (paginaDoItem === pagina) ? '' : 'none';
+                visivelIndice++;
+            });
+            const total = totalPaginas(listaId);
+            const label = document.getElementById('label-' + listaId);
+            if (label) label.textContent = 'Página ' + (pagina + 1) + ' de ' + total;
+            const btnAnterior = document.getElementById('anterior-' + listaId);
+            const btnProximo = document.getElementById('proximo-' + listaId);
+            if (btnAnterior) btnAnterior.disabled = (pagina === 0);
+            if (btnProximo) btnProximo.disabled = (pagina >= total - 1);
+        }
+
+        function mudarPagina(listaId, direcao) {
+            const total = totalPaginas(listaId);
+            let pagina = (paginaAtual[listaId] || 0) + direcao;
+            pagina = Math.max(0, Math.min(total - 1, pagina));
+            paginaAtual[listaId] = pagina;
+            renderizarPagina(listaId);
+        }
+
+        renderizarPagina('lista-times');
+    </script>
 </body>
 </html>
 """
@@ -3442,6 +3692,114 @@ def buscar_estatisticas_time(cur, time_id):
     blocos = [blocos_dict[tipo] for tipo in ORDEM_BLOCOS_TIME if tipo in blocos_dict]
     blocos += [b for tipo, b in blocos_dict.items() if tipo not in ORDEM_BLOCOS_TIME]
     return blocos
+
+
+# ---------- Página de time: vizinhos na tabela + últimos jogos ----------
+def buscar_vizinhos_tabela(tabela, api_football_team_id, redor=2):
+    """Recorta um pedaço da tabela do Brasileirão em volta do time (até
+    `redor` times acima e abaixo) - pra dar contexto de posição sem repetir
+    a tabela inteira dentro da página do time."""
+    if not tabela or not api_football_team_id:
+        return []
+    indice = next((i for i, l in enumerate(tabela) if l["team_id"] == api_football_team_id), None)
+    if indice is None:
+        return []
+    inicio = max(0, indice - redor)
+    fim = min(len(tabela), indice + redor + 1)
+    faltam = (2 * redor + 1) - (fim - inicio)
+    if faltam > 0:
+        if inicio == 0:
+            fim = min(len(tabela), fim + faltam)
+        elif fim == len(tabela):
+            inicio = max(0, inicio - faltam)
+    return tabela[inicio:fim]
+
+
+def buscar_ultimos_jogos_time(cur, time_id, limite=5):
+    """Últimos jogos já concluídos desse time (com placar), mais recentes
+    primeiro - alimenta a coluna "Últimos Jogos" da página do time."""
+    cur.execute(
+        """
+        SELECT id, data_jogo, adversario, mandante, placar_corinthians, placar_adversario
+        FROM jogos
+        WHERE nosso_time_id = %s
+          AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+        ORDER BY data_jogo DESC
+        LIMIT %s
+        """,
+        (time_id, limite),
+    )
+    jogos = []
+    for jogo_id, data_jogo, adversario, mandante, placar_nosso, placar_adv in cur.fetchall():
+        jogos.append({
+            "jogo_id": jogo_id,
+            "data_jogo": data_jogo,
+            "adversario": adversario,
+            "mandante": mandante,
+            "escudo_adversario": buscar_escudo_url(cur, adversario),
+            "placar_nosso": placar_nosso,
+            "placar_adversario": placar_adv,
+        })
+    return jogos
+
+
+def buscar_estatisticas_jogo_completo(cur, jogo_id, mandante_bool):
+    """Estatísticas completas de UM jogo específico, já separadas em
+    "nosso" e "adversário" - é o "retângulo" que abre ao clicar num jogo em
+    "Últimos Jogos". Mistura 3 fontes, cada uma com semântica própria pro
+    campo `lado`:
+      - estatisticas_jogo: posse, escanteios, faltas, chutes totais - lado
+        é baseado no mandante/visitante REAL do jogo, precisa traduzir
+        pro nosso lado via `mandante_bool` (mesma lógica usada nos
+        padrões de time em motor_padroes.py)
+      - jogador_estatisticas_jogo, somado: chutes no gol, desarmes - mesma
+        tradução de lado que estatisticas_jogo
+      - cartoes: já vem gravado direto como "nosso time" (lado=mandante)
+        vs "adversário" (lado=visitante) - NÃO precisa de tradução (ver
+        popular_banco.py/salvar_eventos)"""
+    lado_nosso = "mandante" if mandante_bool else "visitante"
+    lado_adversario = "visitante" if mandante_bool else "mandante"
+
+    cur.execute(
+        "SELECT lado, posse_de_bola, escanteios, faltas, finalizacoes "
+        "FROM estatisticas_jogo WHERE jogo_id = %s",
+        (jogo_id,),
+    )
+    base = {
+        lado: {"posse": posse, "escanteios": escanteios, "faltas": faltas, "chutes": chutes}
+        for lado, posse, escanteios, faltas, chutes in cur.fetchall()
+    }
+
+    cur.execute(
+        "SELECT lado, SUM(chutes_no_gol), SUM(desarmes) "
+        "FROM jogador_estatisticas_jogo WHERE jogo_id = %s GROUP BY lado",
+        (jogo_id,),
+    )
+    soma_jogador = {
+        lado: {"chutes_no_gol": chutes_no_gol, "desarmes": desarmes}
+        for lado, chutes_no_gol, desarmes in cur.fetchall()
+    }
+
+    cur.execute("SELECT lado, COUNT(*) FROM cartoes WHERE jogo_id = %s GROUP BY lado", (jogo_id,))
+    cartoes_dict = dict(cur.fetchall())
+
+    def montar(lado_traduzido, lado_cartao):
+        b = base.get(lado_traduzido, {})
+        s = soma_jogador.get(lado_traduzido, {})
+        return {
+            "posse": b.get("posse"),
+            "escanteios": b.get("escanteios"),
+            "faltas": b.get("faltas"),
+            "chutes": b.get("chutes"),
+            "chutes_no_gol": s.get("chutes_no_gol"),
+            "desarmes": s.get("desarmes"),
+            "cartoes": cartoes_dict.get(lado_cartao, 0),
+        }
+
+    return {
+        "nosso": montar(lado_nosso, "mandante"),
+        "adversario": montar(lado_adversario, "visitante"),
+    }
 
 
 def buscar_escudo_url(cur, nome_time):
@@ -3736,25 +4094,50 @@ def times_lista():
 @app.route("/time/<int:time_id>")
 def time_detalhe(time_id):
     """NOVO (estatísticas de time): página com a frequência histórica de
-    escanteios, faltas, chutes e cartões de UM time rastreado."""
+    escanteios, faltas, chutes e cartões de UM time rastreado, agora com
+    contexto extra: posição na tabela do Brasileirão (com vizinhos),
+    últimos jogos (com estatística completa ao clicar), e a mesma lista de
+    times com busca que a página inicial de Estatísticas de Times tem."""
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
-        cur.execute("SELECT nome FROM times WHERE id = %s AND rastreado = TRUE", (time_id,))
+        cur.execute(
+            "SELECT nome, api_football_team_id FROM times WHERE id = %s AND rastreado = TRUE",
+            (time_id,),
+        )
         row = cur.fetchone()
         if not row:
             cur.close()
             return "Time não encontrado.", 404
-        nome_time = row[0]
+        nome_time, api_football_team_id = row
 
         blocos = buscar_estatisticas_time(cur, time_id)
         escudo_url = buscar_escudo_url(cur, nome_time)
+
+        cur.execute("SELECT id, nome FROM times WHERE rastreado = TRUE ORDER BY nome")
+        times_rastreados = cur.fetchall()
+        clubes = [
+            {"id": tid, "nome": nome, "escudo_url": buscar_escudo_url(cur, nome)}
+            for tid, nome in times_rastreados
+        ]
+
+        ultimos_jogos = buscar_ultimos_jogos_time(cur, time_id)
+        for jogo in ultimos_jogos:
+            jogo["estatisticas"] = buscar_estatisticas_jogo_completo(cur, jogo["jogo_id"], jogo["mandante"])
+
+        banca_atual = buscar_banca(cur, session["usuario_id"])
         cur.close()
     finally:
         conn.close()
 
+    tabela = buscar_tabela_brasileirao()
+    vizinhos_tabela = buscar_vizinhos_tabela(tabela, api_football_team_id)
+
     return render_template_string(
         PAGINA_TIME, blocos=blocos, nome_time=nome_time, escudo_url=escudo_url,
+        clubes=clubes, time_id=time_id, vizinhos_tabela=vizinhos_tabela,
+        api_football_team_id=api_football_team_id, ultimos_jogos=ultimos_jogos,
+        nav_html=barra_navegacao("times", round(banca_atual, 2)),
     )
 
 
