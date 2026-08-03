@@ -59,6 +59,7 @@ app.secret_key = os.environ.get("SECRET_KEY", "troque-essa-chave-numa-variavel-d
 NAV_CSS = """
         .nav-principal {
             display: flex; gap: 10px; flex-wrap: wrap; margin: 20px 0 24px;
+            justify-content: center;
         }
         .nav-btn {
             background: #161b22; border: 1px solid #30363d; color: #c9d1d9;
@@ -93,9 +94,9 @@ def barra_navegacao(pagina_atual, banca_atual=None):
     informado, mostra o botão da banca ao lado do nome do usuário (só faz
     sentido em páginas onde já buscamos a banca mesmo)."""
     itens = [
-        ("index", "/", "🎯 Gerador de Recomendações"),
         ("historico", "/historico", "📊 Histórico de Acertos e Erros"),
         ("times", "/times", "🏟️ Estatísticas de Times"),
+        ("index", "/", "🎯 Gerador de Recomendações"),
         ("jogadores", "/jogadores", "📈 Estatísticas de Jogadores"),
         ("roi", "/minhas-apostas", "💰 Minhas Apostas (ROI)"),
     ]
@@ -3204,14 +3205,19 @@ ORDEM_BLOCOS_TIME = [
 # à toa a cada vez que alguém abre a página.
 LEAGUE_ID_BRASILEIRAO = 71
 TEMPORADA_ATUAL = 2026
-CACHE_TABELA_TTL = timedelta(minutes=15)
-_cache_tabela_brasileirao = {"dados": None, "buscado_em": None}
+_cache_tabela_brasileirao = {"dados": None, "dia": None}
 
 
 def buscar_tabela_brasileirao():
-    agora = datetime.now(timezone.utc)
+    """NOVO: a tabela do Brasileirão só muda quando um jogo termina - não
+    faz sentido buscar de novo a cada poucos minutos. Agora o cache é por
+    DIA (fuso de Brasília): a primeira pessoa que abrir a página depois da
+    meia-noite dispara uma busca nova, e o resto do dia usa essa mesma
+    cópia - só 1 chamada à API-Football por dia (no máximo), em vez de uma
+    a cada 15 minutos."""
+    hoje = datetime.now(FUSO_BRASIL).date()
     cache = _cache_tabela_brasileirao
-    if cache["dados"] is not None and cache["buscado_em"] and (agora - cache["buscado_em"]) < CACHE_TABELA_TTL:
+    if cache["dados"] is not None and cache["dia"] == hoje:
         return cache["dados"]
 
     api_key = os.environ.get("API_FOOTBALL_KEY")
@@ -3229,6 +3235,18 @@ def buscar_tabela_brasileirao():
         )
         resposta.raise_for_status()
         dados = resposta.json()
+
+        # NOVO: log detalhado em caso de resposta "vazia" (sem erro HTTP,
+        # mas sem standings dentro) - ajuda a diagnosticar pelo log do
+        # Railway em vez de só saber que "não carregou".
+        if dados.get("errors"):
+            print(f"[tabela_brasileirao] API-Football retornou erro: {dados['errors']}")
+            return cache["dados"] or []
+        if not dados.get("response"):
+            print(f"[tabela_brasileirao] Resposta sem 'response' (temporada {TEMPORADA_ATUAL} "
+                  f"pode ainda não estar disponível nesse plano) - corpo bruto: {dados}")
+            return cache["dados"] or []
+
         standings = dados["response"][0]["league"]["standings"][0]
 
         tabela = []
@@ -3249,7 +3267,7 @@ def buscar_tabela_brasileirao():
             })
 
         cache["dados"] = tabela
-        cache["buscado_em"] = agora
+        cache["dia"] = hoje
         return tabela
     except (requests.RequestException, KeyError, IndexError) as e:
         print(f"[tabela_brasileirao] Falha ao buscar/interpretar a tabela: {e}")
