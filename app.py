@@ -2548,18 +2548,70 @@ PAGINA_CLUBE = """
         * { box-sizing: border-box; }
         body {
             font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-            background: #0d1117; color: #e6edf3; max-width: 900px;
-            margin: 0 auto; padding: 32px 20px 80px;
+            background: #0d1117; color: #e6edf3; max-width: 1500px;
+            margin: 0 auto; padding: 32px 24px 80px;
         }
-        h1 { font-size: 1.5rem; margin: 0 0 4px; display: flex; align-items: center; gap: 12px; }
+        h1 { font-size: 1.6rem; margin: 0 0 4px; text-align: center; }
         .selo-titulo {
             width: 34px; height: 34px; border-radius: 50%;
             background: transparent;
             flex-shrink: 0; object-fit: contain;
         }
-        .subtitulo { color: #8b949e; margin: 0 0 20px; font-size: 0.88rem; }
+        .subtitulo { color: #8b949e; margin: 0 0 16px; font-size: 0.88rem; text-align: center; }
         .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
         .link-voltar:hover { text-decoration: underline; }
+        .titulo-coluna { font-size: 1.05rem; font-weight: 700; margin: 0 0 14px; text-align: center; }
+
+        .grid-clube {
+            display: grid; grid-template-columns: 1fr 1.6fr 1fr; gap: 22px; align-items: start; margin-top: 12px;
+        }
+        @media (max-width: 1000px) {
+            .grid-clube { grid-template-columns: 1fr; }
+        }
+
+        /* coluna 1: geral + elenco por posição */
+        .btn-geral {
+            display: block; text-align: center; background: #161b22; border: 1px solid #30363d;
+            color: #c9d1d9; border-radius: 10px; padding: 10px; margin-bottom: 16px;
+            text-decoration: none; font-weight: 600; font-size: 0.85rem;
+        }
+        .btn-geral:hover { border-color: #58a6ff; }
+        .grupo-posicao { margin-bottom: 20px; }
+        .grupo-posicao-titulo { font-weight: 700; font-size: 0.95rem; margin-bottom: 8px; }
+        .lista-elenco { list-style: none; margin: 0; padding: 0; }
+        .lista-elenco li {
+            padding: 6px 0 6px 8px; font-size: 0.88rem; color: #c9d1d9;
+            border-left: 2px solid #30363d; margin-bottom: 2px;
+        }
+
+        /* coluna 2: cabeçalho do clube */
+        .cabecalho-clube {
+            display: flex; align-items: center; gap: 14px;
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 18px 22px; margin-bottom: 14px; font-size: 1.15rem; font-weight: 700;
+        }
+
+        /* coluna 3: líderes de estatística do time */
+        .lider-card {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 16px; margin-bottom: 16px;
+        }
+        .lider-titulo {
+            display: inline-block; padding: 4px 14px; border-radius: 999px;
+            font-size: 0.78rem; font-weight: 700; margin-bottom: 12px;
+        }
+        .lider-cor-0 { background: #9e6a0322; color: #d29922; }
+        .lider-cor-1 { background: #a371f722; color: #a371f7; }
+        .lider-cor-2 { background: #39c5cf22; color: #39c5cf; }
+        .lider-cor-3 { background: #3fb95022; color: #3fb950; }
+        .lider-cor-4 { background: #f8514922; color: #f85149; }
+        .lider-cor-5 { background: #db61a222; color: #db61a2; }
+        .tabela-lider { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+        .tabela-lider th { text-align: left; color: #8b949e; font-weight: 600; padding: 4px 6px; }
+        .tabela-lider th:not(:first-child), .tabela-lider td:not(:first-child) { text-align: right; }
+        .tabela-lider td { padding: 6px; font-weight: 600; border-top: 1px solid #21262d; }
+        .vazio-pequeno { color: #8b949e; font-size: 0.8rem; font-style: italic; }
+
         .busca {
             width: 100%; padding: 10px 14px; margin: 16px 0 24px;
             background: #161b22; border: 1px solid #30363d; color: #e6edf3;
@@ -2661,10 +2713,13 @@ PAGINA_CLUBE = """
         }
         .flash-erro { background: #f8514922; color: #f85149; border: 1px solid #f8514955; }
         .flash-sucesso { background: #23863622; color: #3fb950; border: 1px solid #23863655; }
+        """ + NAV_CSS + """
     </style>
 </head>
 <body>
-    <a href="/jogadores" class="link-voltar">← Voltar</a>
+    <h1>📈 Estatísticas de Jogadores</h1>
+    <p class="subtitulo">Elenco completo, última escalação titular confirmada e líderes de estatística do time.</p>
+    {{ nav_html|safe }}
 
     {% with mensagens = get_flashed_messages(with_categories=true) %}
         {% for categoria, texto in mensagens %}
@@ -2672,15 +2727,34 @@ PAGINA_CLUBE = """
         {% endfor %}
     {% endwith %}
 
-    <h1>
-        {% if escudo_url %}
-        <img src="{{ escudo_url }}" alt="{{ nome_clube }}" class="selo-titulo" onerror="this.outerHTML='<span class=&quot;selo-titulo&quot;></span>'">
-        {% else %}
-        <span class="selo-titulo"></span>
-        {% endif %}
-        {{ nome_clube }}
-    </h1>
-    <p class="subtitulo">Elenco completo e última escalação titular confirmada.</p>
+    <div class="grid-clube">
+        <div class="coluna-elenco">
+            <a href="/jogadores" class="btn-geral">📊 Estatísticas Gerais</a>
+            {% if elenco_por_posicao %}
+                {% for grupo in elenco_por_posicao %}
+                <div class="grupo-posicao">
+                    <div class="grupo-posicao-titulo">{{ grupo.icone }} {{ grupo.titulo }}</div>
+                    <ul class="lista-elenco">
+                        {% for nome in grupo.jogadores %}
+                        <li>{{ nome }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="vazio">Elenco ainda não disponível.</div>
+            {% endif %}
+        </div>
+
+        <div class="coluna-principal">
+            <div class="cabecalho-clube">
+                {% if escudo_url %}
+                <img src="{{ escudo_url }}" alt="{{ nome_clube }}" class="selo-titulo" onerror="this.outerHTML='<span class=&quot;selo-titulo&quot;></span>'">
+                {% else %}
+                <span class="selo-titulo"></span>
+                {% endif %}
+                {{ nome_clube }}
+            </div>
 
     {% if ultima_escalacao %}
     <div class="cartao">
@@ -2780,6 +2854,33 @@ PAGINA_CLUBE = """
     {% else %}
         <div class="vazio">Ainda não há padrões calculados pra nenhum jogador desse clube.</div>
     {% endif %}
+    </div>
+        </div>
+
+        <div class="coluna-lideres">
+            <div class="titulo-coluna">Líderes de Estatísticas do Time</div>
+            {% for l in lideres_time %}
+            <div class="lider-card">
+                <div class="lider-titulo lider-cor-{{ loop.index0 % 6 }}">{{ l.titulo }}</div>
+                {% if l.jogador_nome %}
+                <table class="tabela-lider">
+                    <thead>
+                        <tr><th>Jogador</th><th>Últimos 5 jogos</th><th>Total</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ l.jogador_nome }}</td>
+                            <td>{{ l.media_5 }}</td>
+                            <td>{{ l.total }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="vazio-pequeno">Ainda não há dados suficientes pra essa categoria.</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
     </div>
 
     {% if proximo_jogo %}
@@ -3875,6 +3976,94 @@ def buscar_lideres_estatisticas_jogadores(cur):
     return lideres
 
 
+def buscar_lideres_estatisticas_jogadores_time(cur, time_id):
+    """Igual buscar_lideres_estatisticas_jogadores, mas só entre os
+    jogadores DESSE clube (não o campeonato inteiro) - usado em
+    /clube/<id> ("Líderes de Estatísticas do Time")."""
+    lideres = []
+    for coluna, titulo in CATEGORIAS_LIDERANCA_JOGADOR:
+        if coluna == "cartao":
+            cur.execute(
+                """
+                SELECT j.id, j.nome, SUM(jeg.cartao_amarelo + jeg.cartao_vermelho) AS total
+                FROM jogador_estatisticas_jogo jeg
+                JOIN jogadores j ON j.id = jeg.jogador_id
+                WHERE j.ativo = TRUE AND j.time_atual_id = %s
+                GROUP BY j.id, j.nome
+                ORDER BY total DESC
+                LIMIT 1
+                """,
+                (time_id,),
+            )
+        else:
+            cur.execute(
+                f"""
+                SELECT j.id, j.nome, SUM(jeg.{coluna}) AS total
+                FROM jogador_estatisticas_jogo jeg
+                JOIN jogadores j ON j.id = jeg.jogador_id
+                WHERE j.ativo = TRUE AND j.time_atual_id = %s AND jeg.{coluna} IS NOT NULL
+                GROUP BY j.id, j.nome
+                ORDER BY total DESC
+                LIMIT 1
+                """,
+                (time_id,),
+            )
+        row = cur.fetchone()
+        if not row or row[2] is None:
+            lideres.append({"titulo": titulo, "coluna": coluna, "jogador_nome": None})
+            continue
+        jogador_id, jogador_nome, total = row
+        lideres.append({
+            "titulo": titulo, "coluna": coluna, "jogador_nome": jogador_nome,
+            "total": int(total),
+            "media_5": buscar_media_ultimos_5_jogos_jogador(cur, jogador_id, coluna),
+        })
+    return lideres
+
+
+# posição predominante do jogador, a partir de jogador_estatisticas_jogo.posicao
+# (vem do endpoint de estatísticas da API-Football - só distingue goleiro/
+# defensor/meio-campo/atacante, não dá pra separar lateral de zagueiro com
+# esse dado, então o elenco fica agrupado nessas 4 categorias)
+NOMES_POSICAO = {
+    "G": ("🧤", "Goleiros"),
+    "D": ("🛡️", "Defensores"),
+    "M": ("⚙️", "Meio-campistas"),
+    "F": ("⚽", "Atacantes"),
+}
+ORDEM_POSICAO = ["G", "D", "M", "F"]
+
+
+def buscar_elenco_por_posicao(cur, time_id):
+    """Elenco completo do clube (titulares E reservas, todo mundo ativo),
+    agrupado pela posição mais frequente de cada jogador nos jogos em que
+    entrou em campo."""
+    cur.execute(
+        """
+        SELECT j.id, j.nome,
+               (SELECT jeg.posicao FROM jogador_estatisticas_jogo jeg
+                WHERE jeg.jogador_id = j.id AND jeg.posicao IS NOT NULL
+                GROUP BY jeg.posicao ORDER BY COUNT(*) DESC LIMIT 1) AS posicao
+        FROM jogadores j
+        WHERE j.time_atual_id = %s AND j.ativo = TRUE
+        """,
+        (time_id,),
+    )
+    grupos = {}
+    for jogador_id, nome, posicao in cur.fetchall():
+        chave = posicao if posicao in NOMES_POSICAO else "?"
+        grupos.setdefault(chave, []).append(nome)
+
+    resultado = []
+    for chave in ORDEM_POSICAO:
+        if chave in grupos:
+            icone, titulo = NOMES_POSICAO[chave]
+            resultado.append({"icone": icone, "titulo": titulo, "jogadores": sorted(grupos[chave])})
+    if "?" in grupos:
+        resultado.append({"icone": "❓", "titulo": "Posição não identificada", "jogadores": sorted(grupos["?"])})
+    return resultado
+
+
 def buscar_estatisticas_time(cur, time_id):
     """NOVO (estatísticas de time): monta a frequência histórica de
     escanteios, chutes (total e no gol), faltas, cartões, impedimentos,
@@ -4264,7 +4453,8 @@ def clube(time_id):
     /clube/corinthians fixo; agora funciona pra qualquer time rastreado,
     identificado pelo id. Mostra todos os jogadores ativos DESSE clube +
     a última escalação titular confirmada + o próximo jogo (usado pra
-    montar apostas manuais de estatística)."""
+    montar apostas manuais de estatística), além do elenco completo
+    agrupado por posição e os líderes de estatística do time."""
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
@@ -4279,6 +4469,9 @@ def clube(time_id):
         ultima_escalacao = buscar_ultima_escalacao_titular(cur, time_id)
         proximo_jogo = buscar_proximo_jogo(cur, nome_clube)
         escudo_url = buscar_escudo_url(cur, nome_clube)
+        elenco_por_posicao = buscar_elenco_por_posicao(cur, time_id)
+        lideres_time = buscar_lideres_estatisticas_jogadores_time(cur, time_id)
+        banca_atual = buscar_banca(cur, session["usuario_id"])
         cur.close()
     finally:
         conn.close()
@@ -4286,7 +4479,8 @@ def clube(time_id):
     return render_template_string(
         PAGINA_CLUBE, jogadores=lista, ultima_escalacao=ultima_escalacao,
         proximo_jogo=proximo_jogo, nome_clube=nome_clube, escudo_url=escudo_url,
-        time_id=time_id,
+        time_id=time_id, elenco_por_posicao=elenco_por_posicao, lideres_time=lideres_time,
+        nav_html=barra_navegacao("jogadores", round(banca_atual, 2)),
     )
 
 
