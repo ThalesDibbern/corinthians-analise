@@ -2268,20 +2268,19 @@ PAGINA_JOGADORES = """
         * { box-sizing: border-box; }
         body {
             font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-            background: #0d1117; color: #e6edf3; max-width: 900px;
-            margin: 0 auto; padding: 32px 20px 80px;
+            background: #0d1117; color: #e6edf3; max-width: 1500px;
+            margin: 0 auto; padding: 32px 24px 80px;
         }
-        h1 { font-size: 1.5rem; margin: 0 0 4px; text-align: center; }
-        .subtitulo { color: #8b949e; margin: 0 0 20px; font-size: 0.88rem; text-align: center; }
+        h1 { font-size: 1.6rem; margin: 0 0 4px; text-align: center; }
+        .subtitulo { color: #8b949e; margin: 0 0 16px; font-size: 0.88rem; text-align: center; }
         .subtitulo a { color: #58a6ff; }
-        .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
-        .link-voltar:hover { text-decoration: underline; }
+        .titulo-coluna { font-size: 1.05rem; font-weight: 700; margin: 0 0 14px; text-align: center; }
         .vazio {
-            text-align: center; color: #8b949e; padding: 32px 24px;
+            text-align: center; color: #8b949e; padding: 24px; margin-top: 10px;
             background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
         }
         .busca {
-            width: 100%; padding: 10px 14px; margin-bottom: 20px;
+            width: 100%; padding: 10px 14px; margin-bottom: 14px;
             background: #161b22; border: 1px solid #30363d; color: #e6edf3;
             border-radius: 8px; font-size: 0.9rem;
         }
@@ -2302,23 +2301,61 @@ PAGINA_JOGADORES = """
         .linha-item b { color: #3fb950; }
         .binario-texto { font-size: 0.88rem; color: #c9d1d9; }
         .binario-texto b { color: #3fb950; }
-        .separador { border: none; border-top: 1px solid #21262d; margin: 28px 0; }
-        .clubes-titulo { color: #8b949e; font-size: 0.8rem; margin-bottom: 10px; }
+        .nenhum-resultado { display: none; }
+
+        /* coluna 1: clubes (busca + lista, igual /time/<id>) */
         .clube-btn {
             display: flex; align-items: center; gap: 12px;
             background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 14px 20px; margin-bottom: 12px; text-decoration: none;
+            padding: 12px 16px; margin-bottom: 10px; text-decoration: none;
             color: #e6edf3; transition: border-color 0.15s;
         }
         .clube-btn:hover { border-color: #58a6ff; }
         .clube-selo {
-            width: 40px; height: 40px; border-radius: 50%;
+            width: 34px; height: 34px; border-radius: 50%;
             background: linear-gradient(135deg, #333 50%, #eee 50%);
             flex-shrink: 0; object-fit: contain;
         }
-        .clube-nome { font-weight: 700; font-size: 1rem; }
-        .clube-sub { color: #8b949e; font-size: 0.78rem; }
-        .nenhum-resultado { display: none; }
+        .clube-nome { font-weight: 700; font-size: 0.92rem; }
+        .clube-sub { color: #8b949e; font-size: 0.75rem; }
+        .paginacao {
+            display: flex; align-items: center; justify-content: center; gap: 14px;
+            margin-top: 4px; font-size: 0.82rem; color: #8b949e;
+        }
+        .btn-pagina {
+            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+            border-radius: 8px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer;
+        }
+        .btn-pagina:hover:not(:disabled) { border-color: #58a6ff; }
+        .btn-pagina:disabled { opacity: 0.35; cursor: default; }
+
+        /* coluna 3: líderes de estatísticas */
+        .lider-card {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 16px; margin-bottom: 16px;
+        }
+        .lider-titulo {
+            display: inline-block; padding: 4px 14px; border-radius: 999px;
+            font-size: 0.78rem; font-weight: 700; margin-bottom: 12px;
+        }
+        .lider-cor-0 { background: #9e6a0322; color: #d29922; }
+        .lider-cor-1 { background: #a371f722; color: #a371f7; }
+        .lider-cor-2 { background: #39c5cf22; color: #39c5cf; }
+        .lider-cor-3 { background: #3fb95022; color: #3fb950; }
+        .lider-cor-4 { background: #f8514922; color: #f85149; }
+        .lider-cor-5 { background: #db61a222; color: #db61a2; }
+        .tabela-lider { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+        .tabela-lider th { text-align: left; color: #8b949e; font-weight: 600; padding: 4px 6px; }
+        .tabela-lider th:not(:first-child), .tabela-lider td:not(:first-child) { text-align: right; }
+        .tabela-lider td { padding: 6px; font-weight: 600; border-top: 1px solid #21262d; }
+        .vazio-pequeno { color: #8b949e; font-size: 0.8rem; font-style: italic; }
+
+        .grid-jogadores {
+            display: grid; grid-template-columns: 1fr 1.5fr 1fr; gap: 22px; align-items: start; margin-top: 12px;
+        }
+        @media (max-width: 1000px) {
+            .grid-jogadores { grid-template-columns: 1fr; }
+        }
         """ + NAV_CSS + """
     </style>
 </head>
@@ -2328,65 +2365,106 @@ PAGINA_JOGADORES = """
         Procurando estatística do TIME inteiro? <a href="/times">Ver Estatísticas de Times →</a></p>
     {{ nav_html|safe }}
 
-    <input type="text" class="busca" id="busca" placeholder="Buscar jogador por nome (ex: Yuri Alberto)..." onkeyup="filtrar()">
-
-    {% if clubes %}
-    <div class="clubes-titulo">Ou navegue por clube (elenco completo + última escalação):</div>
-        {% for c in clubes %}
-        <a href="/clube/{{ c.id }}" class="clube-btn">
-            {% if c.escudo_url %}
-            <img src="{{ c.escudo_url }}" alt="{{ c.nome }}" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
+    <div class="grid-jogadores">
+        <div class="coluna-clubes">
+            <input type="text" class="busca" id="busca-time" placeholder="Buscar times..." onkeyup="filtrarTimes()">
+            <div id="lista-times">
+            {% if clubes %}
+                {% for c in clubes %}
+                <a href="/clube/{{ c.id }}" class="clube-btn item-time item-pagina">
+                    {% if c.escudo_url %}
+                    <img src="{{ c.escudo_url }}" alt="{{ c.nome }}" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
+                    {% else %}
+                    <div class="clube-selo"></div>
+                    {% endif %}
+                    <div>
+                        <div class="clube-nome">{{ c.nome }}</div>
+                        <div class="clube-sub">Ver elenco e última escalação →</div>
+                    </div>
+                </a>
+                {% endfor %}
             {% else %}
-            <div class="clube-selo"></div>
+                <div class="vazio">Nenhum clube rastreado ainda.</div>
             {% endif %}
-            <div>
-                <div class="clube-nome">{{ c.nome }}</div>
-                <div class="clube-sub">Ver elenco e última escalação →</div>
             </div>
-        </a>
-        {% endfor %}
-    <hr class="separador">
-    {% endif %}
-
-    <div id="lista">
-    {% if jogadores %}
-        {% for j in jogadores %}
-        <div class="cartao jogador-card">
-            <div class="nome-jogador">{{ j.nome }} <span class="nome-jogador-time">· {{ j.time_nome }}</span></div>
-
-            {% if j.cartao %}
-            <div class="bloco">
-                <div class="bloco-titulo">Cartão</div>
-                <div class="binario-texto">Recebeu cartão em <b>{{ j.cartao.frequencia }}%</b> dos últimos
-                    {{ j.cartao.jogos_analisados }} jogos</div>
-            </div>
-            {% endif %}
-
-            {% for bloco in j.blocos_linha %}
-            <div class="bloco">
-                <div class="bloco-titulo">{{ bloco.titulo }}</div>
-                <div class="linhas-grid">
-                    {% for item in bloco.itens %}
-                    <div class="linha-item">+{{ item.linha }}: <b>{{ item.frequencia }}%</b></div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endfor %}
-
-            {% if j.impedimento %}
-            <div class="bloco">
-                <div class="bloco-titulo">Impedimento</div>
-                <div class="binario-texto">Ficou em impedimento em <b>{{ j.impedimento.frequencia }}%</b> dos
-                    últimos {{ j.impedimento.jogos_analisados }} jogos</div>
+            <div class="vazio" id="nenhum-resultado-time" style="display:none;">Nenhum time encontrado com esse nome.</div>
+            {% if clubes|length > 10 %}
+            <div class="paginacao">
+                <button class="btn-pagina" id="anterior-lista-times" onclick="mudarPagina('lista-times', -1)">← Anterior</button>
+                <span id="label-lista-times"></span>
+                <button class="btn-pagina" id="proximo-lista-times" onclick="mudarPagina('lista-times', 1)">Próxima →</button>
             </div>
             {% endif %}
         </div>
-        {% endfor %}
-    {% else %}
-        <div class="vazio">Ainda não há padrões calculados pra nenhum jogador ainda.</div>
-    {% endif %}
+
+        <div class="coluna-jogadores">
+            <input type="text" class="busca" id="busca" placeholder="Buscar jogador por nome (ex: Yuri Alberto)..." onkeyup="filtrar()">
+            <div id="lista">
+            {% if jogadores %}
+                {% for j in jogadores %}
+                <div class="cartao jogador-card">
+                    <div class="nome-jogador">{{ j.nome }} <span class="nome-jogador-time">· {{ j.time_nome }}</span></div>
+
+                    {% if j.cartao %}
+                    <div class="bloco">
+                        <div class="bloco-titulo">Cartão</div>
+                        <div class="binario-texto">Recebeu cartão em <b>{{ j.cartao.frequencia }}%</b> dos últimos
+                            {{ j.cartao.jogos_analisados }} jogos</div>
+                    </div>
+                    {% endif %}
+
+                    {% for bloco in j.blocos_linha %}
+                    <div class="bloco">
+                        <div class="bloco-titulo">{{ bloco.titulo }}</div>
+                        <div class="linhas-grid">
+                            {% for item in bloco.itens %}
+                            <div class="linha-item">+{{ item.linha }}: <b>{{ item.frequencia }}%</b></div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+
+                    {% if j.impedimento %}
+                    <div class="bloco">
+                        <div class="bloco-titulo">Impedimento</div>
+                        <div class="binario-texto">Ficou em impedimento em <b>{{ j.impedimento.frequencia }}%</b> dos
+                            últimos {{ j.impedimento.jogos_analisados }} jogos</div>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="vazio">Ainda não há padrões calculados pra nenhum jogador ainda.</div>
+            {% endif %}
+            </div>
+            <div class="vazio nenhum-resultado" id="nenhum-resultado">Nenhum jogador encontrado com esse nome.</div>
+        </div>
+
+        <div class="coluna-lideres">
+            <div class="titulo-coluna">Líderes de Estatísticas do Campeonato</div>
+            {% for l in lideres %}
+            <div class="lider-card">
+                <div class="lider-titulo lider-cor-{{ loop.index0 % 6 }}">{{ l.titulo }}</div>
+                {% if l.jogador_nome %}
+                <table class="tabela-lider">
+                    <thead>
+                        <tr><th>Jogador</th><th>Últimos 5 jogos</th><th>Total</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ l.jogador_nome }}</td>
+                            <td>{{ l.total_5 }}</td>
+                            <td>{{ l.total }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="vazio-pequeno">Ainda não há dados suficientes pra essa categoria.</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
     </div>
-    <div class="vazio nenhum-resultado" id="nenhum-resultado">Nenhum jogador encontrado com esse nome.</div>
 
     <script>
         function filtrar() {
@@ -2401,6 +2479,59 @@ PAGINA_JOGADORES = """
             document.getElementById('nenhum-resultado').style.display =
                 (termo && visiveis === 0) ? '' : 'none';
         }
+
+        function filtrarTimes() {
+            const termo = document.getElementById('busca-time').value.toLowerCase();
+            let visiveis = 0;
+            document.querySelectorAll('.item-time').forEach(function(card) {
+                const nome = card.querySelector('.clube-nome').textContent.toLowerCase();
+                const bate = nome.includes(termo);
+                card.dataset.escondidoBusca = bate ? '0' : '1';
+                if (bate) visiveis++;
+            });
+            document.getElementById('nenhum-resultado-time').style.display = (termo && visiveis === 0) ? '' : 'none';
+            paginaAtual['lista-times'] = 0;
+            renderizarPagina('lista-times');
+        }
+
+        const TAMANHO_PAGINA = 10;
+        const paginaAtual = {};
+
+        function totalPaginas(listaId) {
+            let n = 0;
+            document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
+                if (item.dataset.escondidoBusca !== '1') n++;
+            });
+            return Math.max(1, Math.ceil(n / TAMANHO_PAGINA));
+        }
+
+        function renderizarPagina(listaId) {
+            const pagina = paginaAtual[listaId] || 0;
+            let visivelIndice = 0;
+            document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
+                if (item.dataset.escondidoBusca === '1') { item.style.display = 'none'; return; }
+                const paginaDoItem = Math.floor(visivelIndice / TAMANHO_PAGINA);
+                item.style.display = (paginaDoItem === pagina) ? '' : 'none';
+                visivelIndice++;
+            });
+            const total = totalPaginas(listaId);
+            const label = document.getElementById('label-' + listaId);
+            if (label) label.textContent = 'Página ' + (pagina + 1) + ' de ' + total;
+            const btnAnterior = document.getElementById('anterior-' + listaId);
+            const btnProximo = document.getElementById('proximo-' + listaId);
+            if (btnAnterior) btnAnterior.disabled = (pagina === 0);
+            if (btnProximo) btnProximo.disabled = (pagina >= total - 1);
+        }
+
+        function mudarPagina(listaId, direcao) {
+            const total = totalPaginas(listaId);
+            let pagina = (paginaAtual[listaId] || 0) + direcao;
+            pagina = Math.max(0, Math.min(total - 1, pagina));
+            paginaAtual[listaId] = pagina;
+            renderizarPagina(listaId);
+        }
+
+        renderizarPagina('lista-times');
     </script>
 </body>
 </html>
@@ -3649,6 +3780,98 @@ def buscar_lideres_estatisticas(cur):
     return lideres
 
 
+# ---------- Líderes de estatísticas por JOGADOR (times rastreados) ----------
+# nome do rótulo -> coluna correspondente em jogador_estatisticas_jogo
+# (cartão é especial: soma amarelo + vermelho, não é uma coluna única)
+CATEGORIAS_LIDERANCA_JOGADOR = [
+    ("chutes", "Chutes (Total)"),
+    ("chutes_no_gol", "Chutes no Gol"),
+    ("impedimentos", "Impedimento"),
+    ("faltas_cometidas", "Faltas Cometidas"),
+    ("desarmes", "Desarmes"),
+    ("cartao", "Cartões"),
+]
+
+
+def buscar_total_ultimos_5_jogos_jogador(cur, jogador_id, coluna):
+    """Soma bruta (não média) da estatística do jogador só nos últimos 5
+    jogos em que ele entrou em campo - pra mostrar ao lado do total geral
+    no card de líder."""
+    if coluna == "cartao":
+        cur.execute(
+            """
+            SELECT jeg.cartao_amarelo + jeg.cartao_vermelho
+            FROM jogador_estatisticas_jogo jeg
+            JOIN jogos g ON g.id = jeg.jogo_id
+            WHERE jeg.jogador_id = %s
+            ORDER BY g.data_jogo DESC LIMIT 5
+            """,
+            (jogador_id,),
+        )
+    else:
+        cur.execute(
+            f"""
+            SELECT jeg.{coluna}
+            FROM jogador_estatisticas_jogo jeg
+            JOIN jogos g ON g.id = jeg.jogo_id
+            WHERE jeg.jogador_id = %s AND jeg.{coluna} IS NOT NULL
+            ORDER BY g.data_jogo DESC LIMIT 5
+            """,
+            (jogador_id,),
+        )
+    valores = [row[0] for row in cur.fetchall() if row[0] is not None]
+    return int(sum(valores))
+
+
+def buscar_lideres_estatisticas_jogadores(cur):
+    """Pra cada categoria, acha qual JOGADOR (de time rastreado, ativo) tem
+    o maior TOTAL somado - diferente da liderança de time (que usa média),
+    aqui o mockup pede número bruto mesmo (ex: "10 nos últimos 5, 60 no
+    total"). A tabela jogador_estatisticas_jogo já é podada pra manter só
+    os últimos 50 jogos por jogador (ver limpar_historico.py), então somar
+    tudo que está na tabela já equivale a somar sobre essa janela, sem
+    precisar de LIMIT explícito aqui."""
+    lideres = []
+    for coluna, titulo in CATEGORIAS_LIDERANCA_JOGADOR:
+        if coluna == "cartao":
+            cur.execute(
+                """
+                SELECT j.id, j.nome, t.nome, SUM(jeg.cartao_amarelo + jeg.cartao_vermelho) AS total
+                FROM jogador_estatisticas_jogo jeg
+                JOIN jogadores j ON j.id = jeg.jogador_id
+                JOIN times t ON t.id = j.time_atual_id
+                WHERE j.ativo = TRUE AND t.rastreado = TRUE
+                GROUP BY j.id, j.nome, t.nome
+                ORDER BY total DESC
+                LIMIT 1
+                """
+            )
+        else:
+            cur.execute(
+                f"""
+                SELECT j.id, j.nome, t.nome, SUM(jeg.{coluna}) AS total
+                FROM jogador_estatisticas_jogo jeg
+                JOIN jogadores j ON j.id = jeg.jogador_id
+                JOIN times t ON t.id = j.time_atual_id
+                WHERE j.ativo = TRUE AND t.rastreado = TRUE AND jeg.{coluna} IS NOT NULL
+                GROUP BY j.id, j.nome, t.nome
+                ORDER BY total DESC
+                LIMIT 1
+                """
+            )
+        row = cur.fetchone()
+        if not row or row[3] is None:
+            lideres.append({"titulo": titulo, "coluna": coluna, "jogador_nome": None})
+            continue
+        jogador_id, jogador_nome, time_nome, total = row
+        lideres.append({
+            "titulo": titulo, "coluna": coluna, "jogador_nome": jogador_nome,
+            "time_nome": time_nome, "total": int(total),
+            "total_5": buscar_total_ultimos_5_jogos_jogador(cur, jogador_id, coluna),
+        })
+    return lideres
+
+
 def buscar_estatisticas_time(cur, time_id):
     """NOVO (estatísticas de time): monta a frequência histórica de
     escanteios, chutes (total e no gol), faltas, cartões, impedimentos,
@@ -4020,13 +4243,14 @@ def jogadores():
             {"id": time_id, "nome": nome, "escudo_url": buscar_escudo_url(cur, nome)}
             for time_id, nome in times_rastreados
         ]
+        lideres = buscar_lideres_estatisticas_jogadores(cur)
         banca_atual = buscar_banca(cur, session["usuario_id"])
         cur.close()
     finally:
         conn.close()
 
     return render_template_string(
-        PAGINA_JOGADORES, clubes=clubes, jogadores=jogadores_lista,
+        PAGINA_JOGADORES, clubes=clubes, jogadores=jogadores_lista, lideres=lideres,
         nav_html=barra_navegacao("jogadores", round(banca_atual, 2)),
     )
 
