@@ -2313,7 +2313,7 @@ PAGINA_JOGADORES = """
         .clube-btn:hover { border-color: #58a6ff; }
         .clube-selo {
             width: 34px; height: 34px; border-radius: 50%;
-            background: linear-gradient(135deg, #333 50%, #eee 50%);
+            background: transparent;
             flex-shrink: 0; object-fit: contain;
         }
         .clube-nome { font-weight: 700; font-size: 0.92rem; }
@@ -2453,7 +2453,7 @@ PAGINA_JOGADORES = """
                     <tbody>
                         <tr>
                             <td>{{ l.jogador_nome }}</td>
-                            <td>{{ l.total_5 }}</td>
+                            <td>{{ l.media_5 }}</td>
                             <td>{{ l.total }}</td>
                         </tr>
                     </tbody>
@@ -2554,7 +2554,7 @@ PAGINA_CLUBE = """
         h1 { font-size: 1.5rem; margin: 0 0 4px; display: flex; align-items: center; gap: 12px; }
         .selo-titulo {
             width: 34px; height: 34px; border-radius: 50%;
-            background: linear-gradient(135deg, #333 50%, #eee 50%);
+            background: transparent;
             flex-shrink: 0; object-fit: contain;
         }
         .subtitulo { color: #8b949e; margin: 0 0 20px; font-size: 0.88rem; }
@@ -3079,7 +3079,7 @@ PAGINA_TIMES = """
         .clube-btn:hover { border-color: #58a6ff; }
         .clube-selo {
             width: 40px; height: 40px; border-radius: 50%;
-            background: linear-gradient(135deg, #333 50%, #eee 50%);
+            background: transparent;
             flex-shrink: 0; object-fit: contain;
         }
         .clube-nome { font-weight: 700; font-size: 1rem; }
@@ -3278,7 +3278,7 @@ PAGINA_TIME = """
         .clube-btn.item-ativo { background: #1f6feb26; border: 1px solid #58a6ff88; }
         .clube-selo {
             width: 34px; height: 34px; border-radius: 50%;
-            background: linear-gradient(135deg, #333 50%, #eee 50%);
+            background: transparent;
             flex-shrink: 0; object-fit: contain;
         }
         .clube-nome { font-weight: 700; font-size: 0.92rem; }
@@ -3297,7 +3297,7 @@ PAGINA_TIME = """
         /* coluna 2: cabeçalho do time + blocos de estatística */
         .selo-titulo {
             width: 34px; height: 34px; border-radius: 50%;
-            background: linear-gradient(135deg, #333 50%, #eee 50%);
+            background: transparent;
             flex-shrink: 0; object-fit: contain;
         }
         .cabecalho-time {
@@ -3793,10 +3793,11 @@ CATEGORIAS_LIDERANCA_JOGADOR = [
 ]
 
 
-def buscar_total_ultimos_5_jogos_jogador(cur, jogador_id, coluna):
-    """Soma bruta (não média) da estatística do jogador só nos últimos 5
-    jogos em que ele entrou em campo - pra mostrar ao lado do total geral
-    no card de líder."""
+def buscar_media_ultimos_5_jogos_jogador(cur, jogador_id, coluna):
+    """Média (não soma) da estatística do jogador só nos últimos 5 jogos em
+    que ele entrou em campo - mesmo critério usado na liderança de time
+    (buscar_media_ultimos_5_jogos), pra manter as duas tabelas de líderes
+    consistentes entre si."""
     if coluna == "cartao":
         cur.execute(
             """
@@ -3820,7 +3821,9 @@ def buscar_total_ultimos_5_jogos_jogador(cur, jogador_id, coluna):
             (jogador_id,),
         )
     valores = [row[0] for row in cur.fetchall() if row[0] is not None]
-    return int(sum(valores))
+    if not valores:
+        return 0
+    return round(sum(valores) / len(valores), 2)
 
 
 def buscar_lideres_estatisticas_jogadores(cur):
@@ -3867,7 +3870,7 @@ def buscar_lideres_estatisticas_jogadores(cur):
         lideres.append({
             "titulo": titulo, "coluna": coluna, "jogador_nome": jogador_nome,
             "time_nome": time_nome, "total": int(total),
-            "total_5": buscar_total_ultimos_5_jogos_jogador(cur, jogador_id, coluna),
+            "media_5": buscar_media_ultimos_5_jogos_jogador(cur, jogador_id, coluna),
         })
     return lideres
 
