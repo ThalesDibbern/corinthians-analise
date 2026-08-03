@@ -278,6 +278,29 @@ PAGINA = """
             gap: 8px;
         }
         .jogo { font-weight: 600; font-size: 0.92rem; }
+        .colunas-resultado {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start;
+            margin-bottom: 28px;
+        }
+        @media (max-width: 640px) {
+            .colunas-resultado { grid-template-columns: 1fr; }
+        }
+        .coluna-cabecalho {
+            border-radius: 10px; padding: 10px 16px; font-weight: 700; font-size: 0.92rem;
+            margin-bottom: 12px; text-align: center;
+        }
+        .coluna-azul { background: #1f6feb33; color: #58a6ff; border: 1px solid #58a6ff55; }
+        .coluna-roxa { background: #a371f722; color: #a371f7; border: 1px solid #a371f755; }
+        .paginacao {
+            display: flex; align-items: center; justify-content: center; gap: 14px;
+            margin-top: 4px; font-size: 0.82rem; color: #8b949e;
+        }
+        .btn-pagina {
+            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+            border-radius: 8px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer;
+        }
+        .btn-pagina:hover:not(:disabled) { border-color: #58a6ff; }
+        .btn-pagina:disabled { opacity: 0.35; cursor: default; }
         .casa {
             background: #1f6feb22;
             color: #58a6ff;
@@ -443,35 +466,108 @@ PAGINA = """
         {% endif %}
     </div>
 
-    {% if buscou %}
-        {% if combinacoes %}
-            {% for c in combinacoes %}
-            <div class="cartao">
-                <div class="cartao-topo">
-                    <span class="jogo">{{ c.data_jogo }} · {{ c.nosso_time }} x {{ c.adversario }}</span>
-                    <span class="casa">{{ c.casa_aposta }}</span>
-                    <span class="odd-tag">ODD {{ c.odd_combinada }}</span>
-                </div>
-                <div class="descricao">{{ c.descricao }}</div>
-                <div class="metricas">
-                    <span>Probabilidade histórica: <b>{{ c.probabilidade_combinada }}%</b></span>
-                    <span>Valor esperado: <b>{{ c.valor_esperado }}</b></span>
-                </div>
-                {% if c.ja_apostado %}
-                <div class="ja-apostado">💰 R$ {{ "%.2f"|format(c.ja_apostado) }} já apostado nessa odd</div>
-                {% endif %}
-                <form method="POST" action="/salvar-aposta" class="salvar-linha">
-                    <input type="hidden" name="descricao" value="{{ c.descricao }}">
-                    <input type="hidden" name="casa_aposta" value="{{ c.casa_aposta }}">
-                    <input type="hidden" name="odd_combinada" value="{{ c.odd_combinada }}">
-                    <input type="hidden" name="probabilidade_combinada" value="{{ c.probabilidade_combinada }}">
-                    <input type="hidden" name="pernas" value='{{ c.pernas_json }}'>
-                    <input type="hidden" name="voltar" value="/?odd_min={{ odd_min }}&odd_max={{ odd_max }}">
-                    <input type="number" step="0.01" min="0.01" name="valor_apostado" placeholder="Valor (R$)" required>
-                    <button type="submit" class="btn-salvar">💾 Salvar</button>
-                </form>
+    {% macro cartao_combo(c) %}
+        <div class="cartao item-pagina">
+            <div class="cartao-topo">
+                <span class="jogo">{{ c.data_jogo }} · {{ c.nosso_time }} x {{ c.adversario }}</span>
+                <span class="casa">{{ c.casa_aposta }}</span>
+                <span class="odd-tag">ODD {{ c.odd_combinada }}</span>
             </div>
-            {% endfor %}
+            <div class="descricao">{{ c.descricao }}</div>
+            <div class="metricas">
+                <span>Probabilidade histórica: <b>{{ c.probabilidade_combinada }}%</b></span>
+                <span>Valor esperado: <b>{{ c.valor_esperado }}</b></span>
+            </div>
+            {% if c.ja_apostado %}
+            <div class="ja-apostado">💰 R$ {{ "%.2f"|format(c.ja_apostado) }} já apostado nessa odd</div>
+            {% endif %}
+            <form method="POST" action="/salvar-aposta" class="salvar-linha">
+                <input type="hidden" name="descricao" value="{{ c.descricao }}">
+                <input type="hidden" name="casa_aposta" value="{{ c.casa_aposta }}">
+                <input type="hidden" name="odd_combinada" value="{{ c.odd_combinada }}">
+                <input type="hidden" name="probabilidade_combinada" value="{{ c.probabilidade_combinada }}">
+                <input type="hidden" name="pernas" value='{{ c.pernas_json }}'>
+                <input type="hidden" name="voltar" value="/?odd_min={{ odd_min }}&odd_max={{ odd_max }}">
+                <input type="number" step="0.01" min="0.01" name="valor_apostado" placeholder="Valor (R$)" required>
+                <button type="submit" class="btn-salvar">💾 Salvar</button>
+            </form>
+        </div>
+    {% endmacro %}
+
+    {% if buscou %}
+        {% if individuais or multiplas %}
+        <div class="colunas-resultado">
+            <div class="coluna">
+                <div class="coluna-cabecalho coluna-azul">🎯 Odds Individuais ({{ individuais|length }})</div>
+                <div id="lista-individuais">
+                    {% if individuais %}
+                        {% for c in individuais %}{{ cartao_combo(c) }}{% endfor %}
+                    {% else %}
+                        <div class="vazio">Nenhuma odd individual disponível nessa faixa.</div>
+                    {% endif %}
+                </div>
+                {% if individuais|length > 10 %}
+                <div class="paginacao">
+                    <button class="btn-pagina" id="anterior-lista-individuais" onclick="mudarPagina('lista-individuais', -1)">← Anterior</button>
+                    <span id="label-lista-individuais"></span>
+                    <button class="btn-pagina" id="proximo-lista-individuais" onclick="mudarPagina('lista-individuais', 1)">Próxima →</button>
+                </div>
+                {% endif %}
+            </div>
+            <div class="coluna">
+                <div class="coluna-cabecalho coluna-roxa">🧩 Múltiplas ({{ multiplas|length }})</div>
+                <div id="lista-multiplas">
+                    {% if multiplas %}
+                        {% for c in multiplas %}{{ cartao_combo(c) }}{% endfor %}
+                    {% else %}
+                        <div class="vazio">Nenhuma múltipla disponível nessa faixa.</div>
+                    {% endif %}
+                </div>
+                {% if multiplas|length > 10 %}
+                <div class="paginacao">
+                    <button class="btn-pagina" id="anterior-lista-multiplas" onclick="mudarPagina('lista-multiplas', -1)">← Anterior</button>
+                    <span id="label-lista-multiplas"></span>
+                    <button class="btn-pagina" id="proximo-lista-multiplas" onclick="mudarPagina('lista-multiplas', 1)">Próxima →</button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <script>
+            const TAMANHO_PAGINA = 10;
+            const paginaAtual = {};
+
+            function totalPaginas(listaId) {
+                const n = document.querySelectorAll('#' + listaId + ' .item-pagina').length;
+                return Math.max(1, Math.ceil(n / TAMANHO_PAGINA));
+            }
+
+            function renderizarPagina(listaId) {
+                const pagina = paginaAtual[listaId] || 0;
+                const itens = document.querySelectorAll('#' + listaId + ' .item-pagina');
+                itens.forEach(function(item, i) {
+                    const paginaDoItem = Math.floor(i / TAMANHO_PAGINA);
+                    item.style.display = (paginaDoItem === pagina) ? '' : 'none';
+                });
+                const total = totalPaginas(listaId);
+                const label = document.getElementById('label-' + listaId);
+                if (label) label.textContent = 'Página ' + (pagina + 1) + ' de ' + total;
+                const btnAnterior = document.getElementById('anterior-' + listaId);
+                const btnProximo = document.getElementById('proximo-' + listaId);
+                if (btnAnterior) btnAnterior.disabled = (pagina === 0);
+                if (btnProximo) btnProximo.disabled = (pagina >= total - 1);
+            }
+
+            function mudarPagina(listaId, direcao) {
+                const total = totalPaginas(listaId);
+                let pagina = (paginaAtual[listaId] || 0) + direcao;
+                pagina = Math.max(0, Math.min(total - 1, pagina));
+                paginaAtual[listaId] = pagina;
+                renderizarPagina(listaId);
+            }
+
+            ['lista-individuais', 'lista-multiplas'].forEach(renderizarPagina);
+        </script>
         {% else %}
             <div class="vazio">
                 <div class="vazio-titulo">Nenhuma recomendação disponível no momento</div>
@@ -3284,9 +3380,16 @@ def index():
     finally:
         conn.close()
 
+    # NOVO: separa odds individuais (1 perna) de múltiplas (2+ pernas) em
+    # listas próprias, uma pra cada coluna (ver PAGINA) - antes vinham
+    # todas misturadas na mesma lista, ordenadas só por probabilidade,
+    # dificultando separar rapidamente "aposta simples" de "combinação".
+    individuais = [c for c in combinacoes if len(c["pernas"]) == 1]
+    multiplas = [c for c in combinacoes if len(c["pernas"]) > 1]
+
     return render_template_string(
         PAGINA, odd_min=odd_min, odd_max=odd_max, buscou=buscou,
-        combinacoes=combinacoes, motivo=motivo, banca_atual=round(banca_atual, 2),
+        individuais=individuais, multiplas=multiplas, motivo=motivo, banca_atual=round(banca_atual, 2),
         ultima_atualizacao_odds=ultima_atualizacao_odds,
     )
 
