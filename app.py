@@ -2402,7 +2402,7 @@ PAGINA_JOGADORES = """
             <div id="lista">
             {% if jogadores %}
                 {% for j in jogadores %}
-                <div class="cartao jogador-card">
+                <div class="cartao jogador-card item-pagina">
                     <div class="nome-jogador">{{ j.nome }} <span class="nome-jogador-time">· {{ j.time_nome }}</span></div>
 
                     {% if j.cartao %}
@@ -2438,6 +2438,13 @@ PAGINA_JOGADORES = """
             {% endif %}
             </div>
             <div class="vazio nenhum-resultado" id="nenhum-resultado">Nenhum jogador encontrado com esse nome.</div>
+            {% if jogadores|length > 10 %}
+            <div class="paginacao">
+                <button class="btn-pagina" id="anterior-lista" onclick="mudarPagina('lista', -1)">← Anterior</button>
+                <span id="label-lista"></span>
+                <button class="btn-pagina" id="proximo-lista" onclick="mudarPagina('lista', 1)">Próxima →</button>
+            </div>
+            {% endif %}
         </div>
 
         <div class="coluna-lideres">
@@ -2473,11 +2480,13 @@ PAGINA_JOGADORES = """
             document.querySelectorAll('.jogador-card').forEach(function(card) {
                 const nome = card.querySelector('.nome-jogador').textContent.toLowerCase();
                 const bate = nome.includes(termo);
-                card.style.display = bate ? '' : 'none';
+                card.dataset.escondidoBusca = bate ? '0' : '1';
                 if (bate) visiveis++;
             });
             document.getElementById('nenhum-resultado').style.display =
                 (termo && visiveis === 0) ? '' : 'none';
+            paginaAtual['lista'] = 0;
+            renderizarPagina('lista');
         }
 
         function filtrarTimes() {
@@ -2532,6 +2541,7 @@ PAGINA_JOGADORES = """
         }
 
         renderizarPagina('lista-times');
+        renderizarPagina('lista');
     </script>
 </body>
 </html>
@@ -2578,6 +2588,16 @@ PAGINA_CLUBE = """
         .btn-geral:hover { border-color: #58a6ff; }
         .grupo-posicao { margin-bottom: 20px; }
         .grupo-posicao-titulo { font-weight: 700; font-size: 0.95rem; margin-bottom: 8px; }
+        .paginacao {
+            display: flex; align-items: center; justify-content: center; gap: 14px;
+            margin: 14px 0 4px; font-size: 0.82rem; color: #8b949e;
+        }
+        .btn-pagina {
+            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+            border-radius: 8px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer;
+        }
+        .btn-pagina:hover:not(:disabled) { border-color: #58a6ff; }
+        .btn-pagina:disabled { opacity: 0.35; cursor: default; }
         .lista-elenco { list-style: none; margin: 0; padding: 0; }
         .lista-elenco li {
             padding: 6px 0 6px 8px; font-size: 0.88rem; color: #c9d1d9;
@@ -2784,7 +2804,7 @@ PAGINA_CLUBE = """
     <div id="lista">
     {% if jogadores %}
         {% for j in jogadores %}
-        <div class="cartao jogador-card">
+        <div class="cartao jogador-card item-pagina">
             <div class="nome-jogador">{{ j.nome }}</div>
 
             {% if j.cartao %}
@@ -2855,6 +2875,13 @@ PAGINA_CLUBE = """
         <div class="vazio">Ainda não há padrões calculados pra nenhum jogador desse clube.</div>
     {% endif %}
     </div>
+    {% if jogadores|length > 10 %}
+    <div class="paginacao">
+        <button class="btn-pagina" id="anterior-lista" onclick="mudarPagina('lista', -1)">← Anterior</button>
+        <span id="label-lista"></span>
+        <button class="btn-pagina" id="proximo-lista" onclick="mudarPagina('lista', 1)">Próxima →</button>
+    </div>
+    {% endif %}
         </div>
 
         <div class="coluna-lideres">
@@ -2928,13 +2955,54 @@ PAGINA_CLUBE = """
     {% endif %}
 
     <script>
+        const TAMANHO_PAGINA = 10;
+        const paginaAtual = {};
+
+        function totalPaginas(listaId) {
+            let n = 0;
+            document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
+                if (item.dataset.escondidoBusca !== '1') n++;
+            });
+            return Math.max(1, Math.ceil(n / TAMANHO_PAGINA));
+        }
+
+        function renderizarPagina(listaId) {
+            const pagina = paginaAtual[listaId] || 0;
+            let visivelIndice = 0;
+            document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
+                if (item.dataset.escondidoBusca === '1') { item.style.display = 'none'; return; }
+                const paginaDoItem = Math.floor(visivelIndice / TAMANHO_PAGINA);
+                item.style.display = (paginaDoItem === pagina) ? '' : 'none';
+                visivelIndice++;
+            });
+            const total = totalPaginas(listaId);
+            const label = document.getElementById('label-' + listaId);
+            if (label) label.textContent = 'Página ' + (pagina + 1) + ' de ' + total;
+            const btnAnterior = document.getElementById('anterior-' + listaId);
+            const btnProximo = document.getElementById('proximo-' + listaId);
+            if (btnAnterior) btnAnterior.disabled = (pagina === 0);
+            if (btnProximo) btnProximo.disabled = (pagina >= total - 1);
+        }
+
+        function mudarPagina(listaId, direcao) {
+            const total = totalPaginas(listaId);
+            let pagina = (paginaAtual[listaId] || 0) + direcao;
+            pagina = Math.max(0, Math.min(total - 1, pagina));
+            paginaAtual[listaId] = pagina;
+            renderizarPagina(listaId);
+        }
+
         function filtrar() {
             const termo = document.getElementById('busca').value.toLowerCase();
             document.querySelectorAll('.jogador-card').forEach(function(card) {
                 const nome = card.querySelector('.nome-jogador').textContent.toLowerCase();
-                card.style.display = nome.includes(termo) ? '' : 'none';
+                card.dataset.escondidoBusca = nome.includes(termo) ? '0' : '1';
             });
+            paginaAtual['lista'] = 0;
+            renderizarPagina('lista');
         }
+
+        renderizarPagina('lista');
 
         function itensSelecionados() {
             return Array.from(document.querySelectorAll('.item-selecionavel:checked'));
@@ -4391,23 +4459,28 @@ def buscar_ultima_escalacao_titular(cur, time_id):
     return {"data_jogo": data_jogo, "adversario": adversario, "titulares": titulares}
 
 
-def buscar_proximo_jogo(cur, nome_time):
-    """NOVO: busca o próximo jogo AINDA NÃO disputado do time - usado pra
+def buscar_proximo_jogo(cur, time_id):
+    """Busca o próximo jogo AINDA NÃO disputado do time - usado pra
     associar apostas manuais de estatística de jogador a um jogo específico
     (necessário pra conseguir avaliar acerto/erro depois que o jogo
-    acontecer)."""
+    acontecer).
+    CORRIGIDO: antes filtrava por mandante_id/visitante_id, que são os
+    mesmos nas DUAS linhas que um jogo entre dois times rastreados gera
+    (uma por perspectiva - ver arquitetura multi-time na documentação).
+    Isso podia pegar a linha do ADVERSÁRIO por engano e mostrar "Santos x
+    Santos" na página do Santos (quando o adversário também é rastreado).
+    Agora filtra direto por `nosso_time_id`, que é único por perspectiva."""
     cur.execute(
         """
         SELECT j.id, j.data_jogo, j.adversario
         FROM jogos j
-        WHERE (j.mandante_id = (SELECT id FROM times WHERE nome = %s)
-            OR j.visitante_id = (SELECT id FROM times WHERE nome = %s))
+        WHERE j.nosso_time_id = %s
           AND ((j.datahora_jogo IS NOT NULL AND j.datahora_jogo >= NOW())
             OR (j.datahora_jogo IS NULL AND j.data_jogo >= CURRENT_DATE))
         ORDER BY COALESCE(j.datahora_jogo, j.data_jogo::timestamp) ASC
         LIMIT 1
         """,
-        (nome_time, nome_time),
+        (time_id,),
     )
     row = cur.fetchone()
     if not row:
@@ -4467,7 +4540,7 @@ def clube(time_id):
 
         lista = buscar_estatisticas_jogadores(cur, time_id)
         ultima_escalacao = buscar_ultima_escalacao_titular(cur, time_id)
-        proximo_jogo = buscar_proximo_jogo(cur, nome_clube)
+        proximo_jogo = buscar_proximo_jogo(cur, time_id)
         escudo_url = buscar_escudo_url(cur, nome_clube)
         elenco_por_posicao = buscar_elenco_por_posicao(cur, time_id)
         lideres_time = buscar_lideres_estatisticas_jogadores_time(cur, time_id)
