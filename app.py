@@ -194,9 +194,11 @@ def disparar_atualizacao_odds_railway():
     Se qualquer uma faltar, ou a chamada falhar, só loga no console e
     retorna False - a página continua funcionando normalmente com o que
     já estiver no banco, só sem conseguir disparar a atualização."""
-    token = os.environ.get("RAILWAY_API_TOKEN")
-    service_id = os.environ.get("RAILWAY_SERVICE_ID_ODDS")
-    environment_id = os.environ.get("RAILWAY_ENVIRONMENT_ID_ODDS")
+    # NOVO: mesmo .strip() de proteção contra espaço/quebra de linha
+    # sobrando (ver comentário equivalente em buscar_tabela_brasileirao)
+    token = (os.environ.get("RAILWAY_API_TOKEN") or "").strip()
+    service_id = (os.environ.get("RAILWAY_SERVICE_ID_ODDS") or "").strip()
+    environment_id = (os.environ.get("RAILWAY_ENVIRONMENT_ID_ODDS") or "").strip()
 
     if not (token and service_id and environment_id):
         print("[atualizacao_odds] RAILWAY_API_TOKEN/RAILWAY_SERVICE_ID_ODDS/RAILWAY_ENVIRONMENT_ID_ODDS "
@@ -3220,7 +3222,11 @@ def buscar_tabela_brasileirao():
     if cache["dados"] is not None and cache["dia"] == hoje:
         return cache["dados"]
 
-    api_key = os.environ.get("API_FOOTBALL_KEY")
+    # NOVO: .strip() de proteção - se a variável de ambiente vier com espaço
+    # ou quebra de linha sobrando no final (comum ao colar de algum lugar),
+    # isso quebrava a chamada HTTP inteira com um erro de "invalid header
+    # value" difícil de entender à primeira vista.
+    api_key = (os.environ.get("API_FOOTBALL_KEY") or "").strip()
     if not api_key:
         print("[tabela_brasileirao] API_FOOTBALL_KEY não configurada nesse serviço - "
               "sem isso não dá pra buscar a tabela do campeonato.")
