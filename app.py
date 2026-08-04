@@ -261,7 +261,7 @@ PAGINA = """
             font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
             background: #0d1117;
             color: #e6edf3;
-            max-width: 900px;
+            max-width: 1500px;
             margin: 0 auto;
             padding: 32px 20px 80px;
         }
@@ -921,7 +921,7 @@ PAGINA_HISTORICO = """
             font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
             background: #0d1117;
             color: #e6edf3;
-            max-width: 900px;
+            max-width: 1500px;
             margin: 0 auto;
             padding: 32px 20px 80px;
         }
@@ -1769,7 +1769,7 @@ PAGINA_ROI = """
         * { box-sizing: border-box; }
         body {
             font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-            background: #0d1117; color: #e6edf3; max-width: 900px;
+            background: #0d1117; color: #e6edf3; max-width: 1500px;
             margin: 0 auto; padding: 32px 20px 80px;
         }
         h1 { font-size: 1.5rem; margin: 0 0 4px; text-align: center; }
