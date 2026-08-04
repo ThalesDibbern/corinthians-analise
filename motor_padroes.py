@@ -1207,8 +1207,20 @@ def calcular_padroes_arbitro(cur):
     resultados = []
 
     for arbitro in arbitros:
+        # CORRIGIDO: quando dois times rastreados jogam entre si, o jogo
+        # gera 2 linhas em `jogos` (uma por perspectiva - arquitetura
+        # multi-time). Sem esse DISTINCT ON, esse jogo era contado 2x pro
+        # perfil do árbitro (2x nos jogos_analisados, 2x nos cartões/faltas
+        # somados via jogo_id), inflando artificialmente a média. Agora
+        # pega só 1 linha por jogo real (COALESCE cobre jogos antigos sem
+        # fixture_id_api preenchido, tratando cada um deles como único).
         cur.execute(
-            "SELECT id FROM jogos WHERE arbitro = %s AND data_jogo < CURRENT_DATE",
+            """
+            SELECT DISTINCT ON (COALESCE(fixture_id_api, id)) id
+            FROM jogos
+            WHERE arbitro = %s AND data_jogo < CURRENT_DATE
+            ORDER BY COALESCE(fixture_id_api, id), id
+            """,
             (arbitro,),
         )
         jogo_ids = [row[0] for row in cur.fetchall()]
