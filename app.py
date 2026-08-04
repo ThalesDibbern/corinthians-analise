@@ -3336,11 +3336,15 @@ PAGINA_TIMES = """
                             <td>{{ l.gols_contra }}</td>
                             <td>{{ l.saldo }}</td>
                             <td>
+                                {% if l.forma %}
                                 <div class="forma-cel">
                                     {% for r in l.forma %}
                                     <span class="bola-forma bola-{{ 'v' if r == 'W' else ('e' if r == 'D' else 'd') }}">{{ '✓' if r == 'W' else ('–' if r == 'D' else '✕') }}</span>
                                     {% endfor %}
                                 </div>
+                                {% else %}
+                                <span style="color:#8b949e; font-size:0.75rem;" title="A API-Football não mandou esse dado pra esse time">—</span>
+                                {% endif %}
                             </td>
                         </tr>
                         {% endfor %}
