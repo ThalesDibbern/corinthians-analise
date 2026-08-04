@@ -1196,6 +1196,15 @@ PAGINA_HISTORICO = """
     <p class="secao-subtitulo">Combinações de 2+ apostas com probabilidade histórica de {{ piso }}% ou mais, SÓ de jogos
         que já terminaram - é uma lista de referência pra ver como essas combinações teriam saído, não tem relação
         com sua banca/ROI nem botão de salvar (não dá pra apostar num jogo que já aconteceu).</p>
+    {% if resumo_multiplas.acertou + resumo_multiplas.errou > 0 %}
+    <p class="secao-subtitulo" style="margin-top: -8px;">
+        Nessa lista: <b style="color:#3fb950">{{ resumo_multiplas.acertou }} acerto(s)</b> ·
+        <b style="color:#f85149">{{ resumo_multiplas.errou }} erro(s)</b> ·
+        <b>{{ resumo_multiplas.taxa }}%</b> de acerto — <u>esse percentual é só entre as combinações que já
+        passaram no filtro de {{ piso }}%+; não soma com a taxa de acerto geral lá em cima, porque são grupos
+        diferentes (esse aqui é filtrado pra ser mais fácil, o de cima não é).</u>
+    </p>
+    {% endif %}
     {% endif %}
     {% for c in multiplas_destaque %}
         <div class="cartao">
@@ -1429,6 +1438,20 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
     return resultado_final[:15]
 
 
+def montar_resumo_multiplas(multiplas):
+    """NOVO: taxa de acerto só entre as "Múltiplas em Destaque" - de
+    propósito NUNCA somado com montar_resumo_historico(itens). Essa lista
+    é filtrada (só combinações com probabilidade histórica >= piso), então
+    é uma amostra enviesada pra cima - misturar com a taxa de acerto geral
+    daria um número mais bonito, mas enganoso, porque estaria comparando
+    coisas de populações diferentes (uma filtrada, a outra não)."""
+    acertou = sum(1 for c in multiplas if c["resultado"] == "acertou")
+    errou = sum(1 for c in multiplas if c["resultado"] == "errou")
+    total_avaliado = acertou + errou
+    taxa = round(100 * acertou / total_avaliado, 1) if total_avaliado else 0
+    return {"acertou": acertou, "errou": errou, "taxa": taxa}
+
+
 def buscar_multiplas_destaque(cur):
     """NOVO: múltiplas de jogos JÁ CONCLUÍDOS (não jogos futuros ainda
     ativos), com probabilidade histórica >= piso, mostrando o resultado
@@ -1464,11 +1487,12 @@ def historico():
     # montar_resumo_historico), em vez de uma contagem separada no banco -
     # os números do topo e das colunas nunca mais vão discordar.
     resumo = montar_resumo_historico(itens)
+    resumo_multiplas = montar_resumo_multiplas(multiplas_destaque)
 
     return render_template_string(
         PAGINA_HISTORICO, acertos=acertos, erros=erros, pendentes=pendentes,
         resumo=resumo, calibracao=calibracao,
-        multiplas_destaque=multiplas_destaque,
+        multiplas_destaque=multiplas_destaque, resumo_multiplas=resumo_multiplas,
         piso=PISO_PROBABILIDADE_MULTIPLAS_DESTAQUE,
         nav_html=barra_navegacao("historico", round(banca_atual, 2)),
     )
