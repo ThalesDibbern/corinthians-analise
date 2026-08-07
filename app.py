@@ -234,18 +234,23 @@ def disparar_atualizacao_odds_railway():
 def processar_atualizacao_odds(cur, usuario_id, forcar):
     """Decide se dispara o Run Now do refreshing-freedom (dispara se nunca
     rodou, se já faz mais de 1h do último disparo, ou se `forcar=True`) e
-    devolve o horário (local, string HH:MM) do último disparo conhecido pra
-    mostrar na tela - já considerando o disparo que acabou de acontecer
-    nessa mesma chamada, se for o caso."""
+    devolve (ultima, disparou_agora) - `disparou_agora` diz se ESSA
+    chamada especificamente acabou de mandar o pedido pro Railway (usado
+    pra explicar ao usuário por que ainda não tem recomendação nova: o
+    disparo em si é rápido, mas o deploy real no Railway leva bem mais
+    tempo pra concluir - não dá pra esperar isso terminar na mesma
+    requisição HTTP sem travar a página por 1-2 minutos)."""
     ultima = buscar_ultima_atualizacao_odds(cur)
     ja_passou_1h = ultima is None or (datetime.now(timezone.utc) - ultima) >= INTERVALO_MINIMO_ATUALIZACAO_ODDS
 
+    disparou_agora = False
     if forcar or ja_passou_1h:
         if disparar_atualizacao_odds_railway():
             registrar_atualizacao_odds(cur, usuario_id, forcar)
             ultima = datetime.now(timezone.utc)
+            disparou_agora = True
 
-    return ultima
+    return ultima, disparou_agora
 
 
 PAGINA = """
@@ -4673,6 +4678,7 @@ def index():
     combinacoes = []
     motivo = ""
     ultima_atualizacao_odds = None
+    disparou_agora = False
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
@@ -4683,7 +4689,7 @@ def index():
         # recomendações" (forcar=True) - só entrar na página sem clicar em
         # nada não dispara nenhum Run Now.
         if buscou or forcar_atualizacao:
-            ultima = processar_atualizacao_odds(cur, session["usuario_id"], forcar_atualizacao)
+            ultima, disparou_agora = processar_atualizacao_odds(cur, session["usuario_id"], forcar_atualizacao)
             conn.commit()
             if ultima:
                 ultima_atualizacao_odds = ultima.astimezone(FUSO_BRASIL).strftime("%H:%M")
@@ -4697,7 +4703,22 @@ def index():
             combinacoes = montar_combinacoes(recomendacoes, float(odd_min), float(odd_max))
             aplicar_totais_apostados(combinacoes, buscar_totais_apostados(cur, session["usuario_id"]))
             if not combinacoes:
-                motivo = descobrir_motivo(cur)
+                # NOVO: se a gente acabou de disparar o pedido de atualização
+                # NESSA MESMA requisição, o motivo real de não ter
+                # recomendação ainda não é "faltam odds coletadas" (mensagem
+                # antiga, confusa aqui) - é que o disparo em si é rápido, mas
+                # o deploy de verdade no Railway (build + coleta + cálculo)
+                # ainda está rodando em segundo plano e pode levar 1-2
+                # minutos pra terminar. Sem isso, a pessoa clica, não vê
+                # nada, e acha que o botão não fez nada - quando na
+                # verdade só ainda não deu tempo.
+                if disparou_agora:
+                    motivo = ("🔄 A atualização de odds foi disparada agora mesmo - o pedido em si é rápido, "
+                               "mas o processo real no Railway (baixar odds + recalcular recomendações) "
+                               "costuma levar de 1 a 2 minutos pra terminar. Espera um pouco e clica em "
+                               "\"Gerar recomendações da rodada\" de novo.")
+                else:
+                    motivo = descobrir_motivo(cur)
         cur.close()
     finally:
         conn.close()
