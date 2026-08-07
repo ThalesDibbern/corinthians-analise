@@ -179,6 +179,18 @@ def registrar_atualizacao_odds(cur, usuario_id, forcado):
     )
 
 
+# NOVO: trava simples pra impedir que duas atualizações rodem ao mesmo
+# tempo (aconteceu de verdade: dois cliques próximos geraram duas rodadas
+# em paralelo, duplicando chamadas à OddsPapi e intercalando os logs dos
+# dois processos). threading.Event é seguro entre threads sem precisar de
+# lock manual - is_set()/set()/clear() são atômicos.
+_atualizacao_em_andamento = threading.Event()
+
+
+def atualizacao_em_andamento():
+    return _atualizacao_em_andamento.is_set()
+
+
 def disparar_atualizacao_odds_railway():
     """NOVO (troca de abordagem): antes isso chamava a API do Railway pra
     pedir pra rodar o serviço `refreshing-freedom` remotamente
@@ -201,9 +213,16 @@ def disparar_atualizacao_odds_railway():
     Roda numa thread separada (não trava a resposta da página) e devolve
     True imediatamente, assim que consegue INICIAR os scripts - não espera
     eles terminarem (isso ainda leva os mesmos ~20-90s de sempre, só que
-    agora rodando de verdade, sem depender de nenhuma API externa)."""
+    agora rodando de verdade, sem depender de nenhuma API externa). Se já
+    tiver uma atualização em andamento, não inicia outra - devolve False."""
+    if _atualizacao_em_andamento.is_set():
+        print("[atualizacao_odds] Já tem uma atualização em andamento - ignorando esse novo pedido "
+              "(evita rodar em paralelo e duplicar chamadas à OddsPapi).")
+        return False
+
     def rodar_em_segundo_plano():
         pasta = os.path.dirname(os.path.abspath(__file__))
+        _atualizacao_em_andamento.set()
         try:
             print("[atualizacao_odds] Rodando atualizar_odds.py...")
             subprocess.run(
@@ -222,6 +241,8 @@ def disparar_atualizacao_odds_railway():
             print("[atualizacao_odds] Um dos scripts passou de 10 minutos rodando - abortado.")
         except Exception as e:
             print(f"[atualizacao_odds] Falha inesperada ao rodar em segundo plano: {e}")
+        finally:
+            _atualizacao_em_andamento.clear()
 
     try:
         threading.Thread(target=rodar_em_segundo_plano, daemon=True).start()
@@ -4707,16 +4728,20 @@ def index():
                 # NESSA MESMA requisição, o motivo real de não ter
                 # recomendação ainda não é "faltam odds coletadas" (mensagem
                 # antiga, confusa aqui) - é que o disparo em si é rápido, mas
-                # o deploy de verdade no Railway (build + coleta + cálculo)
+                # o processo real (baixar odds + recalcular recomendações)
                 # ainda está rodando em segundo plano e pode levar 1-2
                 # minutos pra terminar. Sem isso, a pessoa clica, não vê
                 # nada, e acha que o botão não fez nada - quando na
                 # verdade só ainda não deu tempo.
                 if disparou_agora:
                     motivo = ("🔄 A atualização de odds foi disparada agora mesmo - o pedido em si é rápido, "
-                               "mas o processo real no Railway (baixar odds + recalcular recomendações) "
-                               "costuma levar de 1 a 2 minutos pra terminar. Espera um pouco e clica em "
+                               "mas o processo real (baixar odds + recalcular recomendações) costuma levar "
+                               "de 1 a 2 minutos pra terminar. Espera um pouco e clica em "
                                "\"Gerar recomendações da rodada\" de novo.")
+                elif atualizacao_em_andamento():
+                    motivo = ("⏳ Já tem uma atualização rodando agora (iniciada por outro clique há pouco) - "
+                               "só uma roda por vez, pra não duplicar chamada na OddsPapi. Espera terminar "
+                               "(1-2 minutos) e clica em \"Gerar recomendações da rodada\" de novo.")
                 else:
                     motivo = descobrir_motivo(cur)
         cur.close()
