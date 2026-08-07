@@ -20,6 +20,9 @@ Variáveis de ambiente necessárias:
 
 import os
 import json
+import subprocess
+import sys
+import threading
 from functools import wraps
 from itertools import combinations
 from datetime import datetime, timedelta, timezone
@@ -151,8 +154,6 @@ def registrar_movimento_banca(cur, usuario_id, tipo, valor, aposta_id=None):
 # não disparam de novo sozinhos - mas o botão "🔄 Atualizar recomendações"
 # permite forçar manualmente a qualquer momento.
 INTERVALO_MINIMO_ATUALIZACAO_ODDS = timedelta(hours=1)
-RAILWAY_GRAPHQL_URL = "https://backboard.railway.com/graphql/v2"
-
 # NOVO: corrige bug de fuso horário - o container do Railway roda em UTC
 # por padrão, então `.astimezone()` sem argumento (que converte pro fuso
 # LOCAL do servidor) não convertia nada de verdade, ficava mostrando a
@@ -179,55 +180,54 @@ def registrar_atualizacao_odds(cur, usuario_id, forcado):
 
 
 def disparar_atualizacao_odds_railway():
-    """Chama a API do Railway pra rodar o serviço `refreshing-freedom`
-    (atualizar_odds.py + motor_recomendacoes.py) agora, fora do horário
-    programado - o mesmo efeito de clicar "Run Now" no dashboard, só que
-    automático. Precisa de 3 variáveis de ambiente configuradas no serviço
-    da INTERFACE (não no refreshing-freedom):
-      - RAILWAY_API_TOKEN: token de conta/workspace criado em
-        railway.app -> account settings -> tokens (token de PROJETO não
-        funciona pra disparar deploy, tem que ser de conta ou workspace)
-      - RAILWAY_SERVICE_ID_ODDS: o ID do serviço `refreshing-freedom`
-        (Settings do serviço no Railway -> mostra o ID, ou copia da URL)
-      - RAILWAY_ENVIRONMENT_ID_ODDS: o ID do ambiente (geralmente "production") -
-        NÃO usar o nome "RAILWAY_ENVIRONMENT_ID" puro, porque o próprio Railway
-        já injeta automaticamente uma variável com esse nome exato em todo
-        serviço (o ambiente do PRÓPRIO serviço) - usar esse nome causaria
-        conflito/sobrescrita da variável reservada do Railway
-    Se qualquer uma faltar, ou a chamada falhar, só loga no console e
-    retorna False - a página continua funcionando normalmente com o que
-    já estiver no banco, só sem conseguir disparar a atualização."""
-    # NOVO: mesmo .strip() de proteção contra espaço/quebra de linha
-    # sobrando (ver comentário equivalente em buscar_tabela_brasileirao)
-    token = (os.environ.get("RAILWAY_API_TOKEN") or "").strip()
-    service_id = (os.environ.get("RAILWAY_SERVICE_ID_ODDS") or "").strip()
-    environment_id = (os.environ.get("RAILWAY_ENVIRONMENT_ID_ODDS") or "").strip()
+    """NOVO (troca de abordagem): antes isso chamava a API do Railway pra
+    pedir pra rodar o serviço `refreshing-freedom` remotamente
+    (serviceInstanceRedeploy) - só que, na prática, testamos várias vezes
+    e o disparo por essa API NÃO produzia o mesmo efeito de clicar "Run
+    Now" no painel do Railway (a documentação pública deles também não
+    lista nenhum mutation específico pra "rodar um Cron agora", só pra
+    criar/redeployar - o botão do painel parece usar um caminho interno
+    que não está disponível de fora).
 
-    if not (token and service_id and environment_id):
-        print("[atualizacao_odds] RAILWAY_API_TOKEN/RAILWAY_SERVICE_ID_ODDS/RAILWAY_ENVIRONMENT_ID_ODDS "
-              "não configurados - não é possível disparar o Run Now automaticamente.")
-        return False
+    Em vez de continuar dependendo desse comportamento não confiável e não
+    documentado, essa função agora roda o `atualizar_odds.py` e o
+    `motor_recomendacoes.py` DIRETO nesse mesmo serviço (a Interface),
+    como um processo em segundo plano (thread) - já que os dois scripts
+    já ficam no mesmo repositório e esse serviço já tem tudo que eles
+    precisam pra funcionar (DATABASE_URL, API_FOOTBALL_KEY). Só falta uma
+    variável nova aqui na Interface: ODDSPAPI_KEY (a mesma chave que o
+    refreshing-freedom já usa).
 
-    query = """
-        mutation Redeploy($serviceId: String!, $environmentId: String!) {
-            serviceInstanceRedeploy(serviceId: $serviceId, environmentId: $environmentId)
-        }
-    """
+    Roda numa thread separada (não trava a resposta da página) e devolve
+    True imediatamente, assim que consegue INICIAR os scripts - não espera
+    eles terminarem (isso ainda leva os mesmos ~20-90s de sempre, só que
+    agora rodando de verdade, sem depender de nenhuma API externa)."""
+    def rodar_em_segundo_plano():
+        pasta = os.path.dirname(os.path.abspath(__file__))
+        try:
+            print("[atualizacao_odds] Rodando atualizar_odds.py...")
+            subprocess.run(
+                [sys.executable, os.path.join(pasta, "atualizar_odds.py")],
+                check=True, timeout=600, cwd=pasta,
+            )
+            print("[atualizacao_odds] atualizar_odds.py concluído. Rodando motor_recomendacoes.py...")
+            subprocess.run(
+                [sys.executable, os.path.join(pasta, "motor_recomendacoes.py")],
+                check=True, timeout=600, cwd=pasta,
+            )
+            print("[atualizacao_odds] motor_recomendacoes.py concluído - atualização completa.")
+        except subprocess.CalledProcessError as e:
+            print(f"[atualizacao_odds] Um dos scripts terminou com erro (código {e.returncode}).")
+        except subprocess.TimeoutExpired:
+            print("[atualizacao_odds] Um dos scripts passou de 10 minutos rodando - abortado.")
+        except Exception as e:
+            print(f"[atualizacao_odds] Falha inesperada ao rodar em segundo plano: {e}")
+
     try:
-        resposta = requests.post(
-            RAILWAY_GRAPHQL_URL,
-            json={"query": query, "variables": {"serviceId": service_id, "environmentId": environment_id}},
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            timeout=15,
-        )
-        resposta.raise_for_status()
-        dados = resposta.json()
-        if dados.get("errors"):
-            print(f"[atualizacao_odds] API do Railway retornou erro: {dados['errors']}")
-            return False
+        threading.Thread(target=rodar_em_segundo_plano, daemon=True).start()
         return True
-    except requests.RequestException as e:
-        print(f"[atualizacao_odds] Falha ao chamar a API do Railway: {e}")
+    except Exception as e:
+        print(f"[atualizacao_odds] Falha ao iniciar a thread de atualização: {e}")
         return False
 
 
