@@ -1,4 +1,3 @@
-
 """
 Interface web do projeto - Análise Corinthians.
 
@@ -516,6 +515,25 @@ PAGINA = """
     <p class="subtitulo">Recomendações de múltiplas do Corinthians baseadas em padrões históricos</p>
     {{ nav_html|safe }}
 
+    <script>
+        // NOVO: o link "Gerador de Recomendações" da barra de navegação leva
+        // pra "/" sem nenhum parâmetro de odd - sem isso, o site não sabia
+        // que você já tinha feito uma busca, e voltava pro formulário vazio
+        // (parecia que "reiniciava" a página, incluindo perder a paginação,
+        // porque a lista de recomendações inteira desaparecia). Agora, se
+        // não tem odd_min/odd_max na URL mas o navegador lembra da última
+        // busca feita, redireciona sozinho pra ela.
+        if (!window.location.search.includes('odd_min')) {
+            try {
+                const oddMin = localStorage.getItem('ultima_busca_odd_min');
+                const oddMax = localStorage.getItem('ultima_busca_odd_max');
+                if (oddMin && oddMax) {
+                    window.location.replace('/?odd_min=' + encodeURIComponent(oddMin) + '&odd_max=' + encodeURIComponent(oddMax));
+                }
+            } catch (e) {}
+        }
+    </script>
+
     {% with mensagens = get_flashed_messages(with_categories=true) %}
         {% for categoria, texto in mensagens %}
         <div class="flash flash-{{ categoria }}">{{ texto }}</div>
@@ -578,6 +596,12 @@ PAGINA = """
     {% endmacro %}
 
     {% if buscou %}
+        <script>
+            try {
+                localStorage.setItem('ultima_busca_odd_min', '{{ odd_min }}');
+                localStorage.setItem('ultima_busca_odd_max', '{{ odd_max }}');
+            } catch (e) {}
+        </script>
         {% if individuais or multiplas %}
         <div class="colunas-resultado">
             <div class="coluna">
@@ -620,19 +644,32 @@ PAGINA = """
             const TAMANHO_PAGINA = 10;
             const paginaAtual = {};
 
+            function salvarPaginaNoNavegador(listaId, pagina) {
+                try { localStorage.setItem('pagina:' + window.location.pathname + ':' + listaId, String(pagina)); } catch (e) {}
+            }
+            function carregarPaginaDoNavegador(listaId) {
+                try {
+                    const v = localStorage.getItem('pagina:' + window.location.pathname + ':' + listaId);
+                    return v !== null ? parseInt(v, 10) : 0;
+                } catch (e) { return 0; }
+            }
+
             function totalPaginas(listaId) {
                 const n = document.querySelectorAll('#' + listaId + ' .item-pagina').length;
                 return Math.max(1, Math.ceil(n / TAMANHO_PAGINA));
             }
 
             function renderizarPagina(listaId) {
-                const pagina = paginaAtual[listaId] || 0;
+                if (!(listaId in paginaAtual)) { paginaAtual[listaId] = carregarPaginaDoNavegador(listaId); }
+                const total = totalPaginas(listaId);
+                if (paginaAtual[listaId] > total - 1) paginaAtual[listaId] = total - 1;
+                if (paginaAtual[listaId] < 0) paginaAtual[listaId] = 0;
+                const pagina = paginaAtual[listaId];
                 const itens = document.querySelectorAll('#' + listaId + ' .item-pagina');
                 itens.forEach(function(item, i) {
                     const paginaDoItem = Math.floor(i / TAMANHO_PAGINA);
                     item.style.display = (paginaDoItem === pagina) ? '' : 'none';
                 });
-                const total = totalPaginas(listaId);
                 const label = document.getElementById('label-' + listaId);
                 if (label) label.textContent = 'Página ' + (pagina + 1) + ' de ' + total;
                 const btnAnterior = document.getElementById('anterior-' + listaId);
@@ -646,6 +683,7 @@ PAGINA = """
                 let pagina = (paginaAtual[listaId] || 0) + direcao;
                 pagina = Math.max(0, Math.min(total - 1, pagina));
                 paginaAtual[listaId] = pagina;
+                salvarPaginaNoNavegador(listaId, pagina);
                 renderizarPagina(listaId);
             }
 
@@ -1215,19 +1253,32 @@ PAGINA_HISTORICO = """
         const TAMANHO_PAGINA = 10;
         const paginaAtual = {};
 
+        function salvarPaginaNoNavegador(listaId, pagina) {
+            try { localStorage.setItem('pagina:' + window.location.pathname + ':' + listaId, String(pagina)); } catch (e) {}
+        }
+        function carregarPaginaDoNavegador(listaId) {
+            try {
+                const v = localStorage.getItem('pagina:' + window.location.pathname + ':' + listaId);
+                return v !== null ? parseInt(v, 10) : 0;
+            } catch (e) { return 0; }
+        }
+
         function totalPaginas(listaId) {
             const n = document.querySelectorAll('#' + listaId + ' .item-pagina').length;
             return Math.max(1, Math.ceil(n / TAMANHO_PAGINA));
         }
 
         function renderizarPagina(listaId) {
-            const pagina = paginaAtual[listaId] || 0;
+            if (!(listaId in paginaAtual)) { paginaAtual[listaId] = carregarPaginaDoNavegador(listaId); }
+            const total = totalPaginas(listaId);
+            if (paginaAtual[listaId] > total - 1) paginaAtual[listaId] = total - 1;
+            if (paginaAtual[listaId] < 0) paginaAtual[listaId] = 0;
+            const pagina = paginaAtual[listaId];
             const itens = document.querySelectorAll('#' + listaId + ' .item-pagina');
             itens.forEach(function(item, i) {
                 const paginaDoItem = Math.floor(i / TAMANHO_PAGINA);
                 item.style.display = (paginaDoItem === pagina) ? '' : 'none';
             });
-            const total = totalPaginas(listaId);
             const label = document.getElementById('label-' + listaId);
             if (label) label.textContent = 'Página ' + (pagina + 1) + ' de ' + total;
             const btnAnterior = document.getElementById('anterior-' + listaId);
@@ -1241,6 +1292,7 @@ PAGINA_HISTORICO = """
             let pagina = (paginaAtual[listaId] || 0) + direcao;
             pagina = Math.max(0, Math.min(total - 1, pagina));
             paginaAtual[listaId] = pagina;
+            salvarPaginaNoNavegador(listaId, pagina);
             renderizarPagina(listaId);
         }
 
@@ -2598,6 +2650,16 @@ PAGINA_JOGADORES = """
         const TAMANHO_PAGINA = 10;
         const paginaAtual = {};
 
+        function salvarPaginaNoNavegador(listaId, pagina) {
+            try { localStorage.setItem('pagina:' + window.location.pathname + ':' + listaId, String(pagina)); } catch (e) {}
+        }
+        function carregarPaginaDoNavegador(listaId) {
+            try {
+                const v = localStorage.getItem('pagina:' + window.location.pathname + ':' + listaId);
+                return v !== null ? parseInt(v, 10) : 0;
+            } catch (e) { return 0; }
+        }
+
         function totalPaginas(listaId) {
             let n = 0;
             document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
@@ -2607,7 +2669,11 @@ PAGINA_JOGADORES = """
         }
 
         function renderizarPagina(listaId) {
-            const pagina = paginaAtual[listaId] || 0;
+            if (!(listaId in paginaAtual)) { paginaAtual[listaId] = carregarPaginaDoNavegador(listaId); }
+            const total = totalPaginas(listaId);
+            if (paginaAtual[listaId] > total - 1) paginaAtual[listaId] = total - 1;
+            if (paginaAtual[listaId] < 0) paginaAtual[listaId] = 0;
+            const pagina = paginaAtual[listaId];
             let visivelIndice = 0;
             document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
                 if (item.dataset.escondidoBusca === '1') { item.style.display = 'none'; return; }
@@ -2615,7 +2681,6 @@ PAGINA_JOGADORES = """
                 item.style.display = (paginaDoItem === pagina) ? '' : 'none';
                 visivelIndice++;
             });
-            const total = totalPaginas(listaId);
             const label = document.getElementById('label-' + listaId);
             if (label) label.textContent = 'Página ' + (pagina + 1) + ' de ' + total;
             const btnAnterior = document.getElementById('anterior-' + listaId);
@@ -2629,6 +2694,7 @@ PAGINA_JOGADORES = """
             let pagina = (paginaAtual[listaId] || 0) + direcao;
             pagina = Math.max(0, Math.min(total - 1, pagina));
             paginaAtual[listaId] = pagina;
+            salvarPaginaNoNavegador(listaId, pagina);
             renderizarPagina(listaId);
         }
 
@@ -3050,6 +3116,16 @@ PAGINA_CLUBE = """
         const TAMANHO_PAGINA = 10;
         const paginaAtual = {};
 
+        function salvarPaginaNoNavegador(listaId, pagina) {
+            try { localStorage.setItem('pagina:' + window.location.pathname + ':' + listaId, String(pagina)); } catch (e) {}
+        }
+        function carregarPaginaDoNavegador(listaId) {
+            try {
+                const v = localStorage.getItem('pagina:' + window.location.pathname + ':' + listaId);
+                return v !== null ? parseInt(v, 10) : 0;
+            } catch (e) { return 0; }
+        }
+
         function totalPaginas(listaId) {
             let n = 0;
             document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
@@ -3059,7 +3135,11 @@ PAGINA_CLUBE = """
         }
 
         function renderizarPagina(listaId) {
-            const pagina = paginaAtual[listaId] || 0;
+            if (!(listaId in paginaAtual)) { paginaAtual[listaId] = carregarPaginaDoNavegador(listaId); }
+            const total = totalPaginas(listaId);
+            if (paginaAtual[listaId] > total - 1) paginaAtual[listaId] = total - 1;
+            if (paginaAtual[listaId] < 0) paginaAtual[listaId] = 0;
+            const pagina = paginaAtual[listaId];
             let visivelIndice = 0;
             document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
                 if (item.dataset.escondidoBusca === '1') { item.style.display = 'none'; return; }
@@ -3067,7 +3147,6 @@ PAGINA_CLUBE = """
                 item.style.display = (paginaDoItem === pagina) ? '' : 'none';
                 visivelIndice++;
             });
-            const total = totalPaginas(listaId);
             const label = document.getElementById('label-' + listaId);
             if (label) label.textContent = 'Página ' + (pagina + 1) + ' de ' + total;
             const btnAnterior = document.getElementById('anterior-' + listaId);
@@ -3081,6 +3160,7 @@ PAGINA_CLUBE = """
             let pagina = (paginaAtual[listaId] || 0) + direcao;
             pagina = Math.max(0, Math.min(total - 1, pagina));
             paginaAtual[listaId] = pagina;
+            salvarPaginaNoNavegador(listaId, pagina);
             renderizarPagina(listaId);
         }
 
@@ -3783,6 +3863,16 @@ PAGINA_TIME = """
         const TAMANHO_PAGINA = 10;
         const paginaAtual = {};
 
+        function salvarPaginaNoNavegador(listaId, pagina) {
+            try { localStorage.setItem('pagina:' + window.location.pathname + ':' + listaId, String(pagina)); } catch (e) {}
+        }
+        function carregarPaginaDoNavegador(listaId) {
+            try {
+                const v = localStorage.getItem('pagina:' + window.location.pathname + ':' + listaId);
+                return v !== null ? parseInt(v, 10) : 0;
+            } catch (e) { return 0; }
+        }
+
         function totalPaginas(listaId) {
             let n = 0;
             document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
@@ -3792,7 +3882,11 @@ PAGINA_TIME = """
         }
 
         function renderizarPagina(listaId) {
-            const pagina = paginaAtual[listaId] || 0;
+            if (!(listaId in paginaAtual)) { paginaAtual[listaId] = carregarPaginaDoNavegador(listaId); }
+            const total = totalPaginas(listaId);
+            if (paginaAtual[listaId] > total - 1) paginaAtual[listaId] = total - 1;
+            if (paginaAtual[listaId] < 0) paginaAtual[listaId] = 0;
+            const pagina = paginaAtual[listaId];
             let visivelIndice = 0;
             document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
                 if (item.dataset.escondidoBusca === '1') { item.style.display = 'none'; return; }
@@ -3800,7 +3894,6 @@ PAGINA_TIME = """
                 item.style.display = (paginaDoItem === pagina) ? '' : 'none';
                 visivelIndice++;
             });
-            const total = totalPaginas(listaId);
             const label = document.getElementById('label-' + listaId);
             if (label) label.textContent = 'Página ' + (pagina + 1) + ' de ' + total;
             const btnAnterior = document.getElementById('anterior-' + listaId);
@@ -3814,6 +3907,7 @@ PAGINA_TIME = """
             let pagina = (paginaAtual[listaId] || 0) + direcao;
             pagina = Math.max(0, Math.min(total - 1, pagina));
             paginaAtual[listaId] = pagina;
+            salvarPaginaNoNavegador(listaId, pagina);
             renderizarPagina(listaId);
         }
 
