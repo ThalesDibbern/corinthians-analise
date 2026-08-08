@@ -70,7 +70,12 @@ def buscar_jogos_candidatos(cur, necessarios):
 
 def jogo_esta_em_uso(cur, jogo_id):
     """Verifica se o jogo ainda está referenciado em odds/recomendações
-    (histórico ou ativas) - se estiver, não apaga por segurança."""
+    (histórico ou ativas) OU numa aposta salva por algum usuário - se
+    estiver, não apaga por segurança.
+    CORRIGIDO: antes não checava `apostas_salvas` - um jogo podia ser
+    apagado mesmo com uma aposta salva ainda dependendo dele (o `jogo_id`
+    fica dentro do JSONB `pernas`, não numa coluna direta, por isso
+    precisa de uma consulta separada pra essa tabela)."""
     cur.execute(
         """
         SELECT 1 FROM odds WHERE jogo_id = %s
@@ -79,6 +84,20 @@ def jogo_esta_em_uso(cur, jogo_id):
         LIMIT 1
         """,
         (jogo_id, jogo_id, jogo_id),
+    )
+    if cur.fetchone() is not None:
+        return True
+
+    cur.execute(
+        """
+        SELECT 1 FROM apostas_salvas a
+        WHERE EXISTS (
+            SELECT 1 FROM jsonb_array_elements(a.pernas) AS perna
+            WHERE (perna->>'jogo_id')::int = %s
+        )
+        LIMIT 1
+        """,
+        (jogo_id,),
     )
     return cur.fetchone() is not None
 
