@@ -747,7 +747,7 @@ def buscar_recomendacoes(cur):
         JOIN times t ON t.id = j.nosso_time_id
         """
     )
-    return deduplicar_mercados_jogo_inteiro(cur.fetchall(), colunas_a_manter=12)
+    return deduplicar_mercados_jogo_inteiro(cur.fetchall(), colunas_a_manter=13)
 
 
 # NOVO: largura mínima de uma faixa, em "unidades de linha" (como as linhas
@@ -765,7 +765,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
     grupos = {}
     for rec in recomendacoes:
         (jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo,
-         tipo_padrao, linha, direcao, nosso_time) = rec
+         tipo_padrao, linha, direcao, nosso_time, fixture_id_api) = rec
 
         # resultado final (1X2) só entra como candidato quando a faixa pedida
         # permite odds acima de 5.0 (mercado de alta variância)
@@ -791,6 +791,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
             "adversario": adversario,
             "data_jogo": data_jogo,
             "nosso_time": nosso_time,
+            "fixture_id_api": fixture_id_api,
         })
 
     resultado = []
@@ -938,10 +939,21 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                 # (pode ser 1, como sempre foi, ou vários agora que múltiplas
                 # cruzam jogos diferentes) - usada pro cabeçalho do card
                 # mostrar cada confronto envolvido.
+                # CORRIGIDO: quando os dois times de um confronto são
+                # rastreados, o mesmo jogo real gera 2 linhas (uma por
+                # perspectiva - ver arquitetura multi-time), então uma
+                # combinação podia ter uma perna "Atletico-PR x Santos" e
+                # outra "Santos x Atletico-PR" - mesmo jogo real, mas a
+                # chave antiga (nome dos times) via isso como 2 jogos
+                # diferentes, duplicando no cabeçalho do card. Agora usa
+                # `fixture_id_api` (o ID real do confronto na API-Football,
+                # igual nas duas linhas) como identidade - só cai de volta
+                # pro nome dos times se fixture_id_api não estiver
+                # preenchido (jogos antigos, antes desse campo existir).
                 jogos_vistos_chaves = set()
                 jogos_vistos = []
                 for p in combo:
-                    chave_jogo = (p["nosso_time"], p["adversario"], p["data_jogo"])
+                    chave_jogo = p["fixture_id_api"] or (p["nosso_time"], p["adversario"], p["data_jogo"])
                     if chave_jogo not in jogos_vistos_chaves:
                         jogos_vistos_chaves.add(chave_jogo)
                         jogos_vistos.append({
@@ -1473,7 +1485,7 @@ def buscar_recomendacoes_historico(cur):
         JOIN times t ON t.id = j.nosso_time_id
         """
     )
-    return deduplicar_mercados_jogo_inteiro(cur.fetchall(), colunas_a_manter=11)
+    return deduplicar_mercados_jogo_inteiro(cur.fetchall(), colunas_a_manter=12)
 
 
 def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
@@ -1490,7 +1502,7 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
     grupos = {}
     for rec in recomendacoes:
         (jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo,
-         tipo_padrao, resultado_perna, nosso_time) = rec
+         tipo_padrao, resultado_perna, nosso_time, fixture_id_api) = rec
 
         grupos.setdefault(casa, []).append({
             "jogo_id": jogo_id,
@@ -1503,6 +1515,7 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
             "data_jogo": data_jogo,
             "resultado": resultado_perna,
             "nosso_time": nosso_time,
+            "fixture_id_api": fixture_id_api,
         })
 
     resultado_final = []
@@ -1542,7 +1555,7 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
                 jogos_vistos_chaves = set()
                 jogos_vistos = []
                 for p in combo:
-                    chave_jogo = (p["nosso_time"], p["adversario"], p["data_jogo"])
+                    chave_jogo = p["fixture_id_api"] or (p["nosso_time"], p["adversario"], p["data_jogo"])
                     if chave_jogo not in jogos_vistos_chaves:
                         jogos_vistos_chaves.add(chave_jogo)
                         jogos_vistos.append({
