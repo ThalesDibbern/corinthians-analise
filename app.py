@@ -1,3 +1,4 @@
+
 """
 Interface web do projeto - Análise Corinthians.
 
@@ -2319,21 +2320,33 @@ def minhas_apostas():
 
 
 def buscar_totais_apostados(cur, usuario_id):
-    """NOVO: soma o valor já apostado por (descricao, casa_aposta), pra
+    """Soma o valor já apostado por (descricao, casa_aposta, jogos), pra
     mostrar um aviso tipo "R$ X já apostado nessa odd" - só das apostas do
     usuário logado (cada um vê só o próprio "já apostado", não o dos
-    outros). Não impede apostar de novo na mesma odd, é só informativo."""
+    outros). Não impede apostar de novo na mesma odd, é só informativo.
+    CORRIGIDO: antes comparava só (descricao, casa_aposta) - como o texto
+    de um mercado (ex: "Cartões Total do Jogo - Mais de 5.5") se repete
+    em jogos DIFERENTES, isso fazia o aviso de "já apostado" aparecer em
+    jogos que a pessoa nunca apostou, só porque tinha apostado no mesmo
+    tipo de mercado em outro jogo. Agora o conjunto de jogos envolvidos
+    (via `pernas`) também entra na comparação."""
     cur.execute(
-        "SELECT descricao, casa_aposta, SUM(valor_apostado) FROM apostas_salvas "
-        "WHERE usuario_id = %s GROUP BY descricao, casa_aposta",
+        "SELECT descricao, casa_aposta, pernas, valor_apostado FROM apostas_salvas WHERE usuario_id = %s",
         (usuario_id,),
     )
-    return {(row[0], row[1]): float(row[2]) for row in cur.fetchall()}
+    totais = {}
+    for descricao, casa_aposta, pernas_json, valor_apostado in cur.fetchall():
+        pernas = pernas_json if isinstance(pernas_json, list) else json.loads(pernas_json)
+        jogos = tuple(sorted({p.get("jogo_id") for p in pernas}))
+        chave = (descricao, casa_aposta, jogos)
+        totais[chave] = totais.get(chave, 0) + float(valor_apostado)
+    return totais
 
 
 def aplicar_totais_apostados(combinacoes, totais_apostados):
     for c in combinacoes:
-        c["ja_apostado"] = totais_apostados.get((c["descricao"], c["casa_aposta"]))
+        jogos = tuple(sorted({p["jogo_id"] for p in c["pernas"]}))
+        c["ja_apostado"] = totais_apostados.get((c["descricao"], c["casa_aposta"], jogos))
 
 
 PAGINA_JOGADORES = """
