@@ -2508,6 +2508,19 @@ PAGINA_JOGADORES = """
     <p class="subtitulo">Digite pra filtrar entre todos os jogadores de todos os clubes rastreados, na hora.
         Procurando estatística do TIME inteiro? <a href="/times">Ver Estatísticas de Times →</a></p>
     {{ nav_html|safe }}
+    <script>
+        // NOVO: se a pessoa já tinha um clube aberto antes (ex: Corinthians)
+        // e voltou pra essa lista pelo botão da barra de navegação (sem
+        // "?geral=1"), leva direto pro clube de novo, em vez de mostrar a
+        // lista geral - o "📊 Estatísticas Gerais" (link com ?geral=1) é a
+        // saída explícita pra ver a lista de verdade.
+        if (!window.location.search.includes('geral=1')) {
+            try {
+                const clubeId = localStorage.getItem('ultimo_clube_id');
+                if (clubeId) { window.location.replace('/clube/' + encodeURIComponent(clubeId)); }
+            } catch (e) {}
+        }
+    </script>
 
     <div class="grid-jogadores">
         <div class="coluna-clubes">
@@ -2898,6 +2911,9 @@ PAGINA_CLUBE = """
     <h1>📈 Estatísticas de Jogadores</h1>
     <p class="subtitulo">Elenco completo, última escalação titular confirmada e líderes de estatística do time.</p>
     {{ nav_html|safe }}
+    <script>
+        try { localStorage.setItem('ultimo_clube_id', '{{ time_id }}'); } catch (e) {}
+    </script>
 
     {% with mensagens = get_flashed_messages(with_categories=true) %}
         {% for categoria, texto in mensagens %}
@@ -2907,7 +2923,7 @@ PAGINA_CLUBE = """
 
     <div class="grid-clube">
         <div class="coluna-elenco">
-            <a href="/jogadores" class="btn-geral">📊 Estatísticas Gerais</a>
+            <a href="/jogadores?geral=1" class="btn-geral">📊 Estatísticas Gerais</a>
             {% if elenco_por_posicao %}
                 {% for grupo in elenco_por_posicao %}
                 <div class="grupo-posicao">
@@ -3454,6 +3470,15 @@ PAGINA_TIMES = """
     <p class="subtitulo">Tabela oficial do Brasileirão, estatísticas por clube e líderes entre os times rastreados
         (não depende de nenhuma odd disponível na casa de apostas)</p>
     {{ nav_html|safe }}
+    <script>
+        // NOVO: mesma lógica de /jogadores, mas pro time - ver comentário lá
+        if (!window.location.search.includes('geral=1')) {
+            try {
+                const timeId = localStorage.getItem('ultimo_time_id');
+                if (timeId) { window.location.replace('/time/' + encodeURIComponent(timeId)); }
+            } catch (e) {}
+        }
+    </script>
 
     <div class="grid-times">
         <div class="coluna-tabela">
@@ -3707,10 +3732,13 @@ PAGINA_TIME = """
     <p class="subtitulo">{{ nome_time }} - frequência histórica (só o lado do {{ nome_time }}), posição no
         Brasileirão e últimos jogos - estatísticas normais, sem depender de nenhuma odd disponível na casa de apostas.</p>
     {{ nav_html|safe }}
+    <script>
+        try { localStorage.setItem('ultimo_time_id', '{{ time_id }}'); } catch (e) {}
+    </script>
 
     <div class="grid-time">
         <div class="coluna-lista">
-            <a href="/times" class="btn-geral">📊 Estatísticas Gerais</a>
+            <a href="/times?geral=1" class="btn-geral">📊 Estatísticas Gerais</a>
             <input type="text" class="busca" id="busca-time" placeholder="Buscar times..." onkeyup="filtrarTimes()">
             <div id="lista-times">
             {% if clubes %}
