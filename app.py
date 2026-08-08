@@ -548,7 +548,10 @@ PAGINA = """
     {% macro cartao_combo(c) %}
         <div class="cartao item-pagina">
             <div class="cartao-topo">
-                <span class="jogo">{{ c.data_jogo }} · {{ c.nosso_time }} x {{ c.adversario }}</span>
+                <span class="jogo">
+                    {{ c.jogos[0].data_jogo }} ·
+                    {% for j in c.jogos %}{{ j.nosso_time }} x {{ j.adversario }}{% if not loop.last %} + {% endif %}{% endfor %}
+                </span>
                 <span class="casa">{{ c.casa_aposta }}</span>
                 <span class="odd-tag">ODD {{ c.odd_combinada }}</span>
             </div>
@@ -730,8 +733,15 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
         if tipo_padrao == "resultado_final" and odd_max <= 5.0:
             continue
 
-        chave = (jogo_id, casa)
-        grupos.setdefault(chave, []).append({
+        # NOVO: agrupa só por CASA de apostas, não mais por (jogo, casa) -
+        # antes, uma múltipla só podia combinar pernas do MESMO jogo; agora
+        # pode combinar pernas de jogos diferentes também (ex: uma perna do
+        # Corinthians x Bragantino + uma perna do Santos x Atletico-PR),
+        # contanto que sejam da mesma casa (não dá pra apostar uma múltipla
+        # de verdade misturando casas diferentes). `jogo_id` vai dentro de
+        # cada perna agora, em vez de ser uma chave externa do grupo.
+        grupos.setdefault(casa, []).append({
+            "jogo_id": jogo_id,
             "jogador_id": jogador_id,
             "tipo_padrao": tipo_padrao,
             "descricao": descricao,
@@ -745,9 +755,11 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
         })
 
     resultado = []
-    for (jogo_id, casa), pernas in grupos.items():
+    for casa, pernas in grupos.items():
 
-        # NOVO: pra cada mercado (tipo_padrao + jogador_id) desse jogo, se a
+        # NOVO: pra cada mercado (JOGO + tipo_padrao + jogador_id) - agora
+        # com o jogo na chave, pra não misturar "escanteio do Corinthians"
+        # com "escanteio do Santos" como se fossem o mesmo mercado -, se a
         # casa oferece mais de uma linha "mais" e/ou mais de uma linha
         # "menos" pro mesmo mercado, a ÚNICA combinação de faixa permitida é
         # a mais ampla possível - o corte "mais" mais baixo disponível
@@ -760,7 +772,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
         faixa_permitida_por_mercado = {}
         pernas_por_mercado = {}
         for p in pernas:
-            chave_mercado = (p["tipo_padrao"], p["jogador_id"])
+            chave_mercado = (p["jogo_id"], p["tipo_padrao"], p["jogador_id"])
             pernas_por_mercado.setdefault(chave_mercado, []).append(p)
 
         for chave_mercado, legs in pernas_por_mercado.items():
@@ -798,7 +810,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                 # continua bloqueada, exatamente como antes.
                 contagem_mercado = {}
                 for p in combo:
-                    chave_mercado = (p["tipo_padrao"], p["jogador_id"])
+                    chave_mercado = (p["jogo_id"], p["tipo_padrao"], p["jogador_id"])
                     contagem_mercado.setdefault(chave_mercado, []).append(p)
 
                 valido = True
@@ -854,7 +866,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                 faixa_ja_contabilizada = False
                 for p in combo:
                     odd_combinada *= p["odd"]  # odd real de cada perna sempre multiplica normalmente
-                    chave_mercado = (p["tipo_padrao"], p["jogador_id"])
+                    chave_mercado = (p["jogo_id"], p["tipo_padrao"], p["jogador_id"])
                     if faixa_chave is not None and chave_mercado == faixa_chave:
                         if not faixa_ja_contabilizada:
                             prob_combinada *= faixa_probabilidade
@@ -883,19 +895,36 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                 if faixa_chave is not None:
                     descricao_final += " (faixa)"
 
+                # NOVO: lista os jogos DISTINTOS envolvidos nessa combinação
+                # (pode ser 1, como sempre foi, ou vários agora que múltiplas
+                # cruzam jogos diferentes) - usada pro cabeçalho do card
+                # mostrar cada confronto envolvido.
+                jogos_vistos_chaves = set()
+                jogos_vistos = []
+                for p in combo:
+                    chave_jogo = (p["nosso_time"], p["adversario"], p["data_jogo"])
+                    if chave_jogo not in jogos_vistos_chaves:
+                        jogos_vistos_chaves.add(chave_jogo)
+                        jogos_vistos.append({
+                            "nosso_time": p["nosso_time"], "adversario": p["adversario"],
+                            "data_jogo": p["data_jogo"],
+                        })
+
                 resultado.append({
-                    "jogo_id": jogo_id,
                     "casa_aposta": casa,
                     "descricao": descricao_final,
                     "odd_combinada": round(odd_combinada, 2),
                     "probabilidade_combinada": round(prob_combinada * 100, 2),
                     "valor_esperado": valor_esperado,
+                    "jogos": jogos_vistos,
+                    # mantidos por compatibilidade (qualquer coisa que ainda
+                    # espere um único jogo por combinação usa o primeiro)
                     "adversario": combo[0]["adversario"],
                     "data_jogo": combo[0]["data_jogo"],
                     "nosso_time": combo[0]["nosso_time"],
                     "pernas": [
                         {
-                            "jogo_id": jogo_id,
+                            "jogo_id": p["jogo_id"],
                             "jogador_id": p["jogador_id"],
                             "tipo_padrao": p["tipo_padrao"],
                             "descricao": p["descricao"],
