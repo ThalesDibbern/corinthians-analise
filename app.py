@@ -1317,7 +1317,10 @@ PAGINA_HISTORICO = """
     {% for c in multiplas_destaque %}
         <div class="cartao">
             <div class="cartao-topo">
-                <span class="jogo">{{ c.data_jogo }} · {{ c.nosso_time }} x {{ c.adversario }}</span>
+                <span class="jogo">
+                    {{ c.jogos[0].data_jogo }} ·
+                    {% for j in c.jogos %}{{ j.nosso_time }} x {{ j.adversario }}{% if not loop.last %} + {% endif %}{% endfor %}
+                </span>
                 <span class="badge badge-{{ c.resultado }}">{{ c.resultado }}</span>
             </div>
             <div class="descricao">{{ c.descricao }}</div>
@@ -1474,19 +1477,23 @@ def buscar_recomendacoes_historico(cur):
 
 
 def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
-    """NOVO: monta combinações (1 a 5 pernas) a partir de recomendações JÁ
+    """Monta combinações (1 a 5 pernas) a partir de recomendações JÁ
     CONCLUÍDAS, calculando também o resultado real da combinação: só
     'acertou' se TODAS as pernas acertaram; 'errou' se qualquer perna
     errou; 'pendente' se sobrar alguma perna sem dado ainda. Filtra só as
     combinações com probabilidade histórica >= piso, pra não poluir a lista
-    com combinações de chance muito baixa."""
+    com combinações de chance muito baixa.
+    CORRIGIDO: antes agrupava por (jogo_id, casa), igual montar_combinacoes
+    tinha o mesmo problema antes de ser corrigido - só combinava pernas do
+    MESMO jogo. Agora agrupa só por casa, permitindo combinações que
+    cruzam jogos diferentes (mesma correção aplicada na página principal)."""
     grupos = {}
     for rec in recomendacoes:
         (jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo,
          tipo_padrao, resultado_perna, nosso_time) = rec
 
-        chave = (jogo_id, casa)
-        grupos.setdefault(chave, []).append({
+        grupos.setdefault(casa, []).append({
+            "jogo_id": jogo_id,
             "jogador_id": jogador_id,
             "tipo_padrao": tipo_padrao,
             "descricao": descricao,
@@ -1499,7 +1506,7 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
         })
 
     resultado_final = []
-    for (jogo_id, casa), pernas in grupos.items():
+    for casa, pernas in grupos.items():
         # NOVO: só combinações de 2+ pernas aqui - tamanho=1 seria a mesma
         # aposta individual já mostrada na lista principal do histórico,
         # gerando entrada duplicada.
@@ -1507,7 +1514,7 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
             if len(pernas) < tamanho:
                 continue
             for combo in combinations(pernas, tamanho):
-                chaves_mercado = [(p["tipo_padrao"], p["jogador_id"]) for p in combo]
+                chaves_mercado = [(p["jogo_id"], p["tipo_padrao"], p["jogador_id"]) for p in combo]
                 if len(chaves_mercado) != len(set(chaves_mercado)):
                     continue
 
@@ -1529,6 +1536,20 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
                 else:
                     resultado_combo = "pendente"
 
+                # NOVO: lista os jogos distintos envolvidos, igual
+                # montar_combinacoes - usado pro cabeçalho do card mostrar
+                # cada confronto quando a combinação cruza jogos diferentes.
+                jogos_vistos_chaves = set()
+                jogos_vistos = []
+                for p in combo:
+                    chave_jogo = (p["nosso_time"], p["adversario"], p["data_jogo"])
+                    if chave_jogo not in jogos_vistos_chaves:
+                        jogos_vistos_chaves.add(chave_jogo)
+                        jogos_vistos.append({
+                            "nosso_time": p["nosso_time"], "adversario": p["adversario"],
+                            "data_jogo": p["data_jogo"],
+                        })
+
                 valor_esperado = round((prob_combinada * odd_combinada) - 1, 3)
                 resultado_final.append({
                     "casa_aposta": casa,
@@ -1536,6 +1557,7 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
                     "odd_combinada": round(odd_combinada, 2),
                     "probabilidade_combinada": prob_pct,
                     "valor_esperado": valor_esperado,
+                    "jogos": jogos_vistos,
                     "adversario": combo[0]["adversario"],
                     "data_jogo": combo[0]["data_jogo"],
                     "nosso_time": combo[0]["nosso_time"],
