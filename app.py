@@ -838,14 +838,21 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
         # linha de maior valor esperado individual. As odds INDIVIDUAIS
         # (1 perna) continuam mostrando todas as linhas normalmente - essa
         # redução só vale pra montar múltiplas.
+        # NOVO (ajustado): em vez de manter só a linha de maior VE por
+        # mercado (cortava demais - eliminava a opção de escolher entre uma
+        # linha mais segura e uma mais arriscada do mesmo mercado), agora
+        # mantém as MAX_LINHAS_POR_MERCADO melhores (por valor esperado
+        # individual). Corta a maior parte da explosão de combinações quase
+        # idênticas, sem eliminar toda a variedade.
+        MAX_LINHAS_POR_MERCADO = 2
         pernas_para_combo = []
         for chave_mercado, legs in pernas_por_mercado.items():
             par_faixa = faixa_permitida_por_mercado.get(chave_mercado)
             if par_faixa:
                 pernas_para_combo.extend(p for p in legs if id(p) in par_faixa)
             else:
-                melhor = max(legs, key=lambda p: p["probabilidade"] * p["odd"] - 1)
-                pernas_para_combo.append(melhor)
+                melhores = sorted(legs, key=lambda p: p["probabilidade"] * p["odd"] - 1, reverse=True)
+                pernas_para_combo.extend(melhores[:MAX_LINHAS_POR_MERCADO])
 
         for tamanho in (1, 2, 3, 4, 5):
             pool = pernas if tamanho == 1 else pernas_para_combo
