@@ -826,10 +826,32 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                     and (leg_menos["linha"] - leg_mais["linha"]) >= LARGURA_MINIMA_FAIXA:
                 faixa_permitida_por_mercado[chave_mercado] = {id(leg_mais), id(leg_menos)}
 
+        # NOVO: quando o mesmo jogo oferece várias linhas do mesmo mercado
+        # (ex: Cartões Total "Mais de 5.5", "Mais de 4.5" e "Mais de 3.5"),
+        # cada linha virava uma perna independente - e como as combinações
+        # de 2+ testam TODO subconjunto de `pernas`, isso gerava dezenas de
+        # múltiplas quase idênticas (o mesmo par de jogos, só trocando qual
+        # linha foi escolhida - ex: "753 múltiplas" pra só 2-3 jogos).
+        # Pra combinações de 2+ pernas, cada mercado (jogo + tipo +
+        # jogador) agora entra com só UMA linha representante: os 2
+        # extremos da faixa, quando existe faixa permitida; senão, só a
+        # linha de maior valor esperado individual. As odds INDIVIDUAIS
+        # (1 perna) continuam mostrando todas as linhas normalmente - essa
+        # redução só vale pra montar múltiplas.
+        pernas_para_combo = []
+        for chave_mercado, legs in pernas_por_mercado.items():
+            par_faixa = faixa_permitida_por_mercado.get(chave_mercado)
+            if par_faixa:
+                pernas_para_combo.extend(p for p in legs if id(p) in par_faixa)
+            else:
+                melhor = max(legs, key=lambda p: p["probabilidade"] * p["odd"] - 1)
+                pernas_para_combo.append(melhor)
+
         for tamanho in (1, 2, 3, 4, 5):
-            if len(pernas) < tamanho:
+            pool = pernas if tamanho == 1 else pernas_para_combo
+            if len(pool) < tamanho:
                 continue
-            for combo in combinations(pernas, tamanho):
+            for combo in combinations(pool, tamanho):
                 # NOVO: em vez de bloquear TODA repetição de (tipo_padrao,
                 # jogador_id), agora existe uma exceção específica: duas
                 # pernas do mesmo mercado que formam uma FAIXA coerente
