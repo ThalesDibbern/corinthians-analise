@@ -4210,16 +4210,19 @@ def buscar_media_ultimos_5_jogos(cur, time_id, tipo):
             (time_id,),
         )
     else:  # cartao_time
+        # CORRIGIDO: mesmo bug de contagem duplicada de motor_padroes.py
+        # (JOIN direto com `cartoes` depois de `estatisticas_jogo`, que tem
+        # 2 linhas por jogo, duplicava cada cartão) - agora conta numa
+        # subconsulta separada.
         cur.execute(
             """
             SELECT contagem.total_cartoes
             FROM (
                 SELECT j.id AS jogo_id, j.data_jogo,
-                       COUNT(c.id) FILTER (WHERE c.lado = 'mandante') AS total_cartoes,
+                       (SELECT COUNT(*) FROM cartoes c WHERE c.jogo_id = j.id AND c.lado = 'mandante') AS total_cartoes,
                        COUNT(DISTINCT eg.lado) AS lados
                 FROM jogos j
                 JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
-                LEFT JOIN cartoes c ON c.jogo_id = j.id
                 WHERE j.nosso_time_id = %s AND j.data_jogo < CURRENT_DATE
                 GROUP BY j.id, j.data_jogo
             ) contagem
