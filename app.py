@@ -2652,6 +2652,20 @@ PAGINA_JOGADORES = """
                             últimos {{ j.impedimento.jogos_analisados }} jogos</div>
                     </div>
                     {% endif %}
+
+                    <div class="bloco">
+                        <div class="bloco-titulo">Cartões rumo à suspensão</div>
+                        <div class="binario-texto">
+                            {% if j.cartoes_suspensao == 2 %}
+                            <span style="color:#f85149; font-weight:700;">⚠️ 2/3 - a 1 cartão da suspensão</span>
+                            {% elif j.cartoes_suspensao == 1 %}
+                            <span style="color:#d29922; font-weight:700;">1/3</span>
+                            {% else %}
+                            <span style="color:#3fb950;">0/3</span>
+                            {% endif %}
+                            <span style="color:#8b949e;"> · zera após a suspensão ser cumprida (temporada atual)</span>
+                        </div>
+                    </div>
                 </div>
                 {% endfor %}
             {% else %}
@@ -3037,6 +3051,16 @@ PAGINA_CLUBE = """
     </div>
     {% endif %}
 
+    {% if jogadores_na_regua %}
+    <div class="cartao" style="border-color:#f8514966; background:#f8514912; margin-bottom: 16px;">
+        <b style="color:#f85149;">⚠️ {{ jogadores_na_regua|length }} jogador(es) a 1 cartão da suspensão:</b>
+        <span style="color:#c9d1d9;">{{ jogadores_na_regua|join(", ") }}</span>
+        <div style="color:#8b949e; font-size:0.8rem; margin-top:6px;">
+            Com tanta gente na régua, o time tende a evitar risco - considera isso ao olhar previsão de cartões desse jogo.
+        </div>
+    </div>
+    {% endif %}
+
     <input type="text" class="busca" id="busca" placeholder="Buscar jogador..." onkeyup="filtrar()">
 
     <div id="lista">
@@ -3107,6 +3131,19 @@ PAGINA_CLUBE = """
                 {% endif %}
             </div>
             {% endif %}
+
+            <div class="bloco">
+                <div class="bloco-titulo">Cartões rumo à suspensão</div>
+                <div class="binario-texto">
+                    {% if j.cartoes_suspensao == 2 %}
+                    <span style="color:#f85149; font-weight:700;">⚠️ 2/3 - a 1 cartão da suspensão</span>
+                    {% elif j.cartoes_suspensao == 1 %}
+                    <span style="color:#d29922; font-weight:700;">1/3</span>
+                    {% else %}
+                    <span style="color:#3fb950;">0/3</span>
+                    {% endif %}
+                </div>
+            </div>
         </div>
         {% endfor %}
     {% else %}
@@ -4601,6 +4638,41 @@ def escudo(team_id):
     return "", 404
 
 
+# ---------- Cartões acumulados rumo à suspensão automática ----------
+def buscar_cartoes_para_suspensao(cur):
+    """Cartões amarelos acumulados rumo à suspensão automática (regra do
+    Brasileirão: 3 cartões amarelos = 1 jogo de suspensão; depois de
+    cumprida, a contagem zera e recomeça do zero). Devolve
+    {jogador_id: contagem_atual} - só pra jogadores ativos.
+
+    Como não temos como confirmar se a suspensão foi realmente CUMPRIDA
+    (o jogador pode ter ficado de fora do time por lesão, decisão
+    técnica etc., não necessariamente suspensão), a contagem é simulada
+    de forma direta: zera automaticamente assim que bate 3 cartões,
+    presumindo que a suspensão é cumprida em seguida - na prática isso
+    equivale a "total de cartões amarelos da temporada, módulo 3". Só
+    conta a partir do início da TEMPORADA_ATUAL - a contagem de cartões
+    não carrega de um ano pro outro no Brasileirão."""
+    cur.execute(
+        """
+        SELECT c.jogador_id, j.data_jogo
+        FROM cartoes c
+        JOIN jogos j ON j.id = c.jogo_id
+        JOIN jogadores jog ON jog.id = c.jogador_id
+        WHERE c.cor = 'amarelo'
+          AND EXTRACT(YEAR FROM j.data_jogo) = %s
+          AND jog.ativo = TRUE
+        ORDER BY c.jogador_id, j.data_jogo ASC, j.id ASC
+        """,
+        (TEMPORADA_ATUAL,),
+    )
+    contagem_atual = {}
+    for jogador_id, _data_jogo in cur.fetchall():
+        atual = contagem_atual.get(jogador_id, 0) + 1
+        contagem_atual[jogador_id] = 0 if atual >= 3 else atual
+    return contagem_atual
+
+
 def buscar_estatisticas_jogadores(cur, time_id=None, busca=None):
     """Monta a frequência histórica de cada jogador (cartão, faltas,
     desarmes, chutes no gol, impedimento), lendo direto das tabelas de
@@ -4679,6 +4751,8 @@ def buscar_estatisticas_jogadores(cur, time_id=None, busca=None):
             "jogos_analisados": jogos_analisados, "frequencia": float(frequencia),
         }
 
+    cartoes_suspensao = buscar_cartoes_para_suspensao(cur)
+
     lista = []
     for jogador_id, dados in jogadores_dict.items():
         blocos_linha = [
@@ -4692,6 +4766,7 @@ def buscar_estatisticas_jogadores(cur, time_id=None, busca=None):
             "cartao": dados["cartao"],
             "impedimento": dados["impedimento"],
             "blocos_linha": blocos_linha,
+            "cartoes_suspensao": cartoes_suspensao.get(jogador_id, 0),
         })
 
     lista.sort(key=lambda p: p["nome"])
@@ -4831,10 +4906,19 @@ def clube(time_id):
     finally:
         conn.close()
 
+    # NOVO: quantos jogadores do elenco estão a 1 cartão amarelo da
+    # suspensão automática - jogo com muita gente nessa situação tende a
+    # ter menos cartão de verdade (ninguém quer arriscar ficar de fora),
+    # então vale destacar isso na tela.
+    jogadores_na_regua = sorted(
+        [j["nome"] for j in lista if j["cartoes_suspensao"] == 2]
+    )
+
     return render_template_string(
         PAGINA_CLUBE, jogadores=lista, ultima_escalacao=ultima_escalacao,
         proximo_jogo=proximo_jogo, nome_clube=nome_clube, escudo_url=escudo_url,
         time_id=time_id, elenco_por_posicao=elenco_por_posicao, lideres_time=lideres_time,
+        jogadores_na_regua=jogadores_na_regua,
         nav_html=barra_navegacao("jogadores", round(banca_atual, 2)),
     )
 
