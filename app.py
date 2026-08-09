@@ -760,6 +760,14 @@ def buscar_recomendacoes(cur):
 # realista.
 LARGURA_MINIMA_FAIXA = 3.0
 
+# NOVO: limites de pool (por casa de apostas) pro tamanho máximo adaptativo
+# de múltipla - calculados pra manter combinations() sempre abaixo de umas
+# 2-3 milhões de combinações testadas por tamanho, mesmo no pior caso (bem
+# folgado pra uma única requisição web). C(50,5) ≈ 2.1 milhões,
+# C(90,4) ≈ 2.55 milhões, C(200,3) ≈ 1.3 milhão - todos dentro da margem.
+LIMITE_POOL_PARA_5_PERNAS = 50
+LIMITE_POOL_PARA_4_PERNAS = 90
+
 
 def montar_combinacoes(recomendacoes, odd_min, odd_max):
     grupos = {}
@@ -854,7 +862,25 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                 melhores = sorted(legs, key=lambda p: p["probabilidade"] * p["odd"] - 1, reverse=True)
                 pernas_para_combo.extend(melhores[:MAX_LINHAS_POR_MERCADO])
 
-        for tamanho in (1, 2, 3, 4, 5):
+        # NOVO (limite adaptativo de tamanho da múltipla): combinations()
+        # cresce MUITO rápido com o tamanho do pool - com poucos jogos
+        # rolando (como hoje), até 5 pernas é tranquilo (pool pequeno,
+        # poucas combinações de verdade). Mas com rodada cheia (10+ jogos,
+        # quando tiver os 20 times ativos), o pool de pernas passa de 150-
+        # 200, e C(200, 5) passa de 2 BILHÕES de combinações testadas -
+        # trava a página. Em vez de um limite fixo (perderia as múltiplas
+        # "de diversão" com odd bem alta nos dias de pool pequeno), o
+        # limite se ajusta sozinho: só aperta quando o pool realmente fica
+        # grande o suficiente pra virar risco de performance.
+        tamanho_pool = len(pernas_para_combo)
+        if tamanho_pool <= LIMITE_POOL_PARA_5_PERNAS:
+            tamanho_maximo_combo = 5
+        elif tamanho_pool <= LIMITE_POOL_PARA_4_PERNAS:
+            tamanho_maximo_combo = 4
+        else:
+            tamanho_maximo_combo = 3
+
+        for tamanho in range(1, tamanho_maximo_combo + 1):
             pool = pernas if tamanho == 1 else pernas_para_combo
             if len(pool) < tamanho:
                 continue
