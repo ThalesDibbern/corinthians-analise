@@ -75,6 +75,18 @@ FATOR_ARBITRO_MAXIMO = 1.15
 FATOR_FORMA_MINIMO = 0.85
 FATOR_FORMA_MAXIMO = 1.15
 
+# NOVO (cartão x suspensão): quanto mais jogadores dos dois times estão a
+# 1 cartão amarelo da suspensão automática (regra do Brasileirão: 3
+# cartões = 1 jogo de suspensão), mais cauteloso o jogo tende a ser -
+# ninguém quer arriscar ficar de fora do próximo jogo. Esse ajuste só
+# REDUZ a probabilidade de "mais de X cartões" (por isso o teto é 1.0,
+# nunca aumenta), com um piso pra não dominar sobre o padrão real mesmo
+# em cenários extremos (ex: os 2 times inteiros na régua).
+FATOR_SUSPENSAO_MINIMO = 0.80
+FATOR_SUSPENSAO_MAXIMO = 1.00
+FATOR_SUSPENSAO_POR_JOGADOR = 0.03
+TEMPORADA_ATUAL = 2026  # cartão não carrega de uma temporada pra outra
+
 # NOVO (disponibilidade de jogador): quantos jogos recentes olhar pra decidir
 # se um jogador "sumiu" da escalação (sinal de lesão/suspensão/corte do
 # time) - só usado quando ainda não temos a escalação confirmada da
@@ -284,6 +296,50 @@ def calcular_fator_forma_recente(cur, resultado_cor, time_id):
     return max(FATOR_FORMA_MINIMO, min(FATOR_FORMA_MAXIMO, fator))
 
 
+def contar_jogadores_na_regua(cur, time_id):
+    """NOVO (cartão x suspensão): quantos jogadores ATIVOS desse time estão
+    a 1 cartão amarelo da suspensão automática (2 de 3 acumulados na
+    TEMPORADA_ATUAL) - mesma lógica de acumular/zerar usada na exibição de
+    "estatísticas de jogador" do site (zera automaticamente ao bater 3,
+    simulando a suspensão sendo cumprida em seguida)."""
+    if time_id is None:
+        return 0
+    cur.execute(
+        """
+        SELECT c.jogador_id, j.data_jogo
+        FROM cartoes c
+        JOIN jogos j ON j.id = c.jogo_id
+        JOIN jogadores jog ON jog.id = c.jogador_id
+        WHERE c.cor = 'amarelo'
+          AND EXTRACT(YEAR FROM j.data_jogo) = %s
+          AND jog.ativo = TRUE
+          AND jog.time_atual_id = %s
+        ORDER BY c.jogador_id, j.data_jogo ASC, j.id ASC
+        """,
+        (TEMPORADA_ATUAL, time_id),
+    )
+    contagem = {}
+    for jogador_id, _data_jogo in cur.fetchall():
+        atual = contagem.get(jogador_id, 0) + 1
+        contagem[jogador_id] = 0 if atual >= 3 else atual
+    return sum(1 for v in contagem.values() if v == 2)
+
+
+def calcular_fator_suspensao(cur, nosso_time_id, adversario_id):
+    """NOVO (cartão x suspensão): multiplicador a aplicar na probabilidade
+    de "mais de X" cartões total do jogo, com base em quantos jogadores
+    dos DOIS times estão a 1 cartão da suspensão. Só reduz, nunca aumenta
+    (teto 1.0) - e tem piso (FATOR_SUSPENSAO_MINIMO), pra não dominar
+    sobre o padrão real mesmo com muita gente na régua dos dois lados.
+    Retorna None quando ninguém está na régua (não belisca nada, evita
+    ficar marcando toda recomendação com um fator 1.00x que não diz nada)."""
+    total_na_regua = contar_jogadores_na_regua(cur, nosso_time_id) + contar_jogadores_na_regua(cur, adversario_id)
+    if total_na_regua == 0:
+        return None
+    fator = 1.0 - (FATOR_SUSPENSAO_POR_JOGADOR * total_na_regua)
+    return max(FATOR_SUSPENSAO_MINIMO, min(FATOR_SUSPENSAO_MAXIMO, fator))
+
+
 def buscar_media_geral_cartoes(cur):
     """NOVO: média geral de cartões por jogo, calculada a partir de todos os
     árbitros com perfil já calculado. Serve de linha de base pra saber se um
@@ -450,6 +506,7 @@ def calcular_recomendacoes(cur):
         fator_arbitro_aplicado = None
         veio_de_confronto_direto = False
         fator_forma_aplicado = None
+        fator_suspensao_aplicado = None
 
         # NOVO (confronto direto): identifica o adversário por ID (não por
         # texto - evita o problema de nomes grafados diferente entre
@@ -572,6 +629,19 @@ def calcular_recomendacoes(cur):
                 veio_de_confronto_direto = True
             else:
                 frequencia_bruta = buscar_frequencia_cartao_total(cur, linha, nosso_time_id)
+
+            # NOVO (cartão x suspensão): belisca a frequência "mais de X"
+            # (seja ela do confronto direto ou do padrão geral) pra baixo
+            # quando tem muita gente na régua da suspensão nos dois times -
+            # ver docstring de calcular_fator_suspensao. Aplicado ANTES de
+            # separar mais/menos, pra "menos" herdar o complemento certo
+            # (100 - frequência já ajustada), sem precisar duplicar a conta.
+            if frequencia_bruta is not None:
+                fator_suspensao = calcular_fator_suspensao(cur, nosso_time_id, adversario_id)
+                if fator_suspensao is not None:
+                    frequencia_bruta = round(frequencia_bruta * fator_suspensao, 2)
+                    fator_suspensao_aplicado = fator_suspensao
+
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
@@ -624,6 +694,9 @@ def calcular_recomendacoes(cur):
 
         if fator_forma_aplicado is not None:
             descricao_final += f" (ajustado pela forma recente, fator {fator_forma_aplicado:.2f}x)"
+
+        if fator_suspensao_aplicado is not None:
+            descricao_final += f" (ajustado por jogadores na régua da suspensão, fator {fator_suspensao_aplicado:.2f}x)"
 
         if veio_de_confronto_direto:
             descricao_final += " (confronto direto)"
