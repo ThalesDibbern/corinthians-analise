@@ -376,21 +376,23 @@ def calcular_padrao_cartao_time(cur, time_id, linhas_testadas):
     """NOVO (estatísticas de time): cartões (amarelo + vermelho) recebidos
     por jogadores do NOSSO time em cada jogo - diferente de
     padroes_cartao_total (que soma os dois times do jogo). Usa a tabela
-    `cartoes` diretamente: o campo `lado` ali já é gravado relativo ao
-    NOSSO time (ver popular_banco.py/salvar_eventos - `lado = "mandante"
-    if ev["team"]["id"] == nosso_time_api_id else "visitante"`), não ao
+    cartoes diretamente: o campo lado ali já é gravado relativo ao
+    NOSSO time (ver popular_banco.py/salvar_eventos), não ao
     mandante/visitante real do jogo - por isso, diferente da função acima,
-    não precisa de nenhuma tradução via jogos.mandante."""
+    não precisa de nenhuma tradução via jogos.mandante.
+    CORRIGIDO: mesmo bug de contagem duplicada de calcular_padroes_cartao_total
+    (JOIN direto com cartoes depois de já ter juntado com estatisticas_jogo,
+    que tem 2 linhas por jogo, duplicava cada cartão) - agora conta numa
+    subconsulta separada."""
     cur.execute(
         """
         SELECT contagem.total_cartoes
         FROM (
             SELECT j.id AS jogo_id, j.data_jogo,
-                   COUNT(c.id) FILTER (WHERE c.lado = 'mandante') AS total_cartoes,
+                   (SELECT COUNT(*) FROM cartoes c WHERE c.jogo_id = j.id AND c.lado = 'mandante') AS total_cartoes,
                    COUNT(DISTINCT eg.lado) AS lados
             FROM jogos j
             JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
-            LEFT JOIN cartoes c ON c.jogo_id = j.id
             WHERE j.nosso_time_id = %s AND j.data_jogo < CURRENT_DATE
             GROUP BY j.id, j.data_jogo
         ) contagem
@@ -593,21 +595,30 @@ def salvar_padroes_escanteio_total(cur, resultados, time_id):
 
 
 def calcular_padroes_cartao_total(cur, time_id):
-    """NOVO: cartões do jogo INTEIRO (mandante + visitante somados). Só
-    considera jogos "completos" (com estatísticas dos dois lados já salvas
+    """Cartões do jogo INTEIRO (mandante + visitante somados). Só
+    considera jogos completos (com estatísticas dos dois lados já salvas
     em estatisticas_jogo) como critério de que o jogo já foi totalmente
-    processado - sem isso, um jogo ainda não coletado entraria como "0
-    cartões" por engano, em vez de simplesmente não entrar na amostra.
-    NOVO (multi-time): filtra por nosso_time_id."""
+    processado - sem isso, um jogo ainda não coletado entraria como 0
+    cartões por engano, em vez de simplesmente não entrar na amostra.
+    CORRIGIDO: antes fazia JOIN direto com cartoes DEPOIS de já ter
+    juntado com estatisticas_jogo - só que estatisticas_jogo tem 2
+    linhas por jogo (mandante + visitante), então cada cartão real virava
+    2 linhas na junção (uma pra cada lado de estatisticas_jogo), contando
+    tudo em DOBRO (um jogo com 6 cartões de verdade aparecia como 12).
+    Isso também explicava outro sintoma: como o total sempre saía par
+    (dobro de um inteiro), mais de 4.5 e mais de 5.5 empatavam sempre
+    - o valor real nunca cai em 5 (ímpar) pra diferenciar as duas linhas.
+    Agora conta os cartões numa subconsulta separada, sem passar pela
+    junção com estatisticas_jogo, então não duplica mais."""
     cur.execute(
         """
         SELECT contagem.total_cartoes
         FROM (
-            SELECT j.id AS jogo_id, j.data_jogo, COUNT(c.id) AS total_cartoes,
+            SELECT j.id AS jogo_id, j.data_jogo,
+                   (SELECT COUNT(*) FROM cartoes c WHERE c.jogo_id = j.id) AS total_cartoes,
                    COUNT(DISTINCT eg.lado) AS lados
             FROM jogos j
             JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
-            LEFT JOIN cartoes c ON c.jogo_id = j.id
             WHERE j.data_jogo < CURRENT_DATE AND j.nosso_time_id = %s
             GROUP BY j.id, j.data_jogo
         ) contagem
@@ -730,16 +741,20 @@ def buscar_totais_escanteio_confronto(cur, corinthians_id, adversario_id, mandan
 
 
 def buscar_totais_cartao_confronto(cur, corinthians_id, adversario_id, mandante_filtro):
+    """CORRIGIDO: mesmo bug de contagem duplicada das outras funções de
+    cartão total (JOIN direto com `cartoes` depois de `estatisticas_jogo`,
+    que tem 2 linhas por jogo, duplicava cada cartão) - agora conta numa
+    subconsulta separada."""
     condicao = condicao_confronto(mandante_filtro)
     cur.execute(
         f"""
         SELECT contagem.total_cartoes
         FROM (
-            SELECT j.id AS jogo_id, COUNT(c.id) AS total_cartoes,
+            SELECT j.id AS jogo_id,
+                   (SELECT COUNT(*) FROM cartoes c WHERE c.jogo_id = j.id) AS total_cartoes,
                    COUNT(DISTINCT eg.lado) AS lados
             FROM jogos j
             JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
-            LEFT JOIN cartoes c ON c.jogo_id = j.id
             WHERE {condicao} AND j.data_jogo < CURRENT_DATE
             GROUP BY j.id
         ) contagem
