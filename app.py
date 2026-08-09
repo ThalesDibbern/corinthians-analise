@@ -768,6 +768,14 @@ LARGURA_MINIMA_FAIXA = 3.0
 LIMITE_POOL_PARA_5_PERNAS = 50
 LIMITE_POOL_PARA_4_PERNAS = 90
 
+# NOVO: teto de quantas múltiplas (2+ pernas) a página mostra no total,
+# mesmo com pool pequeno - protege contra faixa de odd muito larga (ex:
+# 10 a 1000) gerando dezenas de milhares de combinações válidas, o que
+# trava o navegador na hora de montar a página (o HTML de cada card vai
+# todo de uma vez, a paginação só esconde visualmente depois). Sempre
+# mantém as de maior probabilidade histórica.
+MAX_MULTIPLAS_RESULTADO = 300
+
 
 def montar_combinacoes(recomendacoes, odd_min, odd_max):
     grupos = {}
@@ -1045,7 +1053,20 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
     # por valor esperado - ajuda visualmente, sem precisar procurar a
     # aposta mais confiável no meio da lista.
     resultado.sort(key=lambda c: c["probabilidade_combinada"], reverse=True)
-    return resultado
+
+    # NOVO (teto de múltiplas): o limite adaptativo de pernas protege o
+    # CÁLCULO (evita testar bilhões de combinações com pool grande), mas
+    # não evita gerar milhares de RESULTADOS quando a faixa de odd pedida é
+    # muito larga (ex: odd mínima 10, máxima 1000) - mesmo com pool
+    # pequeno, isso pode passar de 30 mil combinações válidas, travando o
+    # navegador na hora de montar a página inteira (o HTML de cada card é
+    # enviado de uma vez, a paginação só esconde visualmente). Individuais
+    # continuam sem teto (a quantidade já é naturalmente limitada pelas
+    # odds reais disponíveis) - só múltiplas (2+ pernas) são cortadas,
+    # mantendo sempre as de maior probabilidade histórica.
+    individuais_final = [c for c in resultado if len(c["pernas"]) == 1]
+    multiplas_final = [c for c in resultado if len(c["pernas"]) > 1][:MAX_MULTIPLAS_RESULTADO]
+    return individuais_final + multiplas_final
 
 
 def descobrir_motivo(cur):
