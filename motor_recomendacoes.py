@@ -471,8 +471,15 @@ def resultado_do_ponto_de_vista_corinthians(direcao, mandante):
 
 
 def jogador_disponivel(cur, jogador_id, jogo_id):
-    """NOVO: evita recomendar aposta em jogador que provavelmente não vai
-    jogar (suspenso, lesionado, cortado do time).
+    """Evita recomendar aposta em jogador que provavelmente não vai jogar
+    (suspenso, lesionado, cortado do time).
+
+    Prioridade 0 - lesão/suspensão reportada (API-Football /injuries,
+    coletada em atualizar_odds.py): se existe um registro pra esse
+    jogador nesse jogo específico, é o sinal mais direto e com mais
+    antecedência que temos - normalmente aparece dias antes do jogo, bem
+    antes da escalação sair. Bloqueia direto, sem precisar dos fallbacks
+    abaixo.
 
     Prioridade 1 - escalação CONFIRMADA da partida específica: a API-Football
     normalmente libera isso só perto do jogo (às vezes só ~1h antes), então
@@ -491,6 +498,13 @@ def jogador_disponivel(cur, jogador_id, jogo_id):
     Se não houver dado de escalação suficiente pra decidir (pipeline ainda
     não processou, ou jogador muito novo no banco), NÃO bloqueia - dado
     insuficiente não deve descartar uma recomendação que poderia ser boa."""
+    cur.execute(
+        "SELECT 1 FROM lesoes_suspensoes WHERE jogo_id = %s AND jogador_id = %s",
+        (jogo_id, jogador_id),
+    )
+    if cur.fetchone() is not None:
+        return False
+
     cur.execute("SELECT COUNT(*) FROM escalacoes WHERE jogo_id = %s", (jogo_id,))
     tem_escalacao_confirmada = cur.fetchone()[0] > 0
 
