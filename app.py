@@ -523,12 +523,19 @@ PAGINA = """
         // porque a lista de recomendações inteira desaparecia). Agora, se
         // não tem odd_min/odd_max na URL mas o navegador lembra da última
         // busca feita, redireciona sozinho pra ela.
+        // O "&auto=1" marca que foi ESSE redirecionamento automático que
+        // trouxe você pra cá (não um clique real no formulário) - o
+        // servidor usa isso pra NÃO disparar atualização de odds nesse
+        // caso, só mostrar os resultados que já existem. Sem essa marcação,
+        // só navegar de volta pra essa página (sem pedir nada) já disparava
+        // uma atualização de verdade toda vez que passava de 1h, gastando
+        // cota da OddsPapi à toa.
         if (!window.location.search.includes('odd_min')) {
             try {
                 const oddMin = localStorage.getItem('ultima_busca_odd_min');
                 const oddMax = localStorage.getItem('ultima_busca_odd_max');
                 if (oddMin && oddMax) {
-                    window.location.replace('/?odd_min=' + encodeURIComponent(oddMin) + '&odd_max=' + encodeURIComponent(oddMax));
+                    window.location.replace('/?odd_min=' + encodeURIComponent(oddMin) + '&odd_max=' + encodeURIComponent(oddMax) + '&auto=1');
                 }
             } catch (e) {}
         }
@@ -5057,6 +5064,13 @@ def index():
     odd_max = request.args.get("odd_max", "5.0")
     buscou = "odd_min" in request.args
     forcar_atualizacao = request.args.get("forcar") == "1"
+    # NOVO: distingue um clique de verdade no formulário de um
+    # redirecionamento automático (JS) que só está restaurando a última
+    # busca depois de navegar de volta pra essa página - só o clique de
+    # verdade (ou "Atualizar recomendações") deve poder disparar uma
+    # atualização de odds; só voltar navegando não deveria gastar cota
+    # nenhuma da OddsPapi.
+    eh_redirecionamento_automatico = request.args.get("auto") == "1"
 
     combinacoes = []
     motivo = ""
@@ -5068,10 +5082,11 @@ def index():
         banca_atual = buscar_banca(cur, session["usuario_id"])
 
         # NOVO: só mexe na atualização de odds quando a pessoa realmente
-        # pediu recomendações (buscou=True) ou clicou em "Atualizar
-        # recomendações" (forcar=True) - só entrar na página sem clicar em
-        # nada não dispara nenhum Run Now.
-        if buscou or forcar_atualizacao:
+        # pediu recomendações de propósito (buscou=True e NÃO foi um
+        # redirecionamento automático) ou clicou em "Atualizar
+        # recomendações" (forcar=True) - só entrar/voltar na página sem
+        # ação explícita não dispara nenhuma atualização.
+        if (buscou and not eh_redirecionamento_automatico) or forcar_atualizacao:
             ultima, disparou_agora = processar_atualizacao_odds(cur, session["usuario_id"], forcar_atualizacao)
             conn.commit()
             if ultima:
