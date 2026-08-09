@@ -297,6 +297,37 @@ def calcular_fator_forma_recente(cur, resultado_cor, time_id):
     return max(FATOR_FORMA_MINIMO, min(FATOR_FORMA_MAXIMO, fator))
 
 
+ULTIMOS_JOGOS_PARA_TITULARES = 3
+QTD_TITULARES_PROVAVEIS = 11
+
+
+def buscar_titulares_provaveis(cur, time_id):
+    """NOVO (cartão x suspensão - só quem tende a jogar): os jogadores que
+    mais apareceram como TITULAR nos últimos ULTIMOS_JOGOS_PARA_TITULARES
+    jogos desse time - usado pra restringir o ajuste de cartão x suspensão
+    só a quem tem chance real de entrar em campo. Reserva "na régua" que
+    nem costuma jogar não muda o comportamento cauteloso do time, então
+    não devia pesar na conta (incluir ele só dilui/exagera o ajuste à toa)."""
+    if time_id is None:
+        return set()
+    cur.execute(
+        "SELECT id FROM jogos WHERE nosso_time_id = %s AND placar_corinthians IS NOT NULL "
+        "ORDER BY data_jogo DESC LIMIT %s",
+        (time_id, ULTIMOS_JOGOS_PARA_TITULARES),
+    )
+    jogo_ids = [row[0] for row in cur.fetchall()]
+    if not jogo_ids:
+        return set()
+
+    cur.execute(
+        "SELECT jogador_id, COUNT(*) AS aparicoes FROM escalacoes "
+        "WHERE jogo_id = ANY(%s) AND titular = TRUE "
+        "GROUP BY jogador_id ORDER BY aparicoes DESC LIMIT %s",
+        (jogo_ids, QTD_TITULARES_PROVAVEIS),
+    )
+    return {row[0] for row in cur.fetchall()}
+
+
 def peso_jogadores_na_regua(cur, time_id):
     """NOVO (cartão x suspensão, ponderado por jogador): soma o "peso de
     cautela" dos jogadores desse time que estão a 1 cartão amarelo da
@@ -332,7 +363,14 @@ def peso_jogadores_na_regua(cur, time_id):
     for jogador_id, _data_jogo in cur.fetchall():
         atual = contagem.get(jogador_id, 0) + 1
         contagem[jogador_id] = 0 if atual >= 3 else atual
-    jogadores_na_regua = [jid for jid, v in contagem.items() if v == 2]
+
+    # NOVO: só considera quem tem chance real de jogar - reserva raramente
+    # usado "na régua" não muda o comportamento do time, então não deveria
+    # pesar (ver docstring de buscar_titulares_provaveis).
+    titulares_provaveis = buscar_titulares_provaveis(cur, time_id)
+    jogadores_na_regua = [
+        jid for jid, v in contagem.items() if v == 2 and jid in titulares_provaveis
+    ]
     if not jogadores_na_regua:
         return 0.0
 
