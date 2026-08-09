@@ -522,9 +522,12 @@ def buscar_lesoes_suspensos(fixture_id_api):
         resultado = []
         for item in dados.get("response", []):
             jogador_api = item.get("player", {}) or {}
+            time_api = item.get("team", {}) or {}
             resultado.append({
                 "jogador_api_football_id": jogador_api.get("id"),
                 "jogador_nome": jogador_api.get("name"),
+                "time_api_football_id": time_api.get("id"),
+                "time_nome": time_api.get("name"),
                 "tipo": jogador_api.get("type"),
                 "motivo": jogador_api.get("reason"),
                 "bruto": item,
@@ -539,9 +542,23 @@ def salvar_lesoes_suspensoes(cur, jogo_id, lesoes):
     """NOVO (integração /injuries): grava a lista de lesão/suspensão desse
     jogo. Apaga os registros antigos desse jogo_id antes - o status pode
     mudar de um dia pro outro (jogador recuperado, por exemplo), então não
-    faz sentido acumular; sempre reflete a última checagem."""
+    faz sentido acumular; sempre reflete a última checagem.
+
+    CORRIGIDO: confirmado na prática que a API-Football devolve cada
+    jogador reportado DUAS VEZES na resposta de /injuries?fixture=X (não
+    é bug nosso na montagem da chamada - a lista que ela manda já vem
+    assim). Deduplica por jogador (api_football_id, com fallback pro nome
+    quando não vem ID) antes de gravar, senão cada jogador vira 2 linhas
+    idênticas na tabela."""
     cur.execute("DELETE FROM lesoes_suspensoes WHERE jogo_id = %s", (jogo_id,))
+
+    vistos = set()
     for item in lesoes:
+        chave = item["jogador_api_football_id"] or item["jogador_nome"]
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+
         jogador_id = None
         if item["jogador_api_football_id"] is not None:
             cur.execute(
@@ -778,8 +795,15 @@ def main():
                     salvar_lesoes_suspensoes(cur, jogo_id, lesoes)
                     conn.commit()
                     if lesoes:
-                        nomes = ", ".join(l["jogador_nome"] or "?" for l in lesoes)
-                        print(f"  {len(lesoes)} jogador(es) com lesão/suspensão reportada: {nomes}")
+                        # NOVO: o /injuries?fixture=X traz o relatório dos DOIS
+                        # times do confronto, não só o nosso - mostra o time de
+                        # cada jogador reportado, pra não parecer que todo
+                        # mundo é do nosso time quando metade pode ser do
+                        # adversário.
+                        detalhes = ", ".join(
+                            f"{l['jogador_nome'] or '?'} ({l.get('time_nome') or '?'})" for l in lesoes
+                        )
+                        print(f"  {len(lesoes)} jogador(es) com lesão/suspensão reportada nesse confronto: {detalhes}")
 
                 # NOVO: se a busca de odds falhar pra ESSE jogo específico (ex: 403,
                 # jogo fora da cobertura da OddsPapi, competição não suportada),
