@@ -84,7 +84,8 @@ FATOR_FORMA_MAXIMO = 1.15
 # em cenários extremos (ex: os 2 times inteiros na régua).
 FATOR_SUSPENSAO_MINIMO = 0.80
 FATOR_SUSPENSAO_MAXIMO = 1.00
-FATOR_SUSPENSAO_POR_JOGADOR = 0.03
+FATOR_SUSPENSAO_ESCALA = 0.15
+PESO_PADRAO_SEM_HISTORICO_CARTAO = 0.15  # jogador na régua sem padrão calculado ainda (poucos jogos) - peso neutro
 TEMPORADA_ATUAL = 2026  # cartão não carrega de uma temporada pra outra
 
 # NOVO (disponibilidade de jogador): quantos jogos recentes olhar pra decidir
@@ -296,14 +297,23 @@ def calcular_fator_forma_recente(cur, resultado_cor, time_id):
     return max(FATOR_FORMA_MINIMO, min(FATOR_FORMA_MAXIMO, fator))
 
 
-def contar_jogadores_na_regua(cur, time_id):
-    """NOVO (cartão x suspensão): quantos jogadores ATIVOS desse time estão
-    a 1 cartão amarelo da suspensão automática (2 de 3 acumulados na
-    TEMPORADA_ATUAL) - mesma lógica de acumular/zerar usada na exibição de
-    "estatísticas de jogador" do site (zera automaticamente ao bater 3,
-    simulando a suspensão sendo cumprida em seguida)."""
+def peso_jogadores_na_regua(cur, time_id):
+    """NOVO (cartão x suspensão, ponderado por jogador): soma o "peso de
+    cautela" dos jogadores desse time que estão a 1 cartão amarelo da
+    suspensão automática (2 de 3 acumulados na TEMPORADA_ATUAL) - cada um
+    pesa pela PRÓPRIA frequência histórica de tomar cartão
+    (padroes_jogador_cartao), não conta igual pra todo mundo. Um
+    zagueiro/volante com histórico alto de cartão (ex: 35% dos jogos) pesa
+    muito mais nessa soma do que um atacante que quase nunca é cartonado
+    (ex: 5%), mesmo os dois estando "na régua" no momento - o atacante
+    dificilmente vai mudar o comportamento do jogo por estar cauteloso,
+    o zagueiro/volante sim.
+    Jogador na régua sem padrão de cartão calculado ainda (poucos jogos
+    disputados) entra com um peso neutro (PESO_PADRAO_SEM_HISTORICO_CARTAO),
+    em vez de simplesmente não contar - evita "sumir" da conta só por
+    faltar dado, sem assumir o pior caso."""
     if time_id is None:
-        return 0
+        return 0.0
     cur.execute(
         """
         SELECT c.jogador_id, j.data_jogo
@@ -322,21 +332,36 @@ def contar_jogadores_na_regua(cur, time_id):
     for jogador_id, _data_jogo in cur.fetchall():
         atual = contagem.get(jogador_id, 0) + 1
         contagem[jogador_id] = 0 if atual >= 3 else atual
-    return sum(1 for v in contagem.values() if v == 2)
+    jogadores_na_regua = [jid for jid, v in contagem.items() if v == 2]
+    if not jogadores_na_regua:
+        return 0.0
+
+    cur.execute(
+        "SELECT jogador_id, frequencia FROM padroes_jogador_cartao WHERE jogador_id = ANY(%s)",
+        (jogadores_na_regua,),
+    )
+    frequencias = {jid: float(freq) for jid, freq in cur.fetchall()}
+
+    return sum(
+        (frequencias[jid] / 100) if jid in frequencias else PESO_PADRAO_SEM_HISTORICO_CARTAO
+        for jid in jogadores_na_regua
+    )
 
 
 def calcular_fator_suspensao(cur, nosso_time_id, adversario_id):
     """NOVO (cartão x suspensão): multiplicador a aplicar na probabilidade
-    de "mais de X" cartões total do jogo, com base em quantos jogadores
-    dos DOIS times estão a 1 cartão da suspensão. Só reduz, nunca aumenta
-    (teto 1.0) - e tem piso (FATOR_SUSPENSAO_MINIMO), pra não dominar
-    sobre o padrão real mesmo com muita gente na régua dos dois lados.
+    de "mais de X" cartões total do jogo, com base no peso combinado dos
+    jogadores dos DOIS times que estão a 1 cartão da suspensão (ver
+    peso_jogadores_na_regua - pondera por histórico individual de cartão,
+    não conta todo jogador igual). Só reduz, nunca aumenta (teto 1.0) - e
+    tem piso (FATOR_SUSPENSAO_MINIMO), pra não dominar sobre o padrão real
+    mesmo com muita gente na régua dos dois lados.
     Retorna None quando ninguém está na régua (não belisca nada, evita
     ficar marcando toda recomendação com um fator 1.00x que não diz nada)."""
-    total_na_regua = contar_jogadores_na_regua(cur, nosso_time_id) + contar_jogadores_na_regua(cur, adversario_id)
-    if total_na_regua == 0:
+    peso_total = peso_jogadores_na_regua(cur, nosso_time_id) + peso_jogadores_na_regua(cur, adversario_id)
+    if peso_total == 0:
         return None
-    fator = 1.0 - (FATOR_SUSPENSAO_POR_JOGADOR * total_na_regua)
+    fator = 1.0 - (FATOR_SUSPENSAO_ESCALA * peso_total)
     return max(FATOR_SUSPENSAO_MINIMO, min(FATOR_SUSPENSAO_MAXIMO, fator))
 
 
