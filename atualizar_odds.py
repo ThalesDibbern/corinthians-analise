@@ -41,6 +41,7 @@ Variáveis de ambiente necessárias (configuradas no Railway, aba "Variables"):
 import os
 import re
 import time
+import json
 from datetime import datetime, timezone
 
 import requests
@@ -490,6 +491,75 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
     return cur.fetchone()[0]
 
 
+def buscar_lesoes_suspensos(fixture_id_api):
+    """NOVO (integração /injuries): busca a lista de jogadores machucados/
+    suspensos reportada pela API-Football pra um jogo específico. Usa o
+    parâmetro `fixture` (o mais direto - traz o relatório de
+    indisponibilidade já filtrado pros dois times daquele confronto,
+    sem precisar cruzar manualmente com a lista inteira da liga).
+
+    Retorna lista de dicts (um por jogador reportado) ou lista vazia se
+    não tiver nada, a chave não estiver configurada, ou a chamada falhar
+    por qualquer motivo - esse dado é complementar, não deve travar o
+    script. Guarda o item bruto (`bruto`) junto, pra não perder nada se
+    algum campo específico vier com nome diferente do esperado."""
+    if not API_FOOTBALL_KEY:
+        return []
+
+    try:
+        resp = requests.get(
+            f"{API_FOOTBALL_BASE}/injuries",
+            headers={"x-apisports-key": API_FOOTBALL_KEY},
+            params={"fixture": fixture_id_api},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        dados = resp.json()
+        if dados.get("errors"):
+            print(f"  Aviso: API-Football retornou erro em /injuries: {dados['errors']}")
+            return []
+
+        resultado = []
+        for item in dados.get("response", []):
+            jogador_api = item.get("player", {}) or {}
+            resultado.append({
+                "jogador_api_football_id": jogador_api.get("id"),
+                "jogador_nome": jogador_api.get("name"),
+                "tipo": jogador_api.get("type"),
+                "motivo": jogador_api.get("reason"),
+                "bruto": item,
+            })
+        return resultado
+    except Exception as e:
+        print(f"  Aviso: não foi possível consultar /injuries desse jogo ({e}). Seguindo sem esse dado.")
+        return []
+
+
+def salvar_lesoes_suspensoes(cur, jogo_id, lesoes):
+    """NOVO (integração /injuries): grava a lista de lesão/suspensão desse
+    jogo. Apaga os registros antigos desse jogo_id antes - o status pode
+    mudar de um dia pro outro (jogador recuperado, por exemplo), então não
+    faz sentido acumular; sempre reflete a última checagem."""
+    cur.execute("DELETE FROM lesoes_suspensoes WHERE jogo_id = %s", (jogo_id,))
+    for item in lesoes:
+        jogador_id = None
+        if item["jogador_api_football_id"] is not None:
+            cur.execute(
+                "SELECT id FROM jogadores WHERE api_football_id = %s",
+                (item["jogador_api_football_id"],),
+            )
+            row = cur.fetchone()
+            jogador_id = row[0] if row else None
+
+        cur.execute(
+            """INSERT INTO lesoes_suspensoes
+               (jogo_id, jogador_id, jogador_nome_api, tipo, motivo, dados_brutos)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            (jogo_id, jogador_id, item["jogador_nome"], item["tipo"], item["motivo"],
+             json.dumps(item["bruto"], ensure_ascii=False)),
+        )
+
+
 def nome_time_por_posicao(mandante, adversario, posicao, nosso_nome):
     """NOVO: traduz "Equipe 1"/"Equipe 2" (nomenclatura genérica que a
     OddsPapi usa pra mercados de time) pro nome real do time. Convenção da
@@ -693,6 +763,23 @@ def main():
                     datahora_jogo=datahora_jogo,
                 )
                 conn.commit()
+
+                # NOVO (integração /injuries): só dá pra consultar lesão/
+                # suspensão por fixture da API-Football se esse jogo já tem
+                # um fixture_id_api CONFIRMADO (positivo) - o valor sintético
+                # negativo (fallback de segurança do get_or_create_jogo,
+                # usado quando a API-Football ainda não confirmou o fixture
+                # real) nunca corresponde a um jogo de verdade lá, então
+                # pular direto evita gastar uma chamada de API à toa.
+                cur.execute("SELECT fixture_id_api FROM jogos WHERE id = %s", (jogo_id,))
+                fixture_id_api_do_jogo = cur.fetchone()[0]
+                if fixture_id_api_do_jogo and fixture_id_api_do_jogo > 0:
+                    lesoes = buscar_lesoes_suspensos(fixture_id_api_do_jogo)
+                    salvar_lesoes_suspensoes(cur, jogo_id, lesoes)
+                    conn.commit()
+                    if lesoes:
+                        nomes = ", ".join(l["jogador_nome"] or "?" for l in lesoes)
+                        print(f"  {len(lesoes)} jogador(es) com lesão/suspensão reportada: {nomes}")
 
                 # NOVO: se a busca de odds falhar pra ESSE jogo específico (ex: 403,
                 # jogo fora da cobertura da OddsPapi, competição não suportada),
