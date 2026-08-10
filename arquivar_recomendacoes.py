@@ -33,10 +33,22 @@ site, mas depois passou a esconder justamente os resultados mais recentes
 jogo já passado é arquivado assim que esse script roda, não importa há
 quanto tempo terminou.
 
+NOVO: também avalia as múltiplas capturadas em `multiplas_candidatas`
+(ver combinacoes.py/capturar_candidatas_multiplas) - pra cada candidata
+já CONGELADA (jogo mais próximo já começou) e ainda não avaliada, confere
+se todas as pernas já têm resultado conhecido (reaproveitando o resultado
+que a avaliação individual acima já calculou, em vez de reavaliar do
+zero - uma função de avaliação só, evita o mesmo tipo de bug de lógica
+duplicada divergindo que já aconteceu antes nesse projeto). Assim que uma
+candidata fica pronta, os jogos dela têm o "top-5 por probabilidade
+histórica" recalculado em `historico_multiplas_destaque` - substitui a
+página /historico, que antes recalculava tudo ao vivo a cada acesso.
+
 Variáveis de ambiente:
   - DATABASE_URL -> a URL de conexão do Postgres (mesma usada nos outros scripts)
 """
 
+import json
 import os
 import psycopg2
 
@@ -244,6 +256,150 @@ def reavaliar_pendentes_ja_arquivadas(cur):
     return reavaliadas
 
 
+def garantir_coluna_resultado_candidatas(cur):
+    """NOVO: adiciona a coluna `resultado` em `multiplas_candidatas`, se
+    ainda não existir - guarda o resultado já calculado da múltipla
+    (acertou/errou), pra não precisar recalcular de novo toda vez que
+    selecionar_top5_do_jogo roda. ADD COLUMN IF NOT EXISTS é seguro e
+    instantâneo no Postgres, rodar isso aqui evita depender de uma
+    migração manual separada só por causa de uma coluna."""
+    cur.execute("ALTER TABLE multiplas_candidatas ADD COLUMN IF NOT EXISTS resultado VARCHAR(10)")
+
+
+def buscar_resultado_perna(cur, jogo_id, jogador_id, tipo_padrao, descricao):
+    """Busca o resultado (acertou/errou/pendente) já avaliado dessa perna
+    individual em `historico_recomendacoes` - REAPROVEITA a avaliação que
+    arquivar() já fez acima, em vez de reavaliar do zero (uma função de
+    avaliação só, `avaliar_resultado`, continua sendo a única fonte de
+    verdade). Se a perna ainda não foi arquivada (jogo dela ainda não
+    passou de verdade, mesmo que o PRIMEIRO jogo da múltipla já tenha
+    passado - lembra que uma múltipla pode cruzar jogos com datas
+    diferentes), retorna None."""
+    cur.execute(
+        """
+        SELECT resultado FROM historico_recomendacoes
+        WHERE jogo_id = %s AND jogador_id IS NOT DISTINCT FROM %s
+          AND tipo_padrao = %s AND descricao = %s
+        ORDER BY id DESC LIMIT 1
+        """,
+        (jogo_id, jogador_id, tipo_padrao, descricao),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def buscar_candidatas_prontas_para_avaliar(cur):
+    """Candidatas já congeladas (jogo mais próximo já começou) e ainda não
+    avaliadas."""
+    cur.execute(
+        "SELECT id, pernas, jogos FROM multiplas_candidatas "
+        "WHERE congelada = TRUE AND avaliada = FALSE"
+    )
+    return cur.fetchall()
+
+
+def selecionar_top5_do_jogo(cur, jogo_id):
+    """Recalcula o top-5 de Múltiplas em Destaque desse jogo - pega até 5
+    candidatas já avaliadas ligadas a ele, ordenadas por probabilidade
+    histórica, e substitui a seleção anterior (idempotente - útil quando
+    uma candidata nova ainda mais provável aparece depois).
+
+    NOVO (protege a compressão de limpar_historico.py): se esse jogo já
+    tem QUALQUER linha comprimida (casa_aposta NULL) em
+    historico_multiplas_destaque, significa que ele já saiu da janela de
+    2 rodadas com detalhe completo - não reabre o detalhe dele só porque
+    uma candidata atrasada terminou de ser avaliada agora."""
+    cur.execute(
+        "SELECT COUNT(*) FROM historico_multiplas_destaque WHERE jogo_id = %s AND casa_aposta IS NULL",
+        (jogo_id,),
+    )
+    if cur.fetchone()[0] > 0:
+        return 0
+
+    cur.execute(
+        """
+        SELECT casa_aposta, descricao, odd_combinada, jogos, probabilidade_combinada, resultado
+        FROM multiplas_candidatas
+        WHERE avaliada = TRUE AND jogos @> %s::jsonb
+        ORDER BY probabilidade_combinada DESC
+        LIMIT 5
+        """,
+        (json.dumps([{"jogo_id": jogo_id}]),),
+    )
+    top5 = cur.fetchall()
+
+    cur.execute("SELECT rodada FROM jogos WHERE id = %s", (jogo_id,))
+    row = cur.fetchone()
+    rodada = row[0] if row else None
+
+    cur.execute("DELETE FROM historico_multiplas_destaque WHERE jogo_id = %s", (jogo_id,))
+    for casa, descricao, odd, jogos, prob, resultado in top5:
+        cur.execute(
+            """
+            INSERT INTO historico_multiplas_destaque
+                (jogo_id, rodada, casa_aposta, descricao, odd_combinada, jogos,
+                 probabilidade_combinada, resultado)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (jogo_id, rodada, casa, descricao, odd, json.dumps(jogos, default=str), prob, resultado),
+        )
+    return len(top5)
+
+
+def avaliar_e_selecionar_top5(cur):
+    """Pra cada candidata congelada ainda não avaliada, confere se TODAS
+    as pernas já têm resultado conhecido - se sim, calcula o resultado da
+    múltipla (errou se qualquer perna errou; acertou só se TODAS
+    acertaram; senão continua pendente, tenta de novo na próxima
+    execução) e marca `avaliada = TRUE`. Depois recalcula o top-5 de cada
+    jogo afetado."""
+    garantir_coluna_resultado_candidatas(cur)
+    candidatas = buscar_candidatas_prontas_para_avaliar(cur)
+    if not candidatas:
+        return 0, 0
+
+    avaliadas_agora = 0
+    jogos_a_reselecionar = set()
+
+    for cand_id, pernas, jogos in candidatas:
+        resultados_pernas = []
+        pronto = True
+        for perna in pernas:
+            resultado_perna = buscar_resultado_perna(
+                cur, perna["jogo_id"], perna["jogador_id"], perna["tipo_padrao"], perna["descricao"]
+            )
+            if resultado_perna is None:
+                pronto = False
+                break
+            resultados_pernas.append(resultado_perna)
+
+        if not pronto:
+            continue
+
+        if any(r == "errou" for r in resultados_pernas):
+            resultado_final = "errou"
+        elif all(r == "acertou" for r in resultados_pernas):
+            resultado_final = "acertou"
+        else:
+            resultado_final = "pendente"  # alguma perna arquivada mas ainda sem dado real
+
+        if resultado_final == "pendente":
+            continue
+
+        cur.execute(
+            "UPDATE multiplas_candidatas SET avaliada = TRUE, resultado = %s WHERE id = %s",
+            (resultado_final, cand_id),
+        )
+        avaliadas_agora += 1
+        for j in jogos:
+            jogos_a_reselecionar.add(j["jogo_id"])
+
+    for jogo_id in jogos_a_reselecionar:
+        selecionar_top5_do_jogo(cur, jogo_id)
+
+    return avaliadas_agora, len(jogos_a_reselecionar)
+
+
 def resumo_geral(cur):
     """Retorna a taxa de acerto histórica geral, pra acompanhar a performance
     do sistema ao longo do tempo."""
@@ -275,6 +431,12 @@ def main():
         if reavaliadas:
             print(f"\n{reavaliadas} recomendação(ões) que estavam pendentes foram "
                   f"reavaliadas agora que o dado real do jogo chegou.")
+        conn.commit()
+
+        avaliadas, jogos_processados = avaliar_e_selecionar_top5(cur)
+        if avaliadas:
+            print(f"\n{avaliadas} múltipla(s) candidata(s) avaliada(s) agora; "
+                  f"top-5 de Múltiplas em Destaque recalculado pra {jogos_processados} jogo(s).")
         conn.commit()
 
         resumo = resumo_geral(cur)
