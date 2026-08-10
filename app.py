@@ -20,6 +20,7 @@ Variáveis de ambiente necessárias:
 
 import os
 import json
+import secrets
 import subprocess
 import sys
 import threading
@@ -154,6 +155,47 @@ def registrar_movimento_banca(cur, usuario_id, tipo, valor, aposta_id=None):
 # não disparam de novo sozinhos - mas o botão "🔄 Atualizar recomendações"
 # permite forçar manualmente a qualquer momento.
 INTERVALO_MINIMO_ATUALIZACAO_ODDS = timedelta(hours=1)
+
+# NOVO: token de "clique real", de uso único, guardado na sessão do
+# usuário (server-side, não em cookie/localStorage). Existe porque a trava
+# de "auto=1" só protegia o redirecionamento automático via JS (voltar
+# navegando pra página) - ela NÃO protegia um F5 direto numa URL que já
+# tinha odd_min/odd_max (de um clique real anterior) ou num link
+# "Atualizar recomendações" (que carrega forcar=1, e esse ignora até a
+# trava de 1h). Nos dois casos, a URL sozinha não muda com F5, então o
+# servidor não tinha como distinguir "cliquei de novo" de "só recarreguei
+# a página".
+#
+# Funcionamento: toda vez que a página "/" é renderizada, um token novo é
+# gerado e guardado em session["token_busca_pendente"], e o MESMO token é
+# embutido no HTML (campo oculto do formulário de busca e no link
+# "Atualizar recomendações"). Quando uma requisição chega com
+# token_busca=X e X bate com o que está guardado na sessão, isso prova
+# que veio de um clique de verdade nessa página específica (não um F5,
+# que reenviaria um token JÁ CONSUMIDO) - e o token é imediatamente
+# removido da sessão (uso único), então um F5 logo em seguida chega com
+# um token que não bate mais com nada, e não dispara a atualização de
+# odds (mesmo que a URL pareça idêntica). O `auto=1` do redirecionamento
+# automático continua existindo só de referência/log; quem decide de
+# verdade se dispara é o token.
+def gerar_e_guardar_token_busca():
+    token = secrets.token_urlsafe(16)
+    session["token_busca_pendente"] = token
+    return token
+
+
+def validar_e_consumir_token_busca(token_recebido):
+    """Devolve True só se `token_recebido` bate com o token pendente da
+    sessão - nesse caso, já consome (remove) o token, pra não poder ser
+    reaproveitado por um F5/reenvio da mesma URL."""
+    if not token_recebido:
+        return False
+    valido = token_recebido == session.get("token_busca_pendente")
+    if valido:
+        session.pop("token_busca_pendente", None)
+    return valido
+
+
 # NOVO: corrige bug de fuso horário - o container do Railway roda em UTC
 # por padrão, então `.astimezone()` sem argumento (que converte pro fuso
 # LOCAL do servidor) não convertia nada de verdade, ficava mostrando a
@@ -523,13 +565,13 @@ PAGINA = """
         // porque a lista de recomendações inteira desaparecia). Agora, se
         // não tem odd_min/odd_max na URL mas o navegador lembra da última
         // busca feita, redireciona sozinho pra ela.
-        // O "&auto=1" marca que foi ESSE redirecionamento automático que
-        // trouxe você pra cá (não um clique real no formulário) - o
-        // servidor usa isso pra NÃO disparar atualização de odds nesse
-        // caso, só mostrar os resultados que já existem. Sem essa marcação,
-        // só navegar de volta pra essa página (sem pedir nada) já disparava
-        // uma atualização de verdade toda vez que passava de 1h, gastando
-        // cota da OddsPapi à toa.
+        // O "&auto=1" só marca, pra referência/log, que foi ESSE
+        // redirecionamento automático que trouxe você pra cá (não um
+        // clique real no formulário). Quem realmente decide se dispara
+        // atualização de odds é o token de uso único (token_busca, campo
+        // oculto do formulário) - esse redirecionamento automático nunca
+        // tem esse token, então nunca dispara nada, mesmo que o parâmetro
+        // "auto=1" seja removido ou forjado na URL manualmente.
         if (!window.location.search.includes('odd_min')) {
             try {
                 const oddMin = localStorage.getItem('ultima_busca_odd_min');
@@ -549,6 +591,15 @@ PAGINA = """
 
     <div class="painel">
         <form method="GET" action="/">
+            <!-- NOVO: token_busca de uso único - prova que essa submissão
+                 veio de um clique de verdade nesse formulário, nessa
+                 página específica. Sobrevive a "editar odd e clicar de
+                 novo" (o token só é consumido no servidor, o campo
+                 continua com o mesmo valor até a página recarregar), mas
+                 NÃO sobrevive a um F5 puro na URL resultante, porque o
+                 servidor já terá consumido/trocado o token na resposta
+                 anterior. -->
+            <input type="hidden" name="token_busca" value="{{ token_busca }}">
             <div class="linha-filtro">
                 <div>
                     <label for="odd_min">Odd mínima</label>
@@ -566,7 +617,7 @@ PAGINA = """
         {% if ultima_atualizacao_odds %}
         <div class="linha-atualizacao">
             <span>🔄 Última atualização de odds gerada às <b>{{ ultima_atualizacao_odds }}</b></span>
-            <a href="/?odd_min={{ odd_min }}&odd_max={{ odd_max }}&forcar=1" class="link-atualizar">Atualizar recomendações</a>
+            <a href="/?odd_min={{ odd_min }}&odd_max={{ odd_max }}&forcar=1&token_busca={{ token_busca }}" class="link-atualizar">Atualizar recomendações</a>
         </div>
         {% endif %}
     </div>
@@ -5064,13 +5115,16 @@ def index():
     odd_max = request.args.get("odd_max", "5.0")
     buscou = "odd_min" in request.args
     forcar_atualizacao = request.args.get("forcar") == "1"
-    # NOVO: distingue um clique de verdade no formulário de um
-    # redirecionamento automático (JS) que só está restaurando a última
-    # busca depois de navegar de volta pra essa página - só o clique de
-    # verdade (ou "Atualizar recomendações") deve poder disparar uma
-    # atualização de odds; só voltar navegando não deveria gastar cota
-    # nenhuma da OddsPapi.
-    eh_redirecionamento_automatico = request.args.get("auto") == "1"
+    # NOVO (troca de abordagem, ver comentário perto de
+    # gerar_e_guardar_token_busca): antes disso, a proteção contra
+    # disparo indevido era só o marcador "auto=1" do redirecionamento
+    # automático via JS - mas isso deixava passar um F5 direto numa URL
+    # com odd_min/odd_max (clique real anterior) ou no link "Atualizar
+    # recomendações", já que a URL não muda com F5 e o servidor não tinha
+    # como saber que não foi um clique novo. Agora quem decide é um token
+    # de uso único: só é um "clique real" se veio com o token certo, e
+    # esse token nunca sobrevive a um F5 (é consumido no primeiro uso).
+    eh_clique_real = validar_e_consumir_token_busca(request.args.get("token_busca"))
 
     combinacoes = []
     motivo = ""
@@ -5082,11 +5136,13 @@ def index():
         banca_atual = buscar_banca(cur, session["usuario_id"])
 
         # NOVO: só mexe na atualização de odds quando a pessoa realmente
-        # pediu recomendações de propósito (buscou=True e NÃO foi um
-        # redirecionamento automático) ou clicou em "Atualizar
-        # recomendações" (forcar=True) - só entrar/voltar na página sem
-        # ação explícita não dispara nenhuma atualização.
-        if (buscou and not eh_redirecionamento_automatico) or forcar_atualizacao:
+        # pediu recomendações de propósito, comprovado pelo token de
+        # clique real (cobre tanto o botão "Gerar recomendações da
+        # rodada" quanto o link "Atualizar recomendações", os dois
+        # embutem o mesmo token) - um F5 na mesma URL chega sem um token
+        # válido e cai no "else" (só mostra o que já existe), mesmo que
+        # buscou/forcar continuem True na URL.
+        if buscou and eh_clique_real:
             ultima, disparou_agora = processar_atualizacao_odds(cur, session["usuario_id"], forcar_atualizacao)
             conn.commit()
             if ultima:
@@ -5132,10 +5188,17 @@ def index():
     individuais = [c for c in combinacoes if len(c["pernas"]) == 1]
     multiplas = [c for c in combinacoes if len(c["pernas"]) > 1]
 
+    # NOVO: gera o token dessa renderização (o que vai pro form e pro link
+    # "Atualizar recomendações" nessa página) só agora, no fim - assim o
+    # token que sobra pendente na sessão é sempre o da ÚLTIMA página
+    # mostrada, e qualquer token de uma página antiga (inclusive o que
+    # acabou de ser consumido, se foi o caso) já não serve mais.
+    token_busca = gerar_e_guardar_token_busca()
+
     return render_template_string(
         PAGINA, odd_min=odd_min, odd_max=odd_max, buscou=buscou,
         individuais=individuais, multiplas=multiplas, motivo=motivo, banca_atual=round(banca_atual, 2),
-        ultima_atualizacao_odds=ultima_atualizacao_odds,
+        ultima_atualizacao_odds=ultima_atualizacao_odds, token_busca=token_busca,
         nav_html=barra_navegacao("index", round(banca_atual, 2)),
     )
 
