@@ -3896,6 +3896,31 @@ PAGINA_TIME = """
         }
         .linha-item b { color: #3fb950; }
 
+        /* NOVO (estilo de jogo - Fase 1, só exibição): cartão com o
+           "jeito de jogar" do time (ofensivo/defensivo), em impedimento
+           e cartão - nada aqui influencia recomendação/VE, é só
+           informativo. */
+        .estilo-aviso {
+            color: #8b949e; font-size: 0.78rem; margin: 6px 0 0;
+        }
+        .estilo-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px;
+        }
+        @media (max-width: 700px) {
+            .estilo-grid { grid-template-columns: 1fr; }
+        }
+        .estilo-papel-titulo {
+            font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.03em;
+            margin-bottom: 6px;
+        }
+        .estilo-valor {
+            font-size: 1.05rem; font-weight: 700; margin-bottom: 2px;
+        }
+        .estilo-valor.acima { color: #f85149; }
+        .estilo-valor.abaixo { color: #3fb950; }
+        .estilo-valor.neutro { color: #8b949e; }
+        .estilo-detalhe { font-size: 0.76rem; color: #8b949e; }
+
         /* coluna 3: posição na tabela + últimos jogos */
         .tabela-vizinhos { width: 100%; border-collapse: collapse; margin-bottom: 26px; }
         .linha-vizinho td {
@@ -3984,6 +4009,48 @@ PAGINA_TIME = """
                 {% endif %}
                 {{ nome_time }}
             </div>
+
+            {% if estilo_time %}
+            <div class="cartao">
+                <div class="bloco-topo">
+                    <div class="bloco-titulo">🧬 Estilo de jogo</div>
+                </div>
+                <p class="estilo-aviso">
+                    Ofensivo = o quanto o próprio {{ nome_time }} gera esse evento. Defensivo = o quanto jogar
+                    CONTRA o {{ nome_time }} faz o adversário gerar mais ou menos esse evento. Comparado só entre
+                    os times rastreados hoje - <b>informativo por enquanto, não afeta nenhuma recomendação</b>.
+                </p>
+                {% for tipo, papeis in estilo_time.items() %}
+                {% set titulo_tipo = papeis.ofensivo.titulo if papeis.ofensivo is defined else papeis.defensivo.titulo %}
+                <div style="margin-top: 16px;">
+                    <div class="bloco-titulo" style="font-size: 0.92rem; margin-bottom: 6px;">{{ titulo_tipo }}</div>
+                    <div class="estilo-grid">
+                        {% if papeis.ofensivo is defined %}
+                        {% set d = papeis.ofensivo %}
+                        <div>
+                            <div class="estilo-papel-titulo">Ofensivo</div>
+                            <div class="estilo-valor {{ 'acima' if d.desvio_pct > 0 else ('abaixo' if d.desvio_pct < 0 else 'neutro') }}">
+                                {{ '+' if d.desvio_pct >= 0 else '' }}{{ d.desvio_pct }}% vs. média
+                            </div>
+                            <div class="estilo-detalhe">{{ d.media_time }}/jogo (liga: {{ d.media_liga }}) · {{ d.jogos_analisados }} jogo(s)</div>
+                        </div>
+                        {% endif %}
+                        {% if papeis.defensivo is defined %}
+                        {% set d = papeis.defensivo %}
+                        <div>
+                            <div class="estilo-papel-titulo">Defensivo (efeito no adversário)</div>
+                            <div class="estilo-valor {{ 'acima' if d.desvio_pct > 0 else ('abaixo' if d.desvio_pct < 0 else 'neutro') }}">
+                                {{ '+' if d.desvio_pct >= 0 else '' }}{{ d.desvio_pct }}% vs. média
+                            </div>
+                            <div class="estilo-detalhe">{{ d.media_time }}/jogo (liga: {{ d.media_liga }}) · {{ d.jogos_analisados }} jogo(s)</div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
             {% if blocos %}
                 {% for bloco in blocos %}
                 <div class="cartao">
@@ -4604,6 +4671,53 @@ def buscar_estatisticas_time(cur, time_id):
     return blocos
 
 
+NOMES_TIPO_ESTILO = {"impedimento": "Impedimento", "cartao": "Cartão"}
+
+
+def buscar_estilo_time(cur, time_id):
+    """NOVO (estilo de jogo - Fase 1, só exibição): lê `padroes_estilo_time`
+    (calculada pelo motor_padroes.py/calcular_estilo_times) e monta um
+    resumo pronto pra tela do time - "ofensivo" (o quanto o time gera esse
+    evento) e "defensivo" (o quanto ele influencia o ADVERSÁRIO a gerar
+    mais/menos esse evento), pra impedimento e cartão. Só entre times
+    rastreados, já que só eles têm o dado real coletado. Devolve lista
+    vazia se a tabela ainda não existe ou não tiver dado suficiente ainda
+    (ex: menos de 5 times rastreados com jogos suficientes) - a tela trata
+    isso mostrando um aviso, sem quebrar.
+    NÃO afeta nenhum cálculo de recomendação/VE - é só informativo."""
+    try:
+        cur.execute(
+            """SELECT tipo, papel, media_time, media_liga, jogos_analisados, fator
+               FROM padroes_estilo_time WHERE time_id = %s ORDER BY tipo, papel""",
+            (time_id,),
+        )
+        linhas = cur.fetchall()
+    except Exception as e:
+        # NOVO: se a tabela ainda não foi migrada nesse banco
+        # (migrar_estilo_time.py não rodou ainda), trata como "sem dado"
+        # em vez de derrubar a página inteira - não depende de checar o
+        # tipo exato da exceção (nome do erro varia entre versões do
+        # psycopg2), só olha a mensagem.
+        if "does not exist" not in str(e).lower():
+            raise
+        cur.connection.rollback()
+        return {}
+
+    resultado = {}
+    for tipo, papel, media_time, media_liga, jogos_analisados, fator in linhas:
+        fator = float(fator)
+        desvio_pct = round((fator - 1) * 100, 1)
+        resultado.setdefault(tipo, {})[papel] = {
+            "titulo": NOMES_TIPO_ESTILO.get(tipo, tipo),
+            "media_time": float(media_time),
+            "media_liga": float(media_liga),
+            "jogos_analisados": jogos_analisados,
+            "fator": fator,
+            "desvio_pct": desvio_pct,
+        }
+    return resultado
+
+
 # ---------- Página de time: vizinhos na tabela + últimos jogos ----------
 def buscar_vizinhos_tabela(tabela, api_football_team_id, redor=2):
     """Recorta um pedaço da tabela do Brasileirão em volta do time (até
@@ -5081,6 +5195,7 @@ def time_detalhe(time_id):
 
         blocos = buscar_estatisticas_time(cur, time_id)
         escudo_url = buscar_escudo_url(cur, nome_time)
+        estilo_time = buscar_estilo_time(cur, time_id)
 
         cur.execute("SELECT id, nome FROM times WHERE rastreado = TRUE ORDER BY nome")
         times_rastreados = cur.fetchall()
@@ -5105,6 +5220,7 @@ def time_detalhe(time_id):
         PAGINA_TIME, blocos=blocos, nome_time=nome_time, escudo_url=escudo_url,
         clubes=clubes, time_id=time_id, vizinhos_tabela=vizinhos_tabela,
         api_football_team_id=api_football_team_id, ultimos_jogos=ultimos_jogos,
+        estilo_time=estilo_time,
         nav_html=barra_navegacao("times", round(banca_atual, 2)),
     )
 
