@@ -1,3 +1,4 @@
+
 """
 Motor de padrões - Cartões, faltas, desarmes, chutes e impedimentos de
 jogador + Escanteios do time + perfil de cada árbitro + NOVO: escanteios e
@@ -483,6 +484,164 @@ def calcular_padrao_linha_time_soma_jogadores(cur, time_id, coluna, linhas_testa
         resultados.append((linha, jogos_analisados, jogos_acima, frequencia, media))
 
     return resultados, jogos_analisados
+
+
+# NOVO (estilo de time - Fase 1, só visual/exibição): tipos de evento
+# cobertos pra identificar "jeito de jogar" de cada time rastreado - só
+# impedimento e cartão por enquanto (escopo reduzido de propósito, pra
+# validar a ideia com pouco risco antes de expandir pra outros mercados).
+# Cada tipo é medido em dois PAPÉIS:
+#   - "ofensivo": o quanto o PRÓPRIO time gera esse evento (ex: time que
+#     joga bola longa tende a ter mais impedimento; time indisciplinado
+#     tende a levar mais cartão)
+#   - "defensivo": o quanto esse time INFLUENCIA O ADVERSÁRIO a gerar mais
+#     ou menos esse evento (ex: time que joga com a linha de defesa muito
+#     recuada tende a fazer o ATAQUE ADVERSÁRIO cair menos em impedimento;
+#     time que marca duro/comete muita falta tende a fazer o ADVERSÁRIO
+#     reagir com mais cartão também)
+# Isso é só EXIBIÇÃO por enquanto (ver /time/<id> em app.py) - não entra
+# em nenhuma fórmula de probabilidade/VE ainda. A ideia é os dois donos do
+# projeto conferirem se os números batem com o que eles veem assistindo
+# aos jogos, antes de decidir se vale a pena virar um ajuste fino de
+# verdade (com piso/teto, igual árbitro/forma/suspensão já são).
+TIPOS_ESTILO = ["impedimento", "cartao"]
+PAPEIS_ESTILO = ["ofensivo", "defensivo"]
+
+
+def calcular_media_evento_por_jogo(cur, time_id, tipo, papel):
+    """NOVO (estilo de time): média BRUTA (não frequência de linha) de
+    quantas vezes esse evento aconteceu por jogo, olhando o lado certo
+    conforme o papel pedido:
+      - cartao/ofensivo:  cartões que os jogadores do PRÓPRIO time levaram
+      - cartao/defensivo: cartões que os jogadores do ADVERSÁRIO levaram,
+                           nos jogos DESSE time
+      - impedimento/ofensivo:  impedimentos do PRÓPRIO time
+      - impedimento/defensivo: impedimentos do ADVERSÁRIO, nos jogos
+                                DESSE time
+    Cartão usa a tabela `cartoes` direto (o campo `lado` ali já vem gravado
+    como 'mandante' = nosso time / 'visitante' = adversário, sem precisar
+    de tradução via jogos.mandante - mesmo padrão já usado em
+    calcular_padrao_cartao_time). Impedimento usa
+    jogador_estatisticas_jogo, que guarda o lado MANDANTE/VISITANTE REAL
+    do jogo - por isso essa parte SIM precisa traduzir via jogos.mandante
+    (mesmo padrão de calcular_padrao_linha_time_soma_jogadores), só que
+    invertido quando o papel é "defensivo" (queremos o lado do ADVERSÁRIO,
+    não o nosso)."""
+    if tipo == "cartao":
+        lado_sql = "'mandante'" if papel == "ofensivo" else "'visitante'"
+        cur.execute(
+            f"""
+            SELECT contagem.total
+            FROM (
+                SELECT j.id AS jogo_id, j.data_jogo,
+                       (SELECT COUNT(*) FROM cartoes c WHERE c.jogo_id = j.id AND c.lado = {lado_sql}) AS total,
+                       COUNT(DISTINCT eg.lado) AS lados
+                FROM jogos j
+                JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
+                WHERE j.nosso_time_id = %s AND j.data_jogo < CURRENT_DATE
+                GROUP BY j.id, j.data_jogo
+            ) contagem
+            WHERE contagem.lados = 2
+            ORDER BY contagem.data_jogo DESC
+            LIMIT %s
+            """,
+            (time_id, JANELA_MAXIMA_DE_JOGOS),
+        )
+    elif tipo == "impedimento":
+        if papel == "ofensivo":
+            condicao_lado = ("((j.mandante = TRUE AND jeg.lado = 'mandante') "
+                              "OR (j.mandante = FALSE AND jeg.lado = 'visitante'))")
+        else:
+            condicao_lado = ("((j.mandante = TRUE AND jeg.lado = 'visitante') "
+                              "OR (j.mandante = FALSE AND jeg.lado = 'mandante'))")
+        cur.execute(
+            f"""
+            SELECT SUM(jeg.impedimentos)
+            FROM jogador_estatisticas_jogo jeg
+            JOIN jogos j ON j.id = jeg.jogo_id
+            WHERE j.nosso_time_id = %s
+              AND {condicao_lado}
+              AND jeg.impedimentos IS NOT NULL
+              AND j.data_jogo < CURRENT_DATE
+            GROUP BY jeg.jogo_id, j.data_jogo
+            ORDER BY j.data_jogo DESC
+            LIMIT %s
+            """,
+            (time_id, JANELA_MAXIMA_DE_JOGOS),
+        )
+    else:
+        raise ValueError(f"tipo desconhecido pra estilo de time: {tipo}")
+
+    valores = [row[0] for row in cur.fetchall()]
+    jogos_analisados = len(valores)
+    if jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR:
+        return None, jogos_analisados
+
+    media = round(sum(float(v) for v in valores) / jogos_analisados, 3)
+    return media, jogos_analisados
+
+
+def calcular_estilo_times(cur, times_rastreados):
+    """NOVO (estilo de time - Fase 1): pra cada time rastreado, calcula o
+    fator (media_do_time / media_da_liga) em cada tipo/papel. A "média da
+    liga" é sempre a média do papel OFENSIVO entre todos os times
+    rastreados com dado suficiente - ofensivo e defensivo estão na MESMA
+    unidade (eventos de UM time em UMA partida), então dá pra comparar os
+    dois contra essa mesma régua (ex: um fator defensivo de 0.75 significa
+    "os adversários desse time geram esse evento 25% MENOS do que um time
+    médio gera quando ataca", o que é exatamente a leitura que queremos:
+    "esse time suprime esse evento no rival"). Só entre os times
+    rastreados (não dá pra comparar com o campeonato inteiro, já que só
+    eles têm a temporada coletada de verdade)."""
+    medias = {}
+    for time_id, time_nome, _ in times_rastreados:
+        for tipo in TIPOS_ESTILO:
+            for papel in PAPEIS_ESTILO:
+                media, jogos = calcular_media_evento_por_jogo(cur, time_id, tipo, papel)
+                medias[(time_id, tipo, papel)] = (media, jogos)
+
+    baselines = {}
+    for tipo in TIPOS_ESTILO:
+        valores_ofensivos = [
+            m for (_tid, t, p), (m, _j) in medias.items()
+            if t == tipo and p == "ofensivo" and m is not None
+        ]
+        baselines[tipo] = round(sum(valores_ofensivos) / len(valores_ofensivos), 3) if valores_ofensivos else None
+
+    resultados = []
+    for (time_id, tipo, papel), (media, jogos) in medias.items():
+        baseline = baselines.get(tipo)
+        if media is None or baseline is None or baseline == 0:
+            continue
+        fator = round(media / baseline, 3)
+        resultados.append((time_id, tipo, papel, media, baseline, jogos, fator))
+
+    return resultados
+
+
+def salvar_estilo_times(cur, resultados):
+    """NOVO (estilo de time - Fase 1): salva em `padroes_estilo_time`
+    (precisa rodar migrar_estilo_time.py antes, uma vez, pra criar essa
+    tabela)."""
+    for time_id, tipo, papel, media, baseline, jogos, fator in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_estilo_time
+                (time_id, tipo, papel, media_time, media_liga, jogos_analisados, fator, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, tipo, papel) DO UPDATE SET
+                media_time = EXCLUDED.media_time,
+                media_liga = EXCLUDED.media_liga,
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                fator = EXCLUDED.fator,
+                atualizado_em = NOW()
+            """,
+            (time_id, tipo, papel, media, baseline, jogos, fator),
+        )
+        desvio = round((fator - 1) * 100, 1)
+        sinal = "+" if desvio >= 0 else ""
+        print(f"  [{tipo}/{papel}] time_id={time_id}: média {media}/jogo vs. liga {baseline}/jogo "
+              f"({sinal}{desvio}%, {jogos} jogo(s))")
 
 
 def calcular_posse_time(cur, time_id):
@@ -1464,6 +1623,22 @@ def main():
                 print(f"  Concluído! {total_confronto} padrão(ões) de confronto direto calculados.")
             else:
                 print(f"  Nenhum adversário com pelo menos {JOGOS_MINIMOS_CONFRONTO} jogos analisados ainda.")
+
+        # NOVO (estilo de time - Fase 1, só visual): calculado uma vez só,
+        # DEPOIS do loop por time acima (precisa da média de TODOS os times
+        # rastreados junto, pra calcular a média da liga) - diferente dos
+        # padrões acima, que cada time calcula o próprio sozinho. Só
+        # impedimento e cartão por enquanto. Resultado alimenta só a tela
+        # do time (/time/<id>) - nenhuma recomendação/VE é afetada ainda.
+        if times_rastreados:
+            print("\nCalculando estilo de jogo por time (ofensivo/defensivo - impedimento e cartão)...")
+            resultados_estilo = calcular_estilo_times(cur, times_rastreados)
+            if resultados_estilo:
+                salvar_estilo_times(cur, resultados_estilo)
+                conn.commit()
+                print(f"Concluído! {len(resultados_estilo)} combinação(ões) time/tipo/papel calculadas.")
+            else:
+                print(f"  Nenhum time com dados suficientes ainda (mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos).")
 
         # NOVO: perfil de árbitro continua sendo calculado uma vez só, pra
         # TODOS os jogos disponíveis - não é "do Corinthians" nem "do
