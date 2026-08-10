@@ -1,4 +1,3 @@
-
 """
 Interface web do projeto - Análise Corinthians.
 
@@ -1096,18 +1095,20 @@ PAGINA_HISTORICO = """
         ['lista-acertou', 'lista-errou', 'lista-pendente'].forEach(renderizarPagina);
     </script>
 
-    {% if multiplas_destaque %}
+    {% if multiplas_destaque or resumo_multiplas.acertou + resumo_multiplas.errou > 0 %}
     <div class="coluna-cabecalho coluna-roxa" style="margin-top: 8px;">🎯 Múltiplas em Destaque ({{ multiplas_destaque|length }})</div>
-    <p class="secao-subtitulo">Combinações de 2+ apostas com probabilidade histórica de {{ piso }}% ou mais, SÓ de jogos
-        que já terminaram - é uma lista de referência pra ver como essas combinações teriam saído, não tem relação
-        com sua banca/ROI nem botão de salvar (não dá pra apostar num jogo que já aconteceu).</p>
+    <p class="secao-subtitulo">As 5 melhores múltiplas (por probabilidade histórica) de cada jogo já concluído -
+        capturadas de verdade ANTES do apito inicial (não é mais uma reconstrução hipotética depois do jogo já ter
+        acontecido). Não tem relação com sua banca/ROI nem botão de salvar. Só as rodadas mais recentes mostram o
+        card com detalhe completo; rodadas mais antigas saem da lista abaixo, mas continuam contando no percentual
+        a seguir.</p>
     {% if resumo_multiplas.acertou + resumo_multiplas.errou > 0 %}
     <p class="secao-subtitulo" style="margin-top: -8px;">
-        Nessa lista: <b style="color:#3fb950">{{ resumo_multiplas.acertou }} acerto(s)</b> ·
+        No total (incluindo rodadas já fora do detalhe): <b style="color:#3fb950">{{ resumo_multiplas.acertou }} acerto(s)</b> ·
         <b style="color:#f85149">{{ resumo_multiplas.errou }} erro(s)</b> ·
-        <b>{{ resumo_multiplas.taxa }}%</b> de acerto — <u>esse percentual é só entre as combinações que já
-        passaram no filtro de {{ piso }}%+; não soma com a taxa de acerto geral lá em cima, porque são grupos
-        diferentes (esse aqui é filtrado pra ser mais fácil, o de cima não é).</u>
+        <b>{{ resumo_multiplas.taxa }}%</b> de acerto — <u>esse percentual é só entre o top-5 de cada jogo;
+        não soma com a taxa de acerto geral lá em cima, porque são grupos diferentes (esse aqui já vem pré-filtrado
+        pras 5 melhores de cada jogo, o de cima não é).</u>
     </p>
     {% endif %}
     {% endif %}
@@ -1257,215 +1258,61 @@ def buscar_calibracao(cur):
 # só pra evitar que combinações de chance muito baixa (que erram na maioria
 # das vezes só por natureza estatística, mesmo estando matematicamente
 # corretas) dominem essa lista de referência.
-PISO_PROBABILIDADE_MULTIPLAS_DESTAQUE = 40
-
-# NOVO (correção urgente - trava/crash no /historico): igual
-# MAX_LINHAS_POR_MERCADO em montar_combinacoes (que é definida localmente
-# ali dentro) - reduz cada mercado (jogo + tipo + jogador) às linhas de
-# maior valor esperado individual ANTES de montar qualquer combinação.
-# Sem isso, o mesmo jogo com várias linhas do mesmo mercado (cada vez mais
-# comum com mais times/rodadas acumuladas no histórico) multiplicava à
-# toa o tamanho do pool que entra em combinations().
-MAX_LINHAS_POR_MERCADO_HISTORICO = 2
-
-# NOVO: teto de segurança extra, só pra essa função - o histórico acumula
-# TODAS as rodadas já jogadas (não só a rodada atual, como a página
-# principal), então o pool por casa de apostas pode crescer bem mais ao
-# longo do tempo. Mesmo com a redução de linhas por mercado e o tamanho
-# adaptativo abaixo, esse teto para a geração assim que já tem resultado
-# de sobra pra cobrir o top 15 final, em vez de continuar testando
-# combinações que nunca vão aparecer na tela mesmo.
-MAX_COMBOS_INTERNOS_HISTORICO = 5000
-
-
-def buscar_recomendacoes_historico(cur):
-    """NOVO: mesma estrutura de buscar_recomendacoes, mas lendo de
-    historico_recomendacoes (jogos já concluídos) em vez de recomendacoes
-    (jogos futuros ainda ativos)."""
+def montar_resumo_multiplas(cur):
+    """Taxa de acerto entre TODAS as Múltiplas em Destaque já avaliadas
+    (top-5 de cada jogo, calculado por
+    arquivar_recomendacoes.py/selecionar_top5_do_jogo) - inclui também as
+    que já foram comprimidas (perderam descrição/odd/casa, mas o
+    resultado continua contando pra esse percentual). De propósito NUNCA
+    somado com montar_resumo_historico(itens): essa lista é pré-filtrada
+    (só as 5 melhores de cada jogo por probabilidade histórica), então é
+    uma amostra enviesada pra cima - misturar com a taxa de acerto geral
+    daria um número mais bonito, mas enganoso."""
     cur.execute(
-        """
-        SELECT h.jogo_id, h.jogador_id, h.descricao, h.casa_aposta,
-               h.odd_oferecida, h.probabilidade_historica, j.adversario, j.data_jogo,
-               h.tipo_padrao, h.resultado, t.nome, j.fixture_id_api
-        FROM historico_recomendacoes h
-        JOIN jogos j ON j.id = h.jogo_id
-        JOIN times t ON t.id = j.nosso_time_id
-        """
+        "SELECT resultado, COUNT(*) FROM historico_multiplas_destaque "
+        "WHERE resultado IN ('acertou', 'errou') GROUP BY resultado"
     )
-    return deduplicar_mercados_jogo_inteiro(cur.fetchall(), colunas_a_manter=12)
-
-
-def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
-    """Monta combinações (1 a 5 pernas) a partir de recomendações JÁ
-    CONCLUÍDAS, calculando também o resultado real da combinação: só
-    'acertou' se TODAS as pernas acertaram; 'errou' se qualquer perna
-    errou; 'pendente' se sobrar alguma perna sem dado ainda. Filtra só as
-    combinações com probabilidade histórica >= piso, pra não poluir a lista
-    com combinações de chance muito baixa.
-    CORRIGIDO: antes agrupava por (jogo_id, casa), igual montar_combinacoes
-    tinha o mesmo problema antes de ser corrigido - só combinava pernas do
-    MESMO jogo. Agora agrupa só por casa, permitindo combinações que
-    cruzam jogos diferentes (mesma correção aplicada na página principal).
-    CORRIGIDO (urgente - travava/derrubava a página /historico): essa
-    função nunca tinha ganho a mesma proteção contra explosão de
-    combinações que montar_combinacoes já tinha (ver seção 8 da
-    documentação, marcado como pendência de "baixo risco" - deixou de ser
-    baixo risco assim que o volume de dados cresceu com mais times e mais
-    rodadas acumuladas). Agora aplica as mesmas duas camadas: reduz cada
-    mercado às MAX_LINHAS_POR_MERCADO_HISTORICO melhores linhas antes de
-    combinar, e limita o tamanho máximo da combinação conforme o tamanho
-    do pool (mesmos limiares de montar_combinacoes), além de um teto extra
-    de segurança (MAX_COMBOS_INTERNOS_HISTORICO) só pra essa função, já
-    que aqui o pool acumula TODAS as rodadas já jogadas, não só a atual."""
-    grupos = {}
-    for rec in recomendacoes:
-        (jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo,
-         tipo_padrao, resultado_perna, nosso_time, fixture_id_api) = rec
-
-        grupos.setdefault(casa, []).append({
-            "jogo_id": jogo_id,
-            "jogador_id": jogador_id,
-            "tipo_padrao": tipo_padrao,
-            "descricao": descricao,
-            "odd": float(odd),
-            "probabilidade": float(prob) / 100,
-            "adversario": adversario,
-            "data_jogo": data_jogo,
-            "resultado": resultado_perna,
-            "nosso_time": nosso_time,
-            "fixture_id_api": fixture_id_api,
-        })
-
-    resultado_final = []
-    for casa, pernas in grupos.items():
-        if len(resultado_final) >= MAX_COMBOS_INTERNOS_HISTORICO:
-            break
-
-        # NOVO: mesma redução de linhas por mercado que montar_combinacoes
-        # já faz - mantém só as MAX_LINHAS_POR_MERCADO_HISTORICO melhores
-        # (por valor esperado individual) de cada mercado (jogo + tipo +
-        # jogador), antes de montar qualquer combinação.
-        pernas_por_mercado = {}
-        for p in pernas:
-            chave_mercado = (p["jogo_id"], p["tipo_padrao"], p["jogador_id"])
-            pernas_por_mercado.setdefault(chave_mercado, []).append(p)
-
-        pernas_reduzidas = []
-        for chave_mercado, legs in pernas_por_mercado.items():
-            melhores = sorted(legs, key=lambda p: p["probabilidade"] * p["odd"] - 1, reverse=True)
-            pernas_reduzidas.extend(melhores[:MAX_LINHAS_POR_MERCADO_HISTORICO])
-
-        # NOVO: mesmo tamanho máximo adaptativo de montar_combinacoes -
-        # pool grande -> combinação menor, pra combinations() nunca testar
-        # uma quantidade inviável de combinações.
-        tamanho_pool = len(pernas_reduzidas)
-        if tamanho_pool <= LIMITE_POOL_PARA_5_PERNAS:
-            tamanho_maximo_combo = 5
-        elif tamanho_pool <= LIMITE_POOL_PARA_4_PERNAS:
-            tamanho_maximo_combo = 4
-        else:
-            tamanho_maximo_combo = 3
-
-        # NOVO: só combinações de 2+ pernas aqui - tamanho=1 seria a mesma
-        # aposta individual já mostrada na lista principal do histórico,
-        # gerando entrada duplicada.
-        for tamanho in range(2, tamanho_maximo_combo + 1):
-            if len(pernas_reduzidas) < tamanho:
-                continue
-            for combo in combinations(pernas_reduzidas, tamanho):
-                chaves_mercado = [(p["jogo_id"], p["tipo_padrao"], p["jogador_id"]) for p in combo]
-                if len(chaves_mercado) != len(set(chaves_mercado)):
-                    continue
-
-                # NOVO: mesma proteção de montar_combinacoes - rejeita
-                # combinações fisicamente impossíveis (mesmo time em 2
-                # jogos DIFERENTES na mesma data). É o que causava
-                # combinações do tipo "Corinthians x Atletico-PR" +
-                # "Atletico-PR x Santos" aparecendo como se tivessem
-                # acontecido no mesmo dia no /historico.
-                if combo_tem_conflito_de_time_mesma_data(combo):
-                    continue
-
-                odd_combinada = 1.0
-                prob_combinada = 1.0
-                for p in combo:
-                    odd_combinada *= p["odd"]
-                    prob_combinada *= p["probabilidade"]
-
-                prob_pct = round(prob_combinada * 100, 2)
-                if prob_pct < piso_probabilidade:
-                    continue
-
-                resultados_pernas = [p["resultado"] for p in combo]
-                if any(r == "errou" for r in resultados_pernas):
-                    resultado_combo = "errou"
-                elif all(r == "acertou" for r in resultados_pernas):
-                    resultado_combo = "acertou"
-                else:
-                    resultado_combo = "pendente"
-
-                # NOVO: lista os jogos distintos envolvidos, igual
-                # montar_combinacoes - usado pro cabeçalho do card mostrar
-                # cada confronto quando a combinação cruza jogos diferentes.
-                jogos_vistos_chaves = set()
-                jogos_vistos = []
-                for p in combo:
-                    chave_jogo = p["fixture_id_api"] or (p["nosso_time"], p["adversario"], p["data_jogo"])
-                    if chave_jogo not in jogos_vistos_chaves:
-                        jogos_vistos_chaves.add(chave_jogo)
-                        jogos_vistos.append({
-                            "nosso_time": p["nosso_time"], "adversario": p["adversario"],
-                            "data_jogo": p["data_jogo"],
-                        })
-
-                valor_esperado = round((prob_combinada * odd_combinada) - 1, 3)
-                resultado_final.append({
-                    "casa_aposta": casa,
-                    "descricao": " + ".join(p["descricao"] for p in combo),
-                    "odd_combinada": round(odd_combinada, 2),
-                    "probabilidade_combinada": prob_pct,
-                    "valor_esperado": valor_esperado,
-                    "jogos": jogos_vistos,
-                    "adversario": combo[0]["adversario"],
-                    "data_jogo": combo[0]["data_jogo"],
-                    "nosso_time": combo[0]["nosso_time"],
-                    "resultado": resultado_combo,
-                })
-
-                # NOVO: teto de segurança - já tem resultado de sobra pra
-                # cobrir o top 15 final, não vale a pena continuar gerando
-                # mais (nem por casa, nem no total).
-                if len(resultado_final) >= MAX_COMBOS_INTERNOS_HISTORICO:
-                    break
-            if len(resultado_final) >= MAX_COMBOS_INTERNOS_HISTORICO:
-                break
-
-    resultado_final.sort(key=lambda c: c["probabilidade_combinada"], reverse=True)
-    return resultado_final[:15]
-
-
-def montar_resumo_multiplas(multiplas):
-    """NOVO: taxa de acerto só entre as "Múltiplas em Destaque" - de
-    propósito NUNCA somado com montar_resumo_historico(itens). Essa lista
-    é filtrada (só combinações com probabilidade histórica >= piso), então
-    é uma amostra enviesada pra cima - misturar com a taxa de acerto geral
-    daria um número mais bonito, mas enganoso, porque estaria comparando
-    coisas de populações diferentes (uma filtrada, a outra não)."""
-    acertou = sum(1 for c in multiplas if c["resultado"] == "acertou")
-    errou = sum(1 for c in multiplas if c["resultado"] == "errou")
+    contagem = dict(cur.fetchall())
+    acertou = contagem.get("acertou", 0)
+    errou = contagem.get("errou", 0)
     total_avaliado = acertou + errou
     taxa = round(100 * acertou / total_avaliado, 1) if total_avaliado else 0
     return {"acertou": acertou, "errou": errou, "taxa": taxa}
 
 
 def buscar_multiplas_destaque(cur):
-    """NOVO: múltiplas de jogos JÁ CONCLUÍDOS (não jogos futuros ainda
-    ativos), com probabilidade histórica >= piso, mostrando o resultado
-    real de cada uma (acertou/errou/pendente) - lista de referência, sem
-    relação com dinheiro/ROI (não dá pra "apostar" num jogo que já
-    aconteceu, por isso essa lista não tem botão de salvar)."""
-    recomendacoes = buscar_recomendacoes_historico(cur)
-    return montar_combinacoes_historico(recomendacoes, PISO_PROBABILIDADE_MULTIPLAS_DESTAQUE)
+    """NOVO: lê o top-5 de cada jogo já concluído, calculado de verdade
+    ANTES do apito inicial (não é mais uma reconstrução hipotética depois
+    do fato - ver arquivar_recomendacoes.py/selecionar_top5_do_jogo).
+    Só as linhas AINDA com detalhe completo aparecem como card (as
+    comprimidas, fora da janela de rodadas recentes, não têm mais
+    descrição/odd pra mostrar - elas só entram no resumo agregado de
+    montar_resumo_multiplas, lido direto do banco)."""
+    cur.execute(
+        """
+        SELECT jogo_id, rodada, casa_aposta, descricao, odd_combinada, jogos,
+               probabilidade_combinada, resultado
+        FROM historico_multiplas_destaque
+        WHERE casa_aposta IS NOT NULL
+        ORDER BY probabilidade_combinada DESC
+        """
+    )
+    detalhadas = []
+    for jogo_id, rodada, casa, descricao, odd, jogos, prob, resultado in cur.fetchall():
+        odd = float(odd)
+        prob_pct = float(prob)
+        detalhadas.append({
+            "jogo_id": jogo_id,
+            "rodada": rodada,
+            "casa_aposta": casa,
+            "descricao": descricao,
+            "odd_combinada": odd,
+            "jogos": jogos,
+            "probabilidade_combinada": prob_pct,
+            "valor_esperado": round((prob_pct / 100 * odd) - 1, 3),
+            "resultado": resultado,
+        })
+    return detalhadas
 
 
 @app.route("/historico")
@@ -1476,6 +1323,7 @@ def historico():
         itens = buscar_historico(cur)
         calibracao = buscar_calibracao(cur)
         multiplas_destaque = buscar_multiplas_destaque(cur)
+        resumo_multiplas = montar_resumo_multiplas(cur)
         banca_atual = buscar_banca(cur, session["usuario_id"])
         cur.close()
     finally:
@@ -1493,13 +1341,11 @@ def historico():
     # montar_resumo_historico), em vez de uma contagem separada no banco -
     # os números do topo e das colunas nunca mais vão discordar.
     resumo = montar_resumo_historico(itens)
-    resumo_multiplas = montar_resumo_multiplas(multiplas_destaque)
 
     return render_template_string(
         PAGINA_HISTORICO, acertos=acertos, erros=erros, pendentes=pendentes,
         resumo=resumo, calibracao=calibracao,
         multiplas_destaque=multiplas_destaque, resumo_multiplas=resumo_multiplas,
-        piso=PISO_PROBABILIDADE_MULTIPLAS_DESTAQUE,
         nav_html=barra_navegacao("historico", round(banca_atual, 2)),
     )
 
