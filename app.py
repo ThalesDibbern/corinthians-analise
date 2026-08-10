@@ -1604,6 +1604,24 @@ def buscar_calibracao(cur):
 # corretas) dominem essa lista de referência.
 PISO_PROBABILIDADE_MULTIPLAS_DESTAQUE = 40
 
+# NOVO (correção urgente - trava/crash no /historico): igual
+# MAX_LINHAS_POR_MERCADO em montar_combinacoes (que é definida localmente
+# ali dentro) - reduz cada mercado (jogo + tipo + jogador) às linhas de
+# maior valor esperado individual ANTES de montar qualquer combinação.
+# Sem isso, o mesmo jogo com várias linhas do mesmo mercado (cada vez mais
+# comum com mais times/rodadas acumuladas no histórico) multiplicava à
+# toa o tamanho do pool que entra em combinations().
+MAX_LINHAS_POR_MERCADO_HISTORICO = 2
+
+# NOVO: teto de segurança extra, só pra essa função - o histórico acumula
+# TODAS as rodadas já jogadas (não só a rodada atual, como a página
+# principal), então o pool por casa de apostas pode crescer bem mais ao
+# longo do tempo. Mesmo com a redução de linhas por mercado e o tamanho
+# adaptativo abaixo, esse teto para a geração assim que já tem resultado
+# de sobra pra cobrir o top 15 final, em vez de continuar testando
+# combinações que nunca vão aparecer na tela mesmo.
+MAX_COMBOS_INTERNOS_HISTORICO = 5000
+
 
 def buscar_recomendacoes_historico(cur):
     """NOVO: mesma estrutura de buscar_recomendacoes, mas lendo de
@@ -1632,7 +1650,18 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
     CORRIGIDO: antes agrupava por (jogo_id, casa), igual montar_combinacoes
     tinha o mesmo problema antes de ser corrigido - só combinava pernas do
     MESMO jogo. Agora agrupa só por casa, permitindo combinações que
-    cruzam jogos diferentes (mesma correção aplicada na página principal)."""
+    cruzam jogos diferentes (mesma correção aplicada na página principal).
+    CORRIGIDO (urgente - travava/derrubava a página /historico): essa
+    função nunca tinha ganho a mesma proteção contra explosão de
+    combinações que montar_combinacoes já tinha (ver seção 8 da
+    documentação, marcado como pendência de "baixo risco" - deixou de ser
+    baixo risco assim que o volume de dados cresceu com mais times e mais
+    rodadas acumuladas). Agora aplica as mesmas duas camadas: reduz cada
+    mercado às MAX_LINHAS_POR_MERCADO_HISTORICO melhores linhas antes de
+    combinar, e limita o tamanho máximo da combinação conforme o tamanho
+    do pool (mesmos limiares de montar_combinacoes), além de um teto extra
+    de segurança (MAX_COMBOS_INTERNOS_HISTORICO) só pra essa função, já
+    que aqui o pool acumula TODAS as rodadas já jogadas, não só a atual."""
     grupos = {}
     for rec in recomendacoes:
         (jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo,
@@ -1654,13 +1683,41 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
 
     resultado_final = []
     for casa, pernas in grupos.items():
+        if len(resultado_final) >= MAX_COMBOS_INTERNOS_HISTORICO:
+            break
+
+        # NOVO: mesma redução de linhas por mercado que montar_combinacoes
+        # já faz - mantém só as MAX_LINHAS_POR_MERCADO_HISTORICO melhores
+        # (por valor esperado individual) de cada mercado (jogo + tipo +
+        # jogador), antes de montar qualquer combinação.
+        pernas_por_mercado = {}
+        for p in pernas:
+            chave_mercado = (p["jogo_id"], p["tipo_padrao"], p["jogador_id"])
+            pernas_por_mercado.setdefault(chave_mercado, []).append(p)
+
+        pernas_reduzidas = []
+        for chave_mercado, legs in pernas_por_mercado.items():
+            melhores = sorted(legs, key=lambda p: p["probabilidade"] * p["odd"] - 1, reverse=True)
+            pernas_reduzidas.extend(melhores[:MAX_LINHAS_POR_MERCADO_HISTORICO])
+
+        # NOVO: mesmo tamanho máximo adaptativo de montar_combinacoes -
+        # pool grande -> combinação menor, pra combinations() nunca testar
+        # uma quantidade inviável de combinações.
+        tamanho_pool = len(pernas_reduzidas)
+        if tamanho_pool <= LIMITE_POOL_PARA_5_PERNAS:
+            tamanho_maximo_combo = 5
+        elif tamanho_pool <= LIMITE_POOL_PARA_4_PERNAS:
+            tamanho_maximo_combo = 4
+        else:
+            tamanho_maximo_combo = 3
+
         # NOVO: só combinações de 2+ pernas aqui - tamanho=1 seria a mesma
         # aposta individual já mostrada na lista principal do histórico,
         # gerando entrada duplicada.
-        for tamanho in (2, 3, 4, 5):
-            if len(pernas) < tamanho:
+        for tamanho in range(2, tamanho_maximo_combo + 1):
+            if len(pernas_reduzidas) < tamanho:
                 continue
-            for combo in combinations(pernas, tamanho):
+            for combo in combinations(pernas_reduzidas, tamanho):
                 chaves_mercado = [(p["jogo_id"], p["tipo_padrao"], p["jogador_id"]) for p in combo]
                 if len(chaves_mercado) != len(set(chaves_mercado)):
                     continue
@@ -1710,6 +1767,14 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
                     "nosso_time": combo[0]["nosso_time"],
                     "resultado": resultado_combo,
                 })
+
+                # NOVO: teto de segurança - já tem resultado de sobra pra
+                # cobrir o top 15 final, não vale a pena continuar gerando
+                # mais (nem por casa, nem no total).
+                if len(resultado_final) >= MAX_COMBOS_INTERNOS_HISTORICO:
+                    break
+            if len(resultado_final) >= MAX_COMBOS_INTERNOS_HISTORICO:
+                break
 
     resultado_final.sort(key=lambda c: c["probabilidade_combinada"], reverse=True)
     return resultado_final[:15]
