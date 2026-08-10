@@ -1,20 +1,30 @@
 """
-Motor de recomendações - cruza os padrões já calculados (motor_padroes.py)
-com as odds reais coletadas (atualizar_odds.py) para encontrar apostas
-com "valor esperado" positivo: onde a probabilidade histórica do padrão
-acontecer é maior do que a odd da casa está sugerindo.
+Motor de combinações - gera as múltiplas (2+ pernas) a partir das
+recomendações ativas (mesma lógica que a página principal usa, importada
+de combinacoes.py pra nunca divergir) e captura cada uma em
+`multiplas_candidatas`, abastecendo o ranking de "Múltiplas em Destaque"
+do /historico MESMO SEM ninguém abrir o site.
 
-Fórmula usada (valor esperado por unidade apostada):
-    VE = (probabilidade_historica * odd) - 1
-Se VE > 0, a aposta é estatisticamente favorável no longo prazo, segundo
-o nosso histórico.
+Roda como o último passo do refreshing-freedom, depois de
+atualizar_odds.py e motor_recomendacoes.py (precisa das odds e das
+recomendações individuais já atualizadas). Também roda implicitamente
+quando alguém clica "Atualizar recomendações" na página principal - o
+app.py chama capturar_candidatas_multiplas() direto, com o resultado que
+já calculou pra mostrar na tela, sem precisar rodar esse arquivo de novo.
 
-IMPORTANTE: isso não é garantia de acerto em uma aposta individual - é uma
-estimativa baseada em dados históricos, que só faz sentido com dados de
-jogadores/temporada atuais. Enquanto o banco ainda é de 2022-2024, use
-os resultados aqui só para validar a lógica, não para apostar de verdade.
+Duas responsabilidades, nessa ordem:
+1) Captura: grava/atualiza cada múltipla gerada em `multiplas_candidatas`
+   (upsert por assinatura - ver combinacoes.py). Usa uma faixa de odd bem
+   larga (1.01 a 1000) pra capturar o máximo de combinações válidas
+   possível, já que aqui não existe "faixa que o usuário pediu" - o
+   objetivo é abastecer o ranking, não responder um clique específico.
+2) Congelamento: marca como congeladas as candidatas cujo jogo mais
+   próximo já começou - a partir daí, a odd/probabilidade guardada é
+   definitiva ("a última geração antes do apito").
 
-Só considera odds de jogos que ainda vão acontecer (data_jogo >= hoje).
+A seleção do top-5 por jogo e a avaliação de acerto/erro acontecem
+DEPOIS, em arquivar_recomendacoes.py, quando o jogo já terminou e o
+resultado de cada perna já é conhecido.
 
 Variáveis de ambiente necessárias:
   - DATABASE_URL -> a URL de conexão do Postgres (mesma usada nos outros scripts)
@@ -23,191 +33,21 @@ Variáveis de ambiente necessárias:
 import os
 import psycopg2
 
+from combinacoes import (
+    buscar_recomendacoes, montar_combinacoes,
+    capturar_candidatas_multiplas, congelar_candidatas_vencidas,
+)
+
 DATABASE_URL = os.environ["DATABASE_URL"]
 
-VALOR_ESPERADO_MINIMO = 0.0  # só guarda recomendações com VE acima disso
-
-
-def identificar_tipo_padrao(mercado):
-    """Adivinha a que tipo de padrão um mercado se refere, a partir do nome
-    (em português, como vem da OddsPapi)."""
-    nome = mercado.lower()
-    if "cartão" in nome or "cartao" in nome or "card" in nome:
-        return "cartao"
-    if "falta" in nome:
-        return "falta_cometida"
-    if "desarme" in nome or "tackle" in nome:
-        return "desarme"
-    if "chute" in nome or "shot" in nome:
-        return "chute_no_gol"
-    if "impediment" in nome:
-        return "impedimento"
-    if "escanteio" in nome or "corner" in nome:
-        return "escanteio_time"
-    if "resultado" in nome or "vencedor" in nome or "1x2" in nome:
-        return "resultado_final"
-    return None
-
-
-def buscar_odds_futuras(cur):
-    """Busca odds de jogos que ainda não aconteceram."""
-    cur.execute(
-        """
-        SELECT o.id, o.jogo_id, o.jogador_id, o.casa_aposta, o.mercado,
-               o.valor_odd, o.linha, o.direcao, j.data_jogo, j.adversario, j.mandante
-        FROM odds o
-        JOIN jogos j ON j.id = o.jogo_id
-        WHERE j.data_jogo >= CURRENT_DATE
-        """
-    )
-    return cur.fetchall()
-
-
-def buscar_frequencia_cartao(cur, jogador_id):
-    cur.execute(
-        "SELECT frequencia FROM padroes_jogador_cartao WHERE jogador_id = %s",
-        (jogador_id,),
-    )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
-
-
-def buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha):
-    cur.execute(
-        "SELECT frequencia FROM padroes_jogador_linha WHERE jogador_id = %s AND tipo = %s AND linha = %s",
-        (jogador_id, tipo, linha),
-    )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
-
-
-def buscar_frequencia_simples_jogador(cur, jogador_id, tipo):
-    cur.execute(
-        "SELECT frequencia FROM padroes_jogador_frequencia WHERE jogador_id = %s AND tipo = %s",
-        (jogador_id, tipo),
-    )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
-
-
-def buscar_frequencia_escanteio_time(cur, linha):
-    cur.execute(
-        "SELECT frequencia FROM padroes_time_escanteio WHERE linha = %s",
-        (linha,),
-    )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
-
-
-def buscar_frequencia_resultado(cur, lado, resultado):
-    cur.execute(
-        "SELECT frequencia FROM padroes_time_resultado WHERE lado = %s AND resultado = %s",
-        (lado, resultado),
-    )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
-
-
-def resultado_do_ponto_de_vista_corinthians(direcao, mandante):
-    """Traduz o outcome da odd (1/X/2) para vitória/empate/derrota do
-    Corinthians, considerando se ele é mandante ou visitante nesse jogo."""
-    d = (direcao or "").strip().upper()
-
-    if d in ("X", "EMPATE", "DRAW"):
-        return "empate"
-    if d == "1":
-        return "vitoria" if mandante else "derrota"
-    if d == "2":
-        return "vitoria" if not mandante else "derrota"
-    return None
-
-
-def calcular_recomendacoes(cur):
-    odds = buscar_odds_futuras(cur)
-    recomendacoes = []
-
-    for (odd_id, jogo_id, jogador_id, casa, mercado, valor_odd,
-         linha, direcao, data_jogo, adversario, mandante) in odds:
-
-        tipo = identificar_tipo_padrao(mercado)
-        if tipo is None:
-            continue
-
-        frequencia = None
-        resultado_cor = None
-
-        if tipo == "cartao" and jogador_id and direcao and direcao.lower() == "sim":
-            frequencia = buscar_frequencia_cartao(cur, jogador_id)
-
-        elif tipo in ("falta_cometida", "desarme", "chute_no_gol") and jogador_id \
-                and direcao and direcao.lower() == "mais" and linha is not None:
-            frequencia = buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha)
-
-        elif tipo == "impedimento" and jogador_id and direcao and direcao.lower() == "sim":
-            frequencia = buscar_frequencia_simples_jogador(cur, jogador_id, "impedimento")
-
-        elif tipo == "escanteio_time" and not jogador_id \
-                and direcao and direcao.lower() == "mais" and linha is not None:
-            frequencia = buscar_frequencia_escanteio_time(cur, linha)
-
-        elif tipo == "resultado_final" and not jogador_id:
-            resultado_cor = resultado_do_ponto_de_vista_corinthians(direcao, mandante)
-            if resultado_cor:
-                lado = "mandante" if mandante else "visitante"
-                frequencia = buscar_frequencia_resultado(cur, lado, resultado_cor)
-
-        if frequencia is None:
-            continue  # não temos padrão calculado pra cruzar com essa odd ainda
-
-        probabilidade = frequencia / 100
-        valor_esperado = round((probabilidade * float(valor_odd)) - 1, 3)
-
-        descricao_final = mercado
-        if tipo == "resultado_final":
-            nomes = {"vitoria": "Vitória do Corinthians", "empate": "Empate", "derrota": "Derrota do Corinthians"}
-            descricao_final = f"Resultado Final - {nomes[resultado_cor]}"
-
-        if valor_esperado > VALOR_ESPERADO_MINIMO:
-            recomendacoes.append({
-                "jogo_id": jogo_id,
-                "jogador_id": jogador_id,
-                "tipo_padrao": tipo,
-                "descricao": descricao_final,
-                "casa_aposta": casa,
-                "odd_oferecida": valor_odd,
-                "probabilidade_historica": round(probabilidade * 100, 2),
-                "valor_esperado": valor_esperado,
-                "linha": linha,
-                "adversario": adversario,
-                "data_jogo": data_jogo,
-            })
-
-    return recomendacoes
-
-
-def salvar_recomendacoes(cur, recomendacoes):
-    # limpa só as recomendações de jogos FUTUROS antes de gerar as novas
-    # (as de jogos já ocorridos ficam intactas até o script de arquivamento
-    # processá-las - senão perderíamos o histórico antes de avaliar acerto/erro)
-    cur.execute(
-        "DELETE FROM recomendacoes WHERE jogo_id IN (SELECT id FROM jogos WHERE data_jogo >= CURRENT_DATE)"
-    )
-
-    for r in recomendacoes:
-        cur.execute(
-            """INSERT INTO recomendacoes
-               (jogo_id, jogador_id, tipo_padrao, descricao, casa_aposta,
-                odd_oferecida, probabilidade_historica, valor_esperado, linha)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (
-                r["jogo_id"], r["jogador_id"], r["tipo_padrao"], r["descricao"],
-                r["casa_aposta"], r["odd_oferecida"], r["probabilidade_historica"],
-                r["valor_esperado"], r.get("linha"),
-            ),
-        )
-        print(f"  [{r['data_jogo']} vs {r['adversario']}] {r['descricao']} "
-              f"({r['casa_aposta']}) - odd {r['odd_oferecida']} | "
-              f"prob. histórica {r['probabilidade_historica']}% | VE {r['valor_esperado']}")
+# NOVO: faixa de odd bem larga - esse script não responde a um pedido
+# específico de usuário (não tem "odd mínima/máxima" pra respeitar), o
+# objetivo é capturar o máximo de combinações válidas (VE > 0) possível
+# pra abastecer o ranking. Os limites internos de montar_combinacoes
+# (redução de linhas por mercado, tamanho adaptativo, teto de 300 por
+# casa) continuam protegendo a performance normalmente.
+ODD_MINIMA_CAPTURA = 1.01
+ODD_MAXIMA_CAPTURA = 1000.0
 
 
 def main():
@@ -216,19 +56,29 @@ def main():
     cur = conn.cursor()
 
     try:
-        print("Cruzando padrões com odds de jogos futuros...")
-        recomendacoes = calcular_recomendacoes(cur)
+        print("Buscando recomendações ativas...")
+        recomendacoes = buscar_recomendacoes(cur)
 
         if not recomendacoes:
-            print("Nenhuma recomendação de valor encontrada no momento "
-                  "(sem jogo próximo, sem odds coletadas, ou sem padrão correspondente).")
-            salvar_recomendacoes(cur, [])  # ainda assim limpa recomendações antigas
+            print("Nenhuma recomendação ativa no momento - nada pra combinar.")
         else:
-            recomendacoes.sort(key=lambda r: r["valor_esperado"], reverse=True)
-            salvar_recomendacoes(cur, recomendacoes)
+            print(f"{len(recomendacoes)} recomendação(ões) ativa(s) encontrada(s). Montando combinações...")
+            combinacoes_geradas = montar_combinacoes(recomendacoes, ODD_MINIMA_CAPTURA, ODD_MAXIMA_CAPTURA)
+            multiplas = [c for c in combinacoes_geradas if len(c["pernas"]) > 1]
 
+            if not multiplas:
+                print("Nenhuma múltipla de valor encontrada no momento.")
+            else:
+                capturadas = capturar_candidatas_multiplas(cur, multiplas)
+                conn.commit()
+                print(f"Concluído! {capturadas} múltipla(s) candidata(s) capturada(s)/atualizada(s).")
+
+        congeladas = congelar_candidatas_vencidas(cur)
         conn.commit()
-        print(f"\nConcluído! {len(recomendacoes)} recomendação(ões) salva(s).")
+        if congeladas:
+            print(f"{congeladas} candidata(s) congelada(s) (jogo mais próximo já começou).")
+        else:
+            print("Nenhuma candidata nova pra congelar no momento.")
 
     except Exception as e:
         conn.rollback()
