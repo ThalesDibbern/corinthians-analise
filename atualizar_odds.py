@@ -498,11 +498,18 @@ def buscar_lesoes_suspensos(fixture_id_api):
     indisponibilidade já filtrado pros dois times daquele confronto,
     sem precisar cruzar manualmente com a lista inteira da liga).
 
-    Retorna lista de dicts (um por jogador reportado) ou lista vazia se
-    não tiver nada, a chave não estiver configurada, ou a chamada falhar
-    por qualquer motivo - esse dado é complementar, não deve travar o
-    script. Guarda o item bruto (`bruto`) junto, pra não perder nada se
-    algum campo específico vier com nome diferente do esperado."""
+    Retorna lista de dicts (um por jogador reportado, já sem duplicata) ou
+    lista vazia se não tiver nada, a chave não estiver configurada, ou a
+    chamada falhar por qualquer motivo - esse dado é complementar, não deve
+    travar o script. Guarda o item bruto (`bruto`) junto, pra não perder
+    nada se algum campo específico vier com nome diferente do esperado.
+
+    CORRIGIDO: confirmado na prática que a API-Football devolve cada
+    jogador reportado DUAS VEZES na resposta de /injuries?fixture=X (não é
+    bug nosso na montagem da chamada - a lista que ela manda já vem assim).
+    Deduplica aqui, na origem, pra tanto o log quanto o salvamento no banco
+    refletirem a lista já limpa - antes só deduplicava na hora de salvar,
+    então o log continuava mostrando a contagem e os nomes duplicados."""
     if not API_FOOTBALL_KEY:
         return []
 
@@ -520,9 +527,14 @@ def buscar_lesoes_suspensos(fixture_id_api):
             return []
 
         resultado = []
+        vistos = set()
         for item in dados.get("response", []):
             jogador_api = item.get("player", {}) or {}
             time_api = item.get("team", {}) or {}
+            chave = jogador_api.get("id") or jogador_api.get("name")
+            if chave in vistos:
+                continue
+            vistos.add(chave)
             resultado.append({
                 "jogador_api_football_id": jogador_api.get("id"),
                 "jogador_nome": jogador_api.get("name"),
