@@ -626,8 +626,14 @@ PAGINA = """
         <div class="cartao item-pagina">
             <div class="cartao-topo">
                 <span class="jogo">
-                    {{ c.jogos[0].data_jogo }} ·
-                    {% for j in c.jogos %}{{ j.nosso_time }} x {{ j.adversario }}{% if not loop.last %} + {% endif %}{% endfor %}
+                    <!-- CORRIGIDO: antes mostrava só a data do PRIMEIRO jogo
+                         da combinação (c.jogos[0].data_jogo) pra todos -
+                         quando a múltipla cruza jogos diferentes (recurso
+                         que já existe no projeto), isso fazia parecer que
+                         os dois jogos aconteceram no mesmo dia, mesmo
+                         quando não tinham nada a ver um com o outro. Agora
+                         cada jogo mostra a PRÓPRIA data. -->
+                    {% for j in c.jogos %}{{ j.data_jogo }} · {{ j.nosso_time }} x {{ j.adversario }}{% if not loop.last %} + {% endif %}{% endfor %}
                 </span>
                 <span class="casa">{{ c.casa_aposta }}</span>
                 <span class="odd-tag">ODD {{ c.odd_combinada }}</span>
@@ -835,6 +841,38 @@ LIMITE_POOL_PARA_4_PERNAS = 90
 MAX_MULTIPLAS_RESULTADO = 300
 
 
+def identidade_jogo(p):
+    """Identidade do jogo REAL por trás de uma perna - usa fixture_id_api
+    (idêntico nas duas linhas quando os dois times de um confronto são
+    rastreados, ver arquitetura multi-time), com fallback pro trio
+    (nosso_time, adversario, data_jogo) quando fixture_id_api não está
+    preenchido (jogos antigos)."""
+    return p["fixture_id_api"] or (p["nosso_time"], p["adversario"], p["data_jogo"])
+
+
+def combo_tem_conflito_de_time_mesma_data(combo):
+    """NOVO (correção): impede uma múltipla de combinar pernas de dois
+    jogos DIFERENTES DE VERDADE (fixture_id_api diferente - não é só a
+    mesma partida vista pelas 2 perspectivas) que envolvam o MESMO time na
+    MESMA data - isso é fisicamente impossível (um time não pode disputar
+    duas partidas reais no mesmo dia), então a combinação nunca poderia
+    ter acontecido de verdade. Sem esse filtro, o sistema podia sugerir
+    (ou, no /historico, exibir como se fosse uma combinação válida) algo
+    do tipo "Corinthians x Atletico-PR" + "Atletico-PR x Santos" ambos no
+    mesmo dia - o Atletico-PR não pode estar nos dois jogos ao mesmo
+    tempo."""
+    for i in range(len(combo)):
+        for j in range(i + 1, len(combo)):
+            a, b = combo[i], combo[j]
+            if identidade_jogo(a) == identidade_jogo(b):
+                continue  # mesmo jogo real (só perspectivas diferentes) - ok
+            if a["data_jogo"] == b["data_jogo"] and (
+                {a["nosso_time"], a["adversario"]} & {b["nosso_time"], b["adversario"]}
+            ):
+                return True
+    return False
+
+
 def montar_combinacoes(recomendacoes, odd_min, odd_max):
     grupos = {}
     for rec in recomendacoes:
@@ -1020,6 +1058,12 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                     faixa_probabilidade = prob_faixa
 
                 if not valido:
+                    continue
+
+                # NOVO: rejeita combinações fisicamente impossíveis (mesmo
+                # time em 2 jogos DIFERENTES na mesma data - ver docstring
+                # de combo_tem_conflito_de_time_mesma_data).
+                if combo_tem_conflito_de_time_mesma_data(combo):
                     continue
 
                 odd_combinada = 1.0
@@ -1464,8 +1508,12 @@ PAGINA_HISTORICO = """
         <div class="cartao">
             <div class="cartao-topo">
                 <span class="jogo">
-                    {{ c.jogos[0].data_jogo }} ·
-                    {% for j in c.jogos %}{{ j.nosso_time }} x {{ j.adversario }}{% if not loop.last %} + {% endif %}{% endfor %}
+                    <!-- CORRIGIDO: mesmo problema/mesma correção do
+                         cartao_combo() da página principal (ver
+                         comentário lá) - cada jogo mostra a PRÓPRIA data,
+                         em vez de só a do primeiro jogo da combinação
+                         pra todos. -->
+                    {% for j in c.jogos %}{{ j.data_jogo }} · {{ j.nosso_time }} x {{ j.adversario }}{% if not loop.last %} + {% endif %}{% endfor %}
                 </span>
                 <span class="badge badge-{{ c.resultado }}">{{ c.resultado }}</span>
             </div>
@@ -1720,6 +1768,15 @@ def montar_combinacoes_historico(recomendacoes, piso_probabilidade):
             for combo in combinations(pernas_reduzidas, tamanho):
                 chaves_mercado = [(p["jogo_id"], p["tipo_padrao"], p["jogador_id"]) for p in combo]
                 if len(chaves_mercado) != len(set(chaves_mercado)):
+                    continue
+
+                # NOVO: mesma proteção de montar_combinacoes - rejeita
+                # combinações fisicamente impossíveis (mesmo time em 2
+                # jogos DIFERENTES na mesma data). É o que causava
+                # combinações do tipo "Corinthians x Atletico-PR" +
+                # "Atletico-PR x Santos" aparecendo como se tivessem
+                # acontecido no mesmo dia no /historico.
+                if combo_tem_conflito_de_time_mesma_data(combo):
                     continue
 
                 odd_combinada = 1.0
