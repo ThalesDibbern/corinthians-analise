@@ -457,9 +457,17 @@ def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
     dos casos ele ainda é igual ao fixture_id_api, mas se esse número já
     estiver em uso pela visão de OUTRO time rastreado no mesmo jogo real, a
     inserção cai pra um id automático (savepoint de segurança, mesmo padrão
-    já usado no atualizar_odds.py pra colisão de id)."""
+    já usado no atualizar_odds.py pra colisão de id).
+
+    NOVO: também salva a rodada (fixture["league"]["round"], ex: "Regular
+    Season - 20") - a API já manda esse dado em toda consulta, só nunca
+    tinha sido salvo. Usado pela política de retenção do recurso de
+    Múltiplas em Destaque (mantém detalhe completo só nas 2 rodadas mais
+    recentes). Mesmo padrão de backfill dos outros campos - jogo que já
+    existia sem rodada salva é completado agora."""
     fixture_id = fixture["fixture"]["id"]
     arbitro = fixture["fixture"].get("referee")  # pode vir None em alguns casos
+    rodada = fixture.get("league", {}).get("round")  # NOVO
 
     mandante_nome = fixture["teams"]["home"]["name"]
     visitante_nome = fixture["teams"]["away"]["name"]
@@ -468,18 +476,22 @@ def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
 
     cur.execute(
         "SELECT id, arbitro, mandante_id, visitante_id, datahora_jogo, "
-        "placar_corinthians, placar_adversario FROM jogos "
+        "placar_corinthians, placar_adversario, rodada FROM jogos "
         "WHERE fixture_id_api = %s AND nosso_time_id = %s",
         (fixture_id, nosso_time_id),
     )
     row = cur.fetchone()
     if row:
         (jogo_id, arbitro_salvo, mandante_id_salvo, visitante_id_salvo, datahora_salva,
-         placar_cor_salvo, placar_adv_salvo) = row
+         placar_cor_salvo, placar_adv_salvo, rodada_salva) = row
         # backfill: jogo já existia (de antes dessa funcionalidade) mas
         # está sem árbitro salvo, e agora a API nos deu esse dado - atualiza.
         if arbitro_salvo is None and arbitro:
             cur.execute("UPDATE jogos SET arbitro = %s WHERE id = %s", (arbitro, jogo_id))
+
+        # NOVO: backfill de rodada (jogo já existia de antes dessa coluna existir)
+        if rodada_salva is None and rodada:
+            cur.execute("UPDATE jogos SET rodada = %s WHERE id = %s", (rodada, jogo_id))
 
         # backfill: jogo já existia de antes da tabela `times` existir -
         # completa mandante_id/visitante_id agora.
@@ -541,14 +553,14 @@ def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
             INSERT INTO jogos (id, fixture_id_api, nosso_time_id, data_jogo, datahora_jogo,
                                 adversario, mandante, competicao,
                                 placar_corinthians, placar_adversario, arbitro,
-                                mandante_id, visitante_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                mandante_id, visitante_id, rodada)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 fixture_id, fixture_id, nosso_time_id,
                 data_jogo, datahora_jogo, adversario, eh_mandante, "Brasileirão Série A",
                 placar_corinthians, placar_adversario, arbitro,
-                mandante_id, visitante_id,
+                mandante_id, visitante_id, rodada,
             ),
         )
         return fixture_id
@@ -559,14 +571,14 @@ def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
             INSERT INTO jogos (fixture_id_api, nosso_time_id, data_jogo, datahora_jogo,
                                 adversario, mandante, competicao,
                                 placar_corinthians, placar_adversario, arbitro,
-                                mandante_id, visitante_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                                mandante_id, visitante_id, rodada)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
             """,
             (
                 fixture_id, nosso_time_id,
                 data_jogo, datahora_jogo, adversario, eh_mandante, "Brasileirão Série A",
                 placar_corinthians, placar_adversario, arbitro,
-                mandante_id, visitante_id,
+                mandante_id, visitante_id, rodada,
             ),
         )
         return cur.fetchone()[0]
