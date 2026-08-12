@@ -111,3 +111,128 @@ def buscar_posicao_time(cur, temporada, rodada_numero, api_football_team_id):
         if item["time_api_id"] == api_football_team_id:
             return item
     return None
+
+
+def classificar_forca_adversario(posicao, total_times=TOTAL_TIMES_LIGA):
+    """NOVO (Fase D - Parte 2): classifica o adversário como 'forte'
+    (5 primeiras posições), 'fraco' (5 últimas) ou 'medio' (resto) -
+    medida simples de propósito: só posição na tabela, sem inventar
+    índice de força mais elaborado (decisão documentada)."""
+    if posicao <= 5:
+        return "forte"
+    if posicao > total_times - 5:
+        return "fraco"
+    return "medio"
+
+
+def calcular_contexto_jogo(cur, api_football_team_id, adversario_api_team_id, temporada, rodada_numero):
+    """NOVO (Fase D - Parte 2, só exibição): monta o "contexto" de um jogo
+    específico - onde o nosso time está na tabela, a distância até o
+    objetivo mais próximo (G4 se estiver de fora, ou até a saída seguro do
+    Z4 se estiver dentro), e a força do adversário (posição dele). Serve
+    pra comparar dois jogos da mesma rodada lado a lado (ex: "Palmeiras a
+    3 pontos do G4 contra o Mirassol (fraco)" vs "Flamengo líder contra o
+    Cruzeiro (forte)") - não calcula nada sozinho sobre qual jogo é "mais
+    fácil", só organiza o dado pra quem está olhando decidir.
+    Devolve None se faltar dado (mesmas condições de calcular_jogo_morto)."""
+    rodada_anterior = rodada_numero - 1
+    if rodada_anterior < 1:
+        return None
+
+    tab = calcular_tabela(cur, temporada, rodada_anterior)
+    if not tab:
+        return None
+
+    item_nosso = next((t for t in tab if t["time_api_id"] == api_football_team_id), None)
+    item_adversario = next((t for t in tab if t["time_api_id"] == adversario_api_team_id), None)
+    if item_nosso is None:
+        return None
+
+    total_times = len(tab)
+    if item_nosso["zona"] == "g4":
+        distancia_objetivo = 0
+        objetivo = "manter no G4"
+    else:
+        quarto_colocado = next((t for t in tab if t["posicao"] == TAMANHO_ZONA_G4), None)
+        distancia_objetivo = (quarto_colocado["pontos"] - item_nosso["pontos"]) if quarto_colocado else None
+        objetivo = "alcançar o G4"
+
+    distancia_z4 = None
+    if item_nosso["zona"] == "z4":
+        posicao_referencia = total_times - TAMANHO_ZONA_Z4  # primeiro posto seguro (16º de 20)
+        referencia = next((t for t in tab if t["posicao"] == posicao_referencia), None)
+        distancia_z4 = (item_nosso["pontos"] - referencia["pontos"]) if referencia else None
+
+    return {
+        "posicao": item_nosso["posicao"],
+        "pontos": item_nosso["pontos"],
+        "zona": item_nosso["zona"],
+        "objetivo": objetivo,
+        "distancia_objetivo": distancia_objetivo,
+        "distancia_z4": distancia_z4,
+        "adversario_posicao": item_adversario["posicao"] if item_adversario else None,
+        "adversario_forca": classificar_forca_adversario(item_adversario["posicao"], total_times) if item_adversario else None,
+    }
+
+
+TOTAL_RODADAS_LIGA = 38
+
+
+def calcular_jogo_morto(cur, api_football_team_id, temporada, rodada_numero):
+    """NOVO (Fase D - Parte 1, só rótulo informativo, NÃO afeta nenhuma
+    recomendação/VE): diz se, entrando nessa rodada, o time já não tem
+    mais nada em jogo - matematicamente não pode mais alcançar o G4 nem
+    cair no Z4, mesmo no cenário mais favorável/desfavorável possível daqui
+    pra frente.
+
+    Aproximação simples de propósito: só olha o 4º colocado (corte do G4)
+    e o time na primeira posição do Z4 (corte do rebaixamento) - não
+    considera ainda vagas de Libertadores/Sul-Americana (que mudam de
+    tamanho a cada temporada, dependendo de outras competições - decisão
+    documentada de deixar pra uma fase futura) nem os jogos restantes dos
+    times de referência (assume o cenário mais simples: só olha os pontos
+    ATUAIS deles, sem projetar o que ainda podem ganhar). Isso torna o
+    cálculo um pouco mais "generoso" (marca como morto um pouco depois do
+    que seria o rigor matemático completo) - aceitável pra um rótulo
+    informativo, não pra uma trava definitiva.
+
+    Devolve None se não tiver dado suficiente ainda (rodada muito no
+    início, temporada sem jogos concluídos, ou campeonato já encerrado)."""
+    rodada_anterior = rodada_numero - 1
+    if rodada_anterior < 1:
+        return None
+
+    tab = calcular_tabela(cur, temporada, rodada_anterior)
+    if not tab:
+        return None
+
+    item_nosso = next((t for t in tab if t["time_api_id"] == api_football_team_id), None)
+    if item_nosso is None:
+        return None
+
+    rodadas_restantes = TOTAL_RODADAS_LIGA - rodada_anterior
+    if rodadas_restantes <= 0:
+        return None
+
+    pontos_max_nosso = item_nosso["pontos"] + rodadas_restantes * 3
+
+    quarto_colocado = next((t for t in tab if t["posicao"] == TAMANHO_ZONA_G4), None)
+    pode_alcancar_g4 = quarto_colocado is None or pontos_max_nosso >= quarto_colocado["pontos"]
+
+    total_times = len(tab)
+    posicao_referencia_z4 = total_times - TAMANHO_ZONA_Z4 + 1
+    referencia_z4 = next((t for t in tab if t["posicao"] == posicao_referencia_z4), None)
+    if referencia_z4 is None:
+        pode_cair_z4 = False
+    else:
+        pontos_max_referencia = referencia_z4["pontos"] + rodadas_restantes * 3
+        pode_cair_z4 = item_nosso["pontos"] <= pontos_max_referencia
+
+    return {
+        "morto": not pode_alcancar_g4 and not pode_cair_z4,
+        "zona_atual": item_nosso["zona"],
+        "posicao_atual": item_nosso["posicao"],
+        "pode_alcancar_g4": pode_alcancar_g4,
+        "pode_cair_z4": pode_cair_z4,
+        "rodadas_restantes": rodadas_restantes,
+    }
