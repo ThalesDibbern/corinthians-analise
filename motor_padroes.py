@@ -997,6 +997,215 @@ def salvar_correlacoes_categoria(cur, resultados):
               f"{jogos_acima}+{jogos_abaixo} jogo(s))")
 
 
+# NOVO (Correlação entre categorias - POR TIME, só visual): diferente da
+# versão geral (que soma os DOIS lados juntos), essa isola a DIREÇÃO - só
+# os jogadores da categoria A DO PRÓPRIO time contra os da categoria B DO
+# ADVERSÁRIO, no mesmo jogo. Revela se o ataque de UM time específico tem
+# esse efeito mais forte/fraco que a média da liga.
+def buscar_totais_categoria_direcional_por_jogo(cur, time_id, categoria_a, estatistica_a, categoria_b, estatistica_b):
+    expr_a = EXPRESSOES_ESTATISTICA_JOGADOR[estatistica_a]
+    expr_b = EXPRESSOES_ESTATISTICA_JOGADOR[estatistica_b]
+    cur.execute(
+        f"""
+        SELECT j.id,
+               SUM(CASE WHEN jeg.posicao = %s AND
+                   ((j.mandante = TRUE AND jeg.lado = 'mandante') OR (j.mandante = FALSE AND jeg.lado = 'visitante'))
+                   THEN {expr_a} END) AS valor_a,
+               SUM(CASE WHEN jeg.posicao = %s AND
+                   ((j.mandante = TRUE AND jeg.lado = 'visitante') OR (j.mandante = FALSE AND jeg.lado = 'mandante'))
+                   THEN {expr_b} END) AS valor_b
+        FROM jogos j
+        JOIN jogador_estatisticas_jogo jeg ON jeg.jogo_id = j.id
+        WHERE j.nosso_time_id = %s AND j.data_jogo < CURRENT_DATE
+        GROUP BY j.id
+        """,
+        (categoria_a, categoria_b, time_id),
+    )
+    totais = []
+    for jogo_id, valor_a, valor_b in cur.fetchall():
+        if valor_a is None or valor_b is None:
+            continue
+        totais.append((float(valor_a), float(valor_b)))
+    return totais
+
+
+def calcular_correlacoes_categoria_time(cur, time_id):
+    resultados = []
+    for par_def in PARES_CORRELACAO_CATEGORIA:
+        jogos = buscar_totais_categoria_direcional_por_jogo(
+            cur, time_id, par_def["categoria_a"], par_def["estatistica_a"],
+            par_def["categoria_b"], par_def["estatistica_b"],
+        )
+        if len(jogos) < JOGOS_MINIMOS_PARA_ANALISAR:
+            continue
+
+        valores_a = [v[0] for v in jogos]
+        media_a = sum(valores_a) / len(valores_a)
+
+        grupo_acima = [v[1] for v in jogos if v[0] > media_a]
+        grupo_abaixo = [v[1] for v in jogos if v[0] <= media_a]
+
+        if len(grupo_acima) < JOGOS_MINIMOS_PARA_ANALISAR or len(grupo_abaixo) < JOGOS_MINIMOS_PARA_ANALISAR:
+            continue
+
+        media_b_acima = sum(grupo_acima) / len(grupo_acima)
+        media_b_abaixo = sum(grupo_abaixo) / len(grupo_abaixo)
+
+        resultados.append((
+            time_id, par_def["par"], par_def["categoria_a"], par_def["estatistica_a"],
+            par_def["categoria_b"], par_def["estatistica_b"], round(media_a, 3),
+            round(media_b_acima, 3), round(media_b_abaixo, 3),
+            len(grupo_acima), len(grupo_abaixo), len(jogos),
+        ))
+    return resultados
+
+
+def salvar_correlacoes_categoria_time(cur, resultados):
+    for (time_id, par, cat_a, est_a, cat_b, est_b, media_a, media_b_acima, media_b_abaixo,
+         jogos_acima, jogos_abaixo, jogos_total) in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_correlacao_categoria_time
+                (time_id, par, categoria_a, estatistica_a, categoria_b, estatistica_b, media_a,
+                 valor_b_acima, valor_b_abaixo, jogos_acima, jogos_abaixo, jogos_total, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, par) DO UPDATE SET
+                media_a = EXCLUDED.media_a, valor_b_acima = EXCLUDED.valor_b_acima,
+                valor_b_abaixo = EXCLUDED.valor_b_abaixo, jogos_acima = EXCLUDED.jogos_acima,
+                jogos_abaixo = EXCLUDED.jogos_abaixo, jogos_total = EXCLUDED.jogos_total,
+                atualizado_em = NOW()
+            """,
+            (time_id, par, cat_a, est_a, cat_b, est_b, media_a, media_b_acima, media_b_abaixo,
+             jogos_acima, jogos_abaixo, jogos_total),
+        )
+    if resultados:
+        print(f"  {len(resultados)} par(es) de correlação categoria->categoria calculados pra esse time.")
+
+
+# NOVO (Correlação POR JOGADOR NOMEADO, só visual): a API-Football não
+# informa quem marca quem em campo, então não dá pra afirmar "jogador X
+# tomou cartão POR CAUSA do jogador Y". O que dá pra provar com o dado
+# real: pra um atacante específico, nos jogos em que ELE sofreu mais falta
+# que a PRÓPRIA média pessoal, o time ADVERSÁRIO daquele jogo (como um
+# todo, não um defensor nomeado) reagiu de um jeito ou de outro - medido
+# em cartão dos defensores do adversário.
+JOGOS_MINIMOS_JOGADOR_CORRELACAO = 10  # jogador precisa de amostra própria razoável
+
+
+def expr_estatistica_jogador(estatistica, alias):
+    """Monta a expressão SQL certa pra essa estatística de jogador, com o
+    alias de tabela certo - "cartoes" é especial (soma amarelo+vermelho,
+    não é uma coluna única)."""
+    if estatistica == "cartoes":
+        return f"(COALESCE({alias}.cartao_amarelo, 0) + COALESCE({alias}.cartao_vermelho, 0))"
+    return f"{alias}.{estatistica}"
+
+
+def buscar_jogadores_atacantes_qualificados(cur):
+    """Jogadores classificados como Atacante (posição predominante),
+    ativos, com jogos suficientes registrados (faltas_sofridas não nula)
+    pra calcular uma média pessoal minimamente confiável."""
+    cur.execute(
+        """
+        SELECT j.id, j.nome
+        FROM jogadores j
+        WHERE j.ativo = TRUE
+          AND (
+              SELECT jeg.posicao FROM jogador_estatisticas_jogo jeg
+              WHERE jeg.jogador_id = j.id AND jeg.posicao IS NOT NULL
+              GROUP BY jeg.posicao ORDER BY COUNT(*) DESC LIMIT 1
+          ) = 'F'
+          AND (
+              SELECT COUNT(*) FROM jogador_estatisticas_jogo jeg
+              WHERE jeg.jogador_id = j.id AND jeg.faltas_sofridas IS NOT NULL
+          ) >= %s
+        """,
+        (JOGOS_MINIMOS_JOGADOR_CORRELACAO,),
+    )
+    return cur.fetchall()
+
+
+def buscar_jogos_jogador_vs_adversario(cur, jogador_id, categoria_b, estatistica_b):
+    """Pra um jogador específico: pra cada jogo real (deduplicado por
+    fixture_id_api), devolve (faltas sofridas pessoais dele nesse jogo,
+    soma da estatística B entre os jogadores da categoria B do ADVERSÁRIO
+    nesse mesmo jogo)."""
+    expr_b = expr_estatistica_jogador(estatistica_b, "jeg_adv")
+    cur.execute(
+        f"""
+        SELECT j.fixture_id_api, jeg_proprio.faltas_sofridas,
+               (SELECT SUM(CASE WHEN jeg_adv.posicao = %s THEN {expr_b} END)
+                FROM jogador_estatisticas_jogo jeg_adv
+                WHERE jeg_adv.jogo_id = j.id AND jeg_adv.lado != jeg_proprio.lado) AS valor_b
+        FROM jogador_estatisticas_jogo jeg_proprio
+        JOIN jogos j ON j.id = jeg_proprio.jogo_id
+        WHERE jeg_proprio.jogador_id = %s
+          AND jeg_proprio.faltas_sofridas IS NOT NULL
+          AND j.data_jogo < CURRENT_DATE
+        """,
+        (categoria_b, jogador_id),
+    )
+    totais = {}
+    for fixture_id_api, faltas_pessoais, valor_b in cur.fetchall():
+        if fixture_id_api in totais:
+            continue  # mesmo jogo real já visto (outra perspectiva)
+        if faltas_pessoais is None or valor_b is None:
+            continue
+        totais[fixture_id_api] = (float(faltas_pessoais), float(valor_b))
+    return list(totais.values())
+
+
+def calcular_correlacoes_jogador(cur):
+    jogadores = buscar_jogadores_atacantes_qualificados(cur)
+    resultados = []
+    for jogador_id, nome in jogadores:
+        jogos = buscar_jogos_jogador_vs_adversario(cur, jogador_id, "D", "cartoes")
+        if len(jogos) < JOGOS_MINIMOS_JOGADOR_CORRELACAO:
+            continue
+
+        valores_a = [v[0] for v in jogos]
+        media_pessoal = sum(valores_a) / len(valores_a)
+
+        grupo_acima = [v[1] for v in jogos if v[0] > media_pessoal]
+        grupo_abaixo = [v[1] for v in jogos if v[0] <= media_pessoal]
+
+        if len(grupo_acima) < 5 or len(grupo_abaixo) < 5:
+            continue
+
+        media_b_acima = sum(grupo_acima) / len(grupo_acima)
+        media_b_abaixo = sum(grupo_abaixo) / len(grupo_abaixo)
+
+        resultados.append((
+            jogador_id, "faltas_sofridas_cartao_defensor_adversario", "faltas_sofridas",
+            "D", "cartoes", round(media_pessoal, 3),
+            round(media_b_acima, 3), round(media_b_abaixo, 3),
+            len(grupo_acima), len(grupo_abaixo), len(jogos),
+        ))
+    return resultados
+
+
+def salvar_correlacoes_jogador(cur, resultados):
+    for (jogador_id, par, est_a, cat_b, est_b, media_pessoal, media_b_acima, media_b_abaixo,
+         jogos_acima, jogos_abaixo, jogos_total) in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_correlacao_jogador
+                (jogador_id, par, estatistica_a, categoria_b, estatistica_b, media_pessoal,
+                 valor_b_acima, valor_b_abaixo, jogos_acima, jogos_abaixo, jogos_total, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (jogador_id, par) DO UPDATE SET
+                media_pessoal = EXCLUDED.media_pessoal, valor_b_acima = EXCLUDED.valor_b_acima,
+                valor_b_abaixo = EXCLUDED.valor_b_abaixo, jogos_acima = EXCLUDED.jogos_acima,
+                jogos_abaixo = EXCLUDED.jogos_abaixo, jogos_total = EXCLUDED.jogos_total,
+                atualizado_em = NOW()
+            """,
+            (jogador_id, par, est_a, cat_b, est_b, media_pessoal, media_b_acima, media_b_abaixo,
+             jogos_acima, jogos_abaixo, jogos_total),
+        )
+    if resultados:
+        print(f"  {len(resultados)} jogador(es) atacante(s) com correlação pessoal calculada.")
+
+
 # NOVO (Fase B - padrão por rodada, detecção automática de quebra): pra
 # cada time rastreado, calcula o comportamento em CADA número de rodada
 # (1, 2, 3... até 38), juntando as ~5 temporadas coletadas - ex: "na
@@ -2397,6 +2606,18 @@ def main():
                 print(f"  Dados insuficientes ainda para correlação por time "
                       f"(mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos por grupo).")
 
+            # NOVO (Correlação entre categorias - POR TIME, só visual):
+            # isola a direção (nosso ataque -> defesa do rival), diferente
+            # da versão geral que soma os dois lados juntos.
+            print("Calculando correlação entre categorias (por time)...")
+            correlacoes_categoria_time = calcular_correlacoes_categoria_time(cur, time_id)
+            if correlacoes_categoria_time:
+                salvar_correlacoes_categoria_time(cur, correlacoes_categoria_time)
+                conn.commit()
+            else:
+                print(f"  Dados insuficientes ainda para correlação de categoria por time "
+                      f"(mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos por grupo).")
+
             print("Calculando padrões de resultado final (vitória/empate/derrota)...")
             resultados_finais = calcular_padroes_resultado(cur, time_id)
             if resultados_finais:
@@ -2467,6 +2688,21 @@ def main():
         else:
             print(f"  Dados insuficientes ainda para correlação entre categorias "
                   f"(mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos completos).")
+
+        # NOVO (Correlação POR JOGADOR NOMEADO, só visual): pra cada
+        # atacante com amostra própria suficiente, calculado uma vez só
+        # (percorre todos os jogadores qualificados, não é "por time" -
+        # um jogador pertence a um time, mas a análise em si não precisa
+        # repetir por time).
+        print("\nCalculando correlação por jogador nomeado (atacante que sofre falta)...")
+        resultados_jogador = calcular_correlacoes_jogador(cur)
+        if resultados_jogador:
+            salvar_correlacoes_jogador(cur, resultados_jogador)
+            conn.commit()
+            print(f"Concluído! {len(resultados_jogador)} jogador(es) calculados.")
+        else:
+            print(f"  Nenhum jogador qualificado ainda (mínimo de "
+                  f"{JOGOS_MINIMOS_JOGADOR_CORRELACAO} jogos com faltas sofridas registradas).")
 
         # NOVO: perfil de árbitro continua sendo calculado uma vez só, pra
         # TODOS os jogos disponíveis - não é "do Corinthians" nem "do
