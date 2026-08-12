@@ -885,6 +885,118 @@ def salvar_correlacoes_time(cur, resultados):
         print(f"  {len(resultados)} par(es) de correlação calculados pra esse time.")
 
 
+# NOVO (Correlação entre CATEGORIAS de jogador, só exibição, GERAL da
+# liga): cruza a estatística de um GRUPO de jogadores (por posição -
+# Goleiro/Defensor/Meio-campista/Atacante, a granularidade máxima que a
+# API-Football oferece) com a de OUTRO grupo, dos dois times somados, no
+# mesmo jogo. Ex: "quando os ATACANTES sofrem muita falta, os DEFENSORES
+# do jogo levam mais cartão?". Calculado uma vez só (é um dado da liga,
+# não de um time específico), mesma janela de "acima/abaixo da média" do
+# resto das correlações.
+EXPRESSOES_ESTATISTICA_JOGADOR = {
+    "faltas_sofridas": "jeg.faltas_sofridas",
+    "faltas_cometidas": "jeg.faltas_cometidas",
+    "cartoes": "(COALESCE(jeg.cartao_amarelo, 0) + COALESCE(jeg.cartao_vermelho, 0))",
+    "desarmes": "jeg.desarmes",
+    "chutes": "jeg.chutes",
+    "chutes_no_gol": "jeg.chutes_no_gol",
+}
+
+PARES_CORRELACAO_CATEGORIA = [
+    {
+        "par": "falta_sofrida_atacante_cartao_defensor",
+        "categoria_a": "F", "estatistica_a": "faltas_sofridas", "titulo_a": "Faltas sofridas (atacantes)",
+        "categoria_b": "D", "estatistica_b": "cartoes", "titulo_b": "Cartões (defensores)",
+    },
+]
+
+
+def buscar_totais_categoria_por_jogo(cur, categoria_a, estatistica_a, categoria_b, estatistica_b):
+    """{fixture_id_api: (valor_a, valor_b)} - soma da estatística A entre
+    os jogadores da categoria A (os dois times juntos) e da estatística B
+    entre os jogadores da categoria B, por jogo. Deduplicado por
+    fixture_id_api (mesmo jogo real conta uma vez só, mesmo se os dois
+    times envolvidos forem rastreados)."""
+    expr_a = EXPRESSOES_ESTATISTICA_JOGADOR[estatistica_a]
+    expr_b = EXPRESSOES_ESTATISTICA_JOGADOR[estatistica_b]
+    cur.execute(
+        f"""
+        SELECT j.fixture_id_api, j.id,
+               SUM(CASE WHEN jeg.posicao = %s THEN {expr_a} END) AS valor_a,
+               SUM(CASE WHEN jeg.posicao = %s THEN {expr_b} END) AS valor_b
+        FROM jogos j
+        JOIN jogador_estatisticas_jogo jeg ON jeg.jogo_id = j.id
+        WHERE j.data_jogo < CURRENT_DATE AND j.fixture_id_api IS NOT NULL
+        GROUP BY j.fixture_id_api, j.id
+        """,
+        (categoria_a, categoria_b),
+    )
+    totais = {}
+    for fixture_id_api, jogo_id, valor_a, valor_b in cur.fetchall():
+        if fixture_id_api in totais:
+            continue  # mesmo jogo real já visto pela outra perspectiva
+        if valor_a is None or valor_b is None:
+            continue
+        totais[fixture_id_api] = (float(valor_a), float(valor_b))
+    return totais
+
+
+def calcular_correlacoes_categoria(cur):
+    resultados = []
+    for par_def in PARES_CORRELACAO_CATEGORIA:
+        totais = buscar_totais_categoria_por_jogo(
+            cur, par_def["categoria_a"], par_def["estatistica_a"],
+            par_def["categoria_b"], par_def["estatistica_b"],
+        )
+        jogos = list(totais.values())
+        if len(jogos) < JOGOS_MINIMOS_PARA_ANALISAR:
+            continue
+
+        valores_a = [v[0] for v in jogos]
+        media_a = sum(valores_a) / len(valores_a)
+
+        grupo_acima = [v[1] for v in jogos if v[0] > media_a]
+        grupo_abaixo = [v[1] for v in jogos if v[0] <= media_a]
+
+        if len(grupo_acima) < 5 or len(grupo_abaixo) < 5:
+            continue
+
+        media_b_acima = sum(grupo_acima) / len(grupo_acima)
+        media_b_abaixo = sum(grupo_abaixo) / len(grupo_abaixo)
+
+        resultados.append((
+            par_def["par"], par_def["categoria_a"], par_def["estatistica_a"],
+            par_def["categoria_b"], par_def["estatistica_b"], round(media_a, 3),
+            round(media_b_acima, 3), round(media_b_abaixo, 3),
+            len(grupo_acima), len(grupo_abaixo), len(jogos),
+        ))
+    return resultados
+
+
+def salvar_correlacoes_categoria(cur, resultados):
+    for (par, cat_a, est_a, cat_b, est_b, media_a, media_b_acima, media_b_abaixo,
+         jogos_acima, jogos_abaixo, jogos_total) in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_correlacao_categoria
+                (par, categoria_a, estatistica_a, categoria_b, estatistica_b, media_a,
+                 valor_b_acima, valor_b_abaixo, jogos_acima, jogos_abaixo, jogos_total, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (par) DO UPDATE SET
+                media_a = EXCLUDED.media_a, valor_b_acima = EXCLUDED.valor_b_acima,
+                valor_b_abaixo = EXCLUDED.valor_b_abaixo, jogos_acima = EXCLUDED.jogos_acima,
+                jogos_abaixo = EXCLUDED.jogos_abaixo, jogos_total = EXCLUDED.jogos_total,
+                atualizado_em = NOW()
+            """,
+            (par, cat_a, est_a, cat_b, est_b, media_a, media_b_acima, media_b_abaixo,
+             jogos_acima, jogos_abaixo, jogos_total),
+        )
+        diferenca = round(media_b_acima - media_b_abaixo, 3)
+        print(f"  [{par}] acima da média ({media_a}): {media_b_acima}/jogo | "
+              f"abaixo: {media_b_abaixo}/jogo (diferença: {diferenca:+.3f}, "
+              f"{jogos_acima}+{jogos_abaixo} jogo(s))")
+
+
 # NOVO (Fase B - padrão por rodada, detecção automática de quebra): pra
 # cada time rastreado, calcula o comportamento em CADA número de rodada
 # (1, 2, 3... até 38), juntando as ~5 temporadas coletadas - ex: "na
@@ -2339,6 +2451,21 @@ def main():
             print(f"Concluído! {len(resultados_correlacao)} par(es) de estatísticas calculados.")
         else:
             print(f"  Dados insuficientes ainda para correlação entre estatísticas "
+                  f"(mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos completos).")
+
+        # NOVO (Correlação entre CATEGORIAS de jogador, só visual): mesma
+        # ideia, mas cruzando estatística de um GRUPO de jogadores (por
+        # posição) com a de outro grupo - ex: atacantes que sofrem falta
+        # x cartão dos defensores. Também calculado uma vez só (dado da
+        # liga inteira).
+        print("\nCalculando correlação entre categorias de jogador...")
+        resultados_categoria = calcular_correlacoes_categoria(cur)
+        if resultados_categoria:
+            salvar_correlacoes_categoria(cur, resultados_categoria)
+            conn.commit()
+            print(f"Concluído! {len(resultados_categoria)} par(es) de categoria calculados.")
+        else:
+            print(f"  Dados insuficientes ainda para correlação entre categorias "
                   f"(mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos completos).")
 
         # NOVO: perfil de árbitro continua sendo calculado uma vez só, pra
