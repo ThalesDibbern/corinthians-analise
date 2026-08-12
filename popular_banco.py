@@ -67,6 +67,7 @@ Variáveis de ambiente necessárias (configuradas no Railway, aba "Variables"):
 """
 
 import os
+import re
 import time
 import requests
 import psycopg2
@@ -81,6 +82,16 @@ HEADERS = {"x-apisports-key": API_KEY}
 LEAGUE_ID = 71                    # Brasileirão Série A
 TEMPORADAS = [2022, 2023, 2024, 2025, 2026]  # histórico + temporada atual (plano pago libera 2025/2026)
 LIMITE_REQUISICOES_DIA = 7000      # margem de segurança abaixo do limite de 7.500/dia do plano novo
+
+
+def _numero_rodada(rodada):
+    """NOVO (Fase B): extrai o número de dentro de "Regular Season - 20"
+    -> 20. Mesma lógica já usada em popular_tabela.py/limpar_historico.py -
+    mantida duplicada aqui de propósito (utilitário pequeno e autocontido,
+    baixo risco de divergência - ver combinacoes.py pra contraste com
+    lógica de negócio complexa, essa sim compartilhada)."""
+    m = re.search(r"(\d+)", rodada or "")
+    return int(m.group(1)) if m else None
 
 # NOVO (correção de performance): status da API-Football (campo
 # fixture.status.short) que indicam jogo REALMENTE finalizado, com
@@ -468,6 +479,7 @@ def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
     fixture_id = fixture["fixture"]["id"]
     arbitro = fixture["fixture"].get("referee")  # pode vir None em alguns casos
     rodada = fixture.get("league", {}).get("round")  # NOVO
+    rodada_numero = _numero_rodada(rodada)  # NOVO (Fase B): número extraído, pra agrupar por rodada sem reparsear toda vez
 
     mandante_nome = fixture["teams"]["home"]["name"]
     visitante_nome = fixture["teams"]["away"]["name"]
@@ -476,14 +488,14 @@ def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
 
     cur.execute(
         "SELECT id, arbitro, mandante_id, visitante_id, datahora_jogo, "
-        "placar_corinthians, placar_adversario, rodada FROM jogos "
+        "placar_corinthians, placar_adversario, rodada, rodada_numero FROM jogos "
         "WHERE fixture_id_api = %s AND nosso_time_id = %s",
         (fixture_id, nosso_time_id),
     )
     row = cur.fetchone()
     if row:
         (jogo_id, arbitro_salvo, mandante_id_salvo, visitante_id_salvo, datahora_salva,
-         placar_cor_salvo, placar_adv_salvo, rodada_salva) = row
+         placar_cor_salvo, placar_adv_salvo, rodada_salva, rodada_numero_salva) = row
         # backfill: jogo já existia (de antes dessa funcionalidade) mas
         # está sem árbitro salvo, e agora a API nos deu esse dado - atualiza.
         if arbitro_salvo is None and arbitro:
@@ -492,6 +504,10 @@ def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
         # NOVO: backfill de rodada (jogo já existia de antes dessa coluna existir)
         if rodada_salva is None and rodada:
             cur.execute("UPDATE jogos SET rodada = %s WHERE id = %s", (rodada, jogo_id))
+
+        # NOVO (Fase B): backfill de rodada_numero
+        if rodada_numero_salva is None and rodada_numero is not None:
+            cur.execute("UPDATE jogos SET rodada_numero = %s WHERE id = %s", (rodada_numero, jogo_id))
 
         # backfill: jogo já existia de antes da tabela `times` existir -
         # completa mandante_id/visitante_id agora.
@@ -553,14 +569,14 @@ def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
             INSERT INTO jogos (id, fixture_id_api, nosso_time_id, data_jogo, datahora_jogo,
                                 adversario, mandante, competicao,
                                 placar_corinthians, placar_adversario, arbitro,
-                                mandante_id, visitante_id, rodada)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                mandante_id, visitante_id, rodada, rodada_numero)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 fixture_id, fixture_id, nosso_time_id,
                 data_jogo, datahora_jogo, adversario, eh_mandante, "Brasileirão Série A",
                 placar_corinthians, placar_adversario, arbitro,
-                mandante_id, visitante_id, rodada,
+                mandante_id, visitante_id, rodada, rodada_numero,
             ),
         )
         return fixture_id
@@ -571,14 +587,14 @@ def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
             INSERT INTO jogos (fixture_id_api, nosso_time_id, data_jogo, datahora_jogo,
                                 adversario, mandante, competicao,
                                 placar_corinthians, placar_adversario, arbitro,
-                                mandante_id, visitante_id, rodada)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                                mandante_id, visitante_id, rodada, rodada_numero)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
             """,
             (
                 fixture_id, nosso_time_id,
                 data_jogo, datahora_jogo, adversario, eh_mandante, "Brasileirão Série A",
                 placar_corinthians, placar_adversario, arbitro,
-                mandante_id, visitante_id, rodada,
+                mandante_id, visitante_id, rodada, rodada_numero,
             ),
         )
         return cur.fetchone()[0]
