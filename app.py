@@ -2860,6 +2860,19 @@ PAGINA_CLUBE = """
                     {% endif %}
                 </div>
             </div>
+
+            {% if j.correlacao_jogador %}
+            <div class="bloco">
+                <div class="bloco-titulo">🧩 Efeito no adversário quando sofre muita falta</div>
+                <div class="binario-texto" style="line-height:1.5;">
+                    Média pessoal: <b>{{ j.correlacao_jogador.media_pessoal }}</b> falta(s) sofrida(s)/jogo.
+                    Nos jogos em que sofreu <b>acima</b> dessa média, os defensores do adversário levaram
+                    <b class="{{ 'acima' if j.correlacao_jogador.sobe_junto else 'abaixo' }}">{{ j.correlacao_jogador.valor_acima }} cartão(ões)/jogo</b>
+                    · abaixo da média: <b class="{{ 'abaixo' if j.correlacao_jogador.sobe_junto else 'acima' }}">{{ j.correlacao_jogador.valor_abaixo }}</b>.
+                    <span style="color:#8b949e; font-size:0.75rem;">({{ j.correlacao_jogador.jogos_total }} jogo(s) - não indica QUAL defensor especificamente, a API não informa quem marcou quem.)</span>
+                </div>
+            </div>
+            {% endif %}
         </div>
         {% endfor %}
     {% else %}
@@ -3878,6 +3891,30 @@ PAGINA_TIME = """
             </div>
             {% endif %}
 
+            {% if correlacoes_categoria_time %}
+            <div class="cartao-correlacao" style="margin-top: 16px;">
+                <div class="bloco-titulo" style="margin-bottom: 8px;">🧩 Correlação entre categorias ({{ nome_time }})</div>
+                <p class="correlacao-aviso">
+                    Isola a direção: só o ATAQUE do {{ nome_time }} contra a DEFESA do adversário, no mesmo jogo -
+                    diferente da versão geral, que soma os dois lados juntos. <b>Informativo por enquanto, não
+                    afeta nenhuma recomendação.</b>
+                </p>
+                <div class="correlacao-grid" style="grid-template-columns: 1fr;">
+                    {% for c in correlacoes_categoria_time %}
+                    <div class="correlacao-item">
+                        <div class="correlacao-titulo">{{ c.titulo_a }} do {{ nome_time }} → {{ c.titulo_b }} do adversário</div>
+                        <div class="correlacao-linha">
+                            Acima da média ({{ c.media_a }}/jogo): {{ c.titulo_b|lower }} médio do adversário é
+                            <b class="{{ 'acima' if c.sobe_junto else 'abaixo' }}">{{ c.valor_acima }}/jogo</b>
+                            · abaixo: <b class="{{ 'abaixo' if c.sobe_junto else 'acima' }}">{{ c.valor_abaixo }}/jogo</b>
+                        </div>
+                        <div class="correlacao-detalhe">{{ c.jogos_total }} jogo(s) analisados</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
 
             {% if blocos %}
                 {% for bloco in blocos %}
@@ -4759,6 +4796,40 @@ def buscar_correlacoes_time(cur, time_id):
     return resultado
 
 
+def buscar_correlacoes_categoria_time(cur, time_id):
+    """NOVO (Correlação entre categorias - POR TIME, só exibição): lê
+    `padroes_correlacao_categoria_time` - diferente da versão geral (que
+    soma os dois lados juntos), essa isola a DIREÇÃO: só os jogadores da
+    categoria A DO PRÓPRIO time, contra os da categoria B DO ADVERSÁRIO.
+    NÃO afeta nenhum cálculo de recomendação/VE - é só informativo."""
+    try:
+        cur.execute(
+            """SELECT par, media_a, valor_b_acima, valor_b_abaixo,
+                      jogos_acima, jogos_abaixo, jogos_total
+               FROM padroes_correlacao_categoria_time WHERE time_id = %s ORDER BY id""",
+            (time_id,),
+        )
+        linhas = cur.fetchall()
+    except Exception as e:
+        if "does not exist" not in str(e).lower():
+            raise
+        cur.connection.rollback()
+        return []
+
+    resultado = []
+    for (par, media_a, valor_acima, valor_abaixo, jogos_acima, jogos_abaixo, jogos_total) in linhas:
+        titulo_a, titulo_b = NOMES_TITULO_PAR_CATEGORIA.get(par, (par, par))
+        resultado.append({
+            "titulo_a": titulo_a, "titulo_b": titulo_b,
+            "media_a": float(media_a),
+            "valor_acima": float(valor_acima),
+            "valor_abaixo": float(valor_abaixo),
+            "sobe_junto": float(valor_acima) >= float(valor_abaixo),
+            "jogos_acima": jogos_acima, "jogos_abaixo": jogos_abaixo, "jogos_total": jogos_total,
+        })
+    return resultado
+
+
 # ---------- Página de time: vizinhos na tabela + últimos jogos ----------
 def buscar_vizinhos_tabela(tabela, api_football_team_id, redor=2):
     """Recorta um pedaço da tabela do Brasileirão em volta do time (até
@@ -5016,6 +5087,28 @@ def buscar_estatisticas_jogadores(cur, time_id=None, busca=None):
 
     cartoes_suspensao = buscar_cartoes_para_suspensao(cur)
 
+    # NOVO (Correlação por jogador nomeado, só exibição): só existe pra
+    # atacantes com amostra própria suficiente - a maioria dos jogadores
+    # não vai ter essa chave preenchida, e tudo bem (fica None).
+    correlacoes_jogador = {}
+    try:
+        cur.execute(
+            "SELECT jogador_id, media_pessoal, valor_b_acima, valor_b_abaixo, jogos_total "
+            "FROM padroes_correlacao_jogador"
+        )
+        for jogador_id, media_pessoal, valor_acima, valor_abaixo, jogos_total in cur.fetchall():
+            correlacoes_jogador[jogador_id] = {
+                "media_pessoal": float(media_pessoal),
+                "valor_acima": float(valor_acima),
+                "valor_abaixo": float(valor_abaixo),
+                "sobe_junto": float(valor_acima) >= float(valor_abaixo),
+                "jogos_total": jogos_total,
+            }
+    except Exception as e:
+        if "does not exist" not in str(e).lower():
+            raise
+        cur.connection.rollback()
+
     lista = []
     for jogador_id, dados in jogadores_dict.items():
         blocos_linha = [
@@ -5030,6 +5123,7 @@ def buscar_estatisticas_jogadores(cur, time_id=None, busca=None):
             "impedimento": dados["impedimento"],
             "blocos_linha": blocos_linha,
             "cartoes_suspensao": cartoes_suspensao.get(jogador_id, 0),
+            "correlacao_jogador": correlacoes_jogador.get(jogador_id),
         })
 
     lista.sort(key=lambda p: p["nome"])
@@ -5276,6 +5370,7 @@ def time_detalhe(time_id):
         quebras_rodada = buscar_quebras_rodada(cur, time_id)
         padroes_zona = buscar_padroes_zona(cur, time_id)
         correlacoes_time = buscar_correlacoes_time(cur, time_id)
+        correlacoes_categoria_time = buscar_correlacoes_categoria_time(cur, time_id)
 
         cur.execute("SELECT id, nome FROM times WHERE rastreado = TRUE ORDER BY nome")
         times_rastreados = cur.fetchall()
@@ -5301,7 +5396,7 @@ def time_detalhe(time_id):
         clubes=clubes, time_id=time_id, vizinhos_tabela=vizinhos_tabela,
         api_football_team_id=api_football_team_id, ultimos_jogos=ultimos_jogos,
         estilo_time=estilo_time, quebras_rodada=quebras_rodada, padroes_zona=padroes_zona,
-        correlacoes_time=correlacoes_time,
+        correlacoes_time=correlacoes_time, correlacoes_categoria_time=correlacoes_categoria_time,
         nav_html=barra_navegacao("times", round(banca_atual, 2)),
     )
 
