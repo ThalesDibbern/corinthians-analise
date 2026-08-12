@@ -645,6 +645,132 @@ def salvar_estilo_times(cur, resultados):
               f"({sinal}{desvio}%, {jogos} jogo(s))")
 
 
+# NOVO (Correlação entre estatísticas, só exibição): dentro do MESMO jogo,
+# algumas estatísticas tendem a se mover juntas (ex: jogo com muito chute
+# tende a ter mais escanteio também - o time que ataca mais gera as duas
+# coisas ao mesmo tempo). Diferente de Estilo/Rodada/Zona (que são POR
+# TIME), essa é uma estatística da LIGA inteira, olhando o TOTAL de cada
+# jogo (mandante + visitante somados) - só pares que fazem sentido
+# futebolisticamente (decisão consciente de não testar todo par possível,
+# ex: impedimento x chute não tem relação lógica, fica de fora).
+PARES_CORRELACAO_ESTATISTICAS = [
+    ("chutes", "escanteios"),
+    ("faltas", "cartoes"),
+    ("desarmes", "faltas"),
+]
+
+
+def buscar_totais_por_jogo_liga(cur):
+    """{fixture_id_api: {"chutes":..., "escanteios":..., "faltas":...,
+    "cartoes":..., "desarmes":...}} - total do jogo (mandante+visitante),
+    só pra jogos com as duas estatísticas completas. Deduplicado por
+    fixture_id_api - o mesmo jogo real gera 2 linhas em `jogos` quando os
+    dois times envolvidos são rastreados (visões diferentes), mas aqui
+    cada jogo real só pode contar UMA vez, senão o mesmo jogo pesaria
+    dobrado na correlação."""
+    cur.execute(
+        """
+        SELECT contagem.fixture_id_api, contagem.jogo_id, contagem.chutes,
+               contagem.escanteios, contagem.faltas
+        FROM (
+            SELECT j.fixture_id_api, j.id AS jogo_id,
+                   SUM(eg.finalizacoes) AS chutes, SUM(eg.escanteios) AS escanteios,
+                   SUM(eg.faltas) AS faltas, COUNT(DISTINCT eg.lado) AS lados
+            FROM jogos j
+            JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
+            WHERE j.data_jogo < CURRENT_DATE AND j.fixture_id_api IS NOT NULL
+            GROUP BY j.fixture_id_api, j.id
+        ) contagem
+        WHERE contagem.lados = 2
+        """
+    )
+    linhas = cur.fetchall()
+
+    cur.execute("SELECT jogo_id, COUNT(*) FROM cartoes GROUP BY jogo_id")
+    cartoes_por_jogo = dict(cur.fetchall())
+
+    cur.execute(
+        "SELECT jogo_id, SUM(desarmes) FROM jogador_estatisticas_jogo "
+        "WHERE desarmes IS NOT NULL GROUP BY jogo_id"
+    )
+    desarmes_por_jogo = dict(cur.fetchall())
+
+    totais = {}
+    for fixture_id_api, jogo_id, chutes, escanteios, faltas in linhas:
+        if fixture_id_api in totais:
+            continue  # mesmo jogo real já visto pela outra perspectiva
+        if chutes is None or escanteios is None or faltas is None:
+            continue
+        cartoes = cartoes_por_jogo.get(jogo_id)
+        desarmes = desarmes_por_jogo.get(jogo_id)
+        if cartoes is None or desarmes is None:
+            continue
+        totais[fixture_id_api] = {
+            "chutes": float(chutes), "escanteios": float(escanteios), "faltas": float(faltas),
+            "cartoes": float(cartoes), "desarmes": float(desarmes),
+        }
+    return totais
+
+
+def calcular_correlacoes_estatisticas(cur):
+    """Pra cada par de PARES_CORRELACAO_ESTATISTICAS, separa os jogos em
+    "A acima da média" vs "A abaixo da média" e compara a média de B em
+    cada grupo - a diferença entre os dois grupos é o efeito. Estatística
+    simples (média e comparação de grupo), no mesmo espírito do resto do
+    projeto - não é correlação estatística formal (ex: coeficiente de
+    Pearson), de propósito, pra ficar fácil de conferir/explicar."""
+    totais = buscar_totais_por_jogo_liga(cur)
+    jogos = list(totais.values())
+    if len(jogos) < JOGOS_MINIMOS_PARA_ANALISAR:
+        return []
+
+    resultados = []
+    for chave_a, chave_b in PARES_CORRELACAO_ESTATISTICAS:
+        valores_a = [j[chave_a] for j in jogos]
+        media_a = sum(valores_a) / len(valores_a)
+
+        grupo_acima = [j[chave_b] for j in jogos if j[chave_a] > media_a]
+        grupo_abaixo = [j[chave_b] for j in jogos if j[chave_a] <= media_a]
+
+        if len(grupo_acima) < 3 or len(grupo_abaixo) < 3:
+            continue
+
+        media_b_acima = sum(grupo_acima) / len(grupo_acima)
+        media_b_abaixo = sum(grupo_abaixo) / len(grupo_abaixo)
+
+        resultados.append((
+            chave_a, chave_b, round(media_a, 3),
+            round(media_b_acima, 3), round(media_b_abaixo, 3),
+            len(grupo_acima), len(grupo_abaixo), len(jogos),
+        ))
+    return resultados
+
+
+def salvar_correlacoes_estatisticas(cur, resultados):
+    for (chave_a, chave_b, media_a, media_b_acima, media_b_abaixo,
+         jogos_acima, jogos_abaixo, jogos_total) in resultados:
+        par = f"{chave_a}_{chave_b}"
+        cur.execute(
+            """
+            INSERT INTO padroes_correlacao_estatisticas
+                (par, estatistica_a, estatistica_b, media_a, valor_b_acima, valor_b_abaixo,
+                 jogos_acima, jogos_abaixo, jogos_total, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (par) DO UPDATE SET
+                media_a = EXCLUDED.media_a, valor_b_acima = EXCLUDED.valor_b_acima,
+                valor_b_abaixo = EXCLUDED.valor_b_abaixo, jogos_acima = EXCLUDED.jogos_acima,
+                jogos_abaixo = EXCLUDED.jogos_abaixo, jogos_total = EXCLUDED.jogos_total,
+                atualizado_em = NOW()
+            """,
+            (par, chave_a, chave_b, media_a, media_b_acima, media_b_abaixo,
+             jogos_acima, jogos_abaixo, jogos_total),
+        )
+        diferenca = round(media_b_acima - media_b_abaixo, 3)
+        print(f"  [{chave_a} -> {chave_b}] acima da média ({media_a}): {media_b_acima}/jogo | "
+              f"abaixo da média: {media_b_abaixo}/jogo (diferença: {diferenca:+.3f}, "
+              f"{jogos_acima}+{jogos_abaixo} jogo(s))")
+
+
 # NOVO (Fase B - padrão por rodada, detecção automática de quebra): pra
 # cada time rastreado, calcula o comportamento em CADA número de rodada
 # (1, 2, 3... até 38), juntando as ~5 temporadas coletadas - ex: "na
@@ -2072,6 +2198,21 @@ def main():
                 print(f"Concluído! {len(resultados_estilo)} combinação(ões) time/tipo/papel calculadas.")
             else:
                 print(f"  Nenhum time com dados suficientes ainda (mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos).")
+
+        # NOVO (Correlação entre estatísticas, só visual): calculado uma
+        # vez só, DEPOIS do loop por time - é uma estatística da LIGA
+        # inteira (não é "do Corinthians"), olhando o total de cada jogo
+        # (mandante + visitante somados). Não entra em recomendação/VE
+        # ainda.
+        print("\nCalculando correlação entre estatísticas do mesmo jogo...")
+        resultados_correlacao = calcular_correlacoes_estatisticas(cur)
+        if resultados_correlacao:
+            salvar_correlacoes_estatisticas(cur, resultados_correlacao)
+            conn.commit()
+            print(f"Concluído! {len(resultados_correlacao)} par(es) de estatísticas calculados.")
+        else:
+            print(f"  Dados insuficientes ainda para correlação entre estatísticas "
+                  f"(mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos completos).")
 
         # NOVO: perfil de árbitro continua sendo calculado uma vez só, pra
         # TODOS os jogos disponíveis - não é "do Corinthians" nem "do
