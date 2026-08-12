@@ -3346,6 +3346,34 @@ PAGINA_TIMES = """
     </div>
     {% endif %}
 
+    {% if correlacoes_categoria %}
+    <div class="cartao-correlacao" style="margin-top: 16px;">
+        <div class="titulo-coluna" style="margin-bottom: 8px;">🧩 Correlação entre categorias de jogador (times rastreados)</div>
+        <p class="correlacao-aviso">
+            Cruza a estatística de um GRUPO de jogadores (por posição - Goleiro/Defensor/Meio-campista/Atacante,
+            a granularidade máxima disponível) com a de outro grupo, dos dois times somados, no mesmo jogo.
+            <b>Informativo por enquanto, não afeta nenhuma recomendação.</b>
+        </p>
+        <div class="correlacao-grid">
+            {% for c in correlacoes_categoria %}
+            <div class="correlacao-item">
+                <div class="correlacao-titulo">{{ c.titulo_a }} → {{ c.titulo_b }}</div>
+                <div class="correlacao-linha">
+                    Quando {{ c.titulo_a|lower }} fica <b>acima</b> da média ({{ c.media_a }}/jogo):
+                    {{ c.titulo_b|lower }} médio é
+                    <b class="{{ 'acima' if c.sobe_junto else 'abaixo' }}">{{ c.valor_acima }}/jogo</b>
+                </div>
+                <div class="correlacao-linha">
+                    Quando fica <b>abaixo</b>: {{ c.titulo_b|lower }} médio é
+                    <b class="{{ 'abaixo' if c.sobe_junto else 'acima' }}">{{ c.valor_abaixo }}/jogo</b>
+                </div>
+                <div class="correlacao-detalhe">{{ c.jogos_total }} jogo(s) analisados</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <div class="grid-times">
         <div class="coluna-tabela">
             <div class="titulo-coluna">Tabela do Brasileirão</div>
@@ -4283,6 +4311,45 @@ def buscar_correlacoes_estatisticas(cur):
     return resultado
 
 
+NOMES_TITULO_PAR_CATEGORIA = {
+    "falta_sofrida_atacante_cartao_defensor": ("Faltas sofridas (atacantes)", "Cartões (defensores)"),
+}
+
+
+def buscar_correlacoes_categoria(cur):
+    """NOVO (Correlação entre CATEGORIAS de jogador, só exibição): lê
+    `padroes_correlacao_categoria` - cruza a estatística de um grupo de
+    jogadores (por posição) com a de outro grupo, dos dois times somados,
+    no mesmo jogo (ex: atacantes que sofrem falta x cartão dos
+    defensores). NÃO afeta nenhum cálculo de recomendação/VE - é só
+    informativo."""
+    try:
+        cur.execute(
+            """SELECT par, media_a, valor_b_acima, valor_b_abaixo,
+                      jogos_acima, jogos_abaixo, jogos_total
+               FROM padroes_correlacao_categoria ORDER BY id"""
+        )
+        linhas = cur.fetchall()
+    except Exception as e:
+        if "does not exist" not in str(e).lower():
+            raise
+        cur.connection.rollback()
+        return []
+
+    resultado = []
+    for (par, media_a, valor_acima, valor_abaixo, jogos_acima, jogos_abaixo, jogos_total) in linhas:
+        titulo_a, titulo_b = NOMES_TITULO_PAR_CATEGORIA.get(par, (par, par))
+        resultado.append({
+            "titulo_a": titulo_a, "titulo_b": titulo_b,
+            "media_a": float(media_a),
+            "valor_acima": float(valor_acima),
+            "valor_abaixo": float(valor_abaixo),
+            "sobe_junto": float(valor_acima) >= float(valor_abaixo),
+            "jogos_acima": jogos_acima, "jogos_abaixo": jogos_abaixo, "jogos_total": jogos_total,
+        })
+    return resultado
+
+
 
 # nome do rótulo -> coluna correspondente em jogador_estatisticas_jogo
 # (cartão é especial: soma amarelo + vermelho, não é uma coluna única)
@@ -5168,6 +5235,7 @@ def times_lista():
         ]
         lideres = buscar_lideres_estatisticas(cur)
         correlacoes = buscar_correlacoes_estatisticas(cur)
+        correlacoes_categoria = buscar_correlacoes_categoria(cur)
         banca_atual = buscar_banca(cur, session["usuario_id"])
         cur.close()
     finally:
@@ -5177,6 +5245,7 @@ def times_lista():
 
     return render_template_string(
         PAGINA_TIMES, clubes=clubes, tabela=tabela, lideres=lideres, correlacoes=correlacoes,
+        correlacoes_categoria=correlacoes_categoria,
         nav_html=barra_navegacao("times", round(banca_atual, 2)),
     )
 
