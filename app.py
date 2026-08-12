@@ -3206,6 +3206,27 @@ PAGINA_TIMES = """
         }
         .titulo-coluna { font-size: 1.05rem; font-weight: 700; margin: 0 0 14px; text-align: center; }
 
+        /* NOVO (Correlação entre estatísticas, só exibição) */
+        .cartao-correlacao {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 18px 20px; margin-top: 20px;
+        }
+        .correlacao-aviso { font-size: 0.8rem; color: #8b949e; margin: 0 0 14px; }
+        .correlacao-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+        }
+        @media (max-width: 1000px) {
+            .correlacao-grid { grid-template-columns: 1fr; }
+        }
+        .correlacao-item {
+            background: #0d1117; border: 1px solid #21262d; border-radius: 10px; padding: 12px 14px;
+        }
+        .correlacao-titulo { font-size: 0.88rem; font-weight: 700; margin-bottom: 8px; }
+        .correlacao-linha { font-size: 0.8rem; color: #c9d1d9; margin-bottom: 4px; }
+        .correlacao-linha .acima { color: #f85149; }
+        .correlacao-linha .abaixo { color: #3fb950; }
+        .correlacao-detalhe { font-size: 0.74rem; color: #8b949e; margin-top: 6px; }
+
         /* layout de 3 colunas - usa a largura toda da página, não só o meio */
         .grid-times {
             display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 22px; align-items: start; margin-top: 24px;
@@ -3296,6 +3317,34 @@ PAGINA_TIMES = """
             } catch (e) {}
         }
     </script>
+
+    {% if correlacoes %}
+    <div class="cartao-correlacao">
+        <div class="titulo-coluna" style="margin-bottom: 8px;">🔗 Correlação entre estatísticas (times rastreados)</div>
+        <p class="correlacao-aviso">
+            Dentro do MESMO jogo, como uma estatística tende a se mover junto com outra - "acima/abaixo da média"
+            se refere ao total do jogo (mandante + visitante somados). <b>Informativo por enquanto, não afeta
+            nenhuma recomendação.</b>
+        </p>
+        <div class="correlacao-grid">
+            {% for c in correlacoes %}
+            <div class="correlacao-item">
+                <div class="correlacao-titulo">{{ c.titulo_a }} → {{ c.titulo_b }}</div>
+                <div class="correlacao-linha">
+                    Quando {{ c.titulo_a|lower }} fica <b>acima</b> da média ({{ c.media_a }}/jogo):
+                    {{ c.titulo_b|lower }} médio é
+                    <b class="{{ 'acima' if c.sobe_junto else 'abaixo' }}">{{ c.valor_acima }}/jogo</b>
+                </div>
+                <div class="correlacao-linha">
+                    Quando fica <b>abaixo</b>: {{ c.titulo_b|lower }} médio é
+                    <b class="{{ 'abaixo' if c.sobe_junto else 'acima' }}">{{ c.valor_abaixo }}/jogo</b>
+                </div>
+                <div class="correlacao-detalhe">{{ c.jogos_total }} jogo(s) analisados</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
 
     <div class="grid-times">
         <div class="coluna-tabela">
@@ -4154,7 +4203,47 @@ def buscar_lideres_estatisticas(cur):
     return lideres
 
 
-# ---------- Líderes de estatísticas por JOGADOR (times rastreados) ----------
+NOMES_ESTATISTICA_CORRELACAO = {
+    "chutes": "Chutes (total)", "escanteios": "Escanteios", "faltas": "Faltas",
+    "cartoes": "Cartões", "desarmes": "Desarmes",
+}
+
+
+def buscar_correlacoes_estatisticas(cur):
+    """NOVO (Correlação entre estatísticas, só exibição): lê
+    `padroes_correlacao_estatisticas` (calculada por
+    motor_padroes.py/calcular_correlacoes_estatisticas) - dentro do MESMO
+    jogo, como uma estatística tende a se mover junto com outra (ex: jogo
+    com muito chute tende a ter mais escanteio também). NÃO afeta nenhum
+    cálculo de recomendação/VE - é só informativo."""
+    try:
+        cur.execute(
+            """SELECT estatistica_a, estatistica_b, media_a, valor_b_acima, valor_b_abaixo,
+                      jogos_acima, jogos_abaixo, jogos_total
+               FROM padroes_correlacao_estatisticas ORDER BY id"""
+        )
+        linhas = cur.fetchall()
+    except Exception as e:
+        if "does not exist" not in str(e).lower():
+            raise
+        cur.connection.rollback()
+        return []
+
+    resultado = []
+    for (a, b, media_a, valor_acima, valor_abaixo, jogos_acima, jogos_abaixo, jogos_total) in linhas:
+        resultado.append({
+            "titulo_a": NOMES_ESTATISTICA_CORRELACAO.get(a, a),
+            "titulo_b": NOMES_ESTATISTICA_CORRELACAO.get(b, b),
+            "media_a": float(media_a),
+            "valor_acima": float(valor_acima),
+            "valor_abaixo": float(valor_abaixo),
+            "sobe_junto": float(valor_acima) >= float(valor_abaixo),
+            "jogos_acima": jogos_acima, "jogos_abaixo": jogos_abaixo, "jogos_total": jogos_total,
+        })
+    return resultado
+
+
+
 # nome do rótulo -> coluna correspondente em jogador_estatisticas_jogo
 # (cartão é especial: soma amarelo + vermelho, não é uma coluna única)
 CATEGORIAS_LIDERANCA_JOGADOR = [
@@ -5004,6 +5093,7 @@ def times_lista():
             for time_id, nome in times_rastreados
         ]
         lideres = buscar_lideres_estatisticas(cur)
+        correlacoes = buscar_correlacoes_estatisticas(cur)
         banca_atual = buscar_banca(cur, session["usuario_id"])
         cur.close()
     finally:
@@ -5012,7 +5102,7 @@ def times_lista():
     tabela = buscar_tabela_brasileirao()
 
     return render_template_string(
-        PAGINA_TIMES, clubes=clubes, tabela=tabela, lideres=lideres,
+        PAGINA_TIMES, clubes=clubes, tabela=tabela, lideres=lideres, correlacoes=correlacoes,
         nav_html=barra_navegacao("times", round(banca_atual, 2)),
     )
 
