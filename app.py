@@ -3506,6 +3506,19 @@ PAGINA_TIME = """
         .quebra-rodada-texto .acima { color: #f85149; }
         .quebra-rodada-texto .abaixo { color: #3fb950; }
 
+        /* NOVO (Fase C - comportamento por zona, só exibição) */
+        .zona-momento-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+        }
+        @media (max-width: 700px) {
+            .zona-momento-grid { grid-template-columns: 1fr; }
+        }
+        .zona-outros-mercados { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+        .zona-outros-item {
+            font-size: 0.78rem; color: #c9d1d9; background: #161b22;
+            border: 1px solid #21262d; border-radius: 6px; padding: 4px 8px;
+        }
+
         /* coluna 3: posição na tabela + últimos jogos */
         .tabela-vizinhos { width: 100%; border-collapse: collapse; margin-bottom: 26px; }
         .linha-vizinho td {
@@ -3654,6 +3667,59 @@ PAGINA_TIME = """
                         <b>{{ q.valor_antes }}{{ '%' if q.eh_percentual else '/jogo' }}</b> · depois,
                         <b class="{{ 'acima' if q.subiu else 'abaixo' }}">{{ q.valor_depois }}{{ '%' if q.eh_percentual else '/jogo' }}</b>
                     </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if padroes_zona %}
+            <div class="cartao">
+                <div class="bloco-topo">
+                    <div class="bloco-titulo">🎯 Comportamento por zona da tabela</div>
+                </div>
+                <p class="estilo-aviso">
+                    Como o {{ nome_time }} se sai dependendo de onde estava na tabela ANTES de cada jogo (G4/meio/
+                    Z4/rebaixamento) - "depois de vitória" vs "depois de derrota" mostra se ele tende a embalar ou
+                    afundar dentro da mesma zona. Zonas simplificadas (não distingue Libertadores/Sul-Americana
+                    ainda). <b>Informativo por enquanto, não afeta nenhuma recomendação.</b>
+                </p>
+                {% for zona_key, z in padroes_zona.items() %}
+                <div style="margin-top: 16px;">
+                    <div class="bloco-titulo" style="font-size: 0.92rem; margin-bottom: 6px;">{{ z.titulo }}</div>
+
+                    {% if z.resultado %}
+                    <div class="zona-momento-grid">
+                        {% if z.resultado.geral %}
+                        <div>
+                            <div class="estilo-papel-titulo">Geral nessa zona</div>
+                            <div class="estilo-valor neutro">{{ z.resultado.geral.valor }}% vitória</div>
+                            <div class="estilo-detalhe">{{ z.resultado.geral.jogos_amostra }} jogo(s)</div>
+                        </div>
+                        {% endif %}
+                        {% if z.resultado.apos_vitoria %}
+                        <div>
+                            <div class="estilo-papel-titulo">Depois de vitória</div>
+                            <div class="estilo-valor abaixo">{{ z.resultado.apos_vitoria.valor }}% vitória</div>
+                            <div class="estilo-detalhe">{{ z.resultado.apos_vitoria.jogos_amostra }} jogo(s)</div>
+                        </div>
+                        {% endif %}
+                        {% if z.resultado.apos_derrota %}
+                        <div>
+                            <div class="estilo-papel-titulo">Depois de derrota</div>
+                            <div class="estilo-valor acima">{{ z.resultado.apos_derrota.valor }}% vitória</div>
+                            <div class="estilo-detalhe">{{ z.resultado.apos_derrota.jogos_amostra }} jogo(s)</div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+
+                    {% if z.outros %}
+                    <div class="zona-outros-mercados">
+                        {% for o in z.outros %}
+                        <span class="zona-outros-item">{{ o.titulo }}: <b>{{ o.valor }}/jogo</b> ({{ o.jogos_amostra }})</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
                 </div>
                 {% endfor %}
             </div>
@@ -4370,6 +4436,63 @@ def buscar_quebras_rodada(cur, time_id):
     return resultado
 
 
+NOMES_ZONA = {"g4": "G4 (topo)", "meio": "Meio de tabela", "z4": "Z4 (rebaixamento)"}
+NOMES_TIPO_ZONA = {
+    "resultado": "Resultado (vitória)", "cartao": "Cartão", "escanteio": "Escanteio",
+    "falta": "Falta", "chute": "Chute", "chute_no_gol": "Chute no gol",
+    "impedimento": "Impedimento", "desarme": "Desarme",
+}
+ORDEM_ZONA = ["g4", "meio", "z4"]
+
+
+def buscar_padroes_zona(cur, time_id):
+    """NOVO (Fase C - comportamento por zona da tabela, só exibição): lê
+    `padroes_zona_time` (calculada por
+    motor_padroes.py/calcular_padroes_zona_time) e monta um resumo pronto
+    pra tela do time, organizado por zona (G4/meio/Z4) - dentro de cada
+    zona, "resultado" aparece com a comparação de momento (depois de
+    vitória vs depois de derrota, a mesma zona) e os outros mercados
+    aparecem só com a média geral naquela zona (evita um card gigante).
+    NÃO afeta nenhum cálculo de recomendação/VE - é só informativo."""
+    try:
+        cur.execute(
+            """SELECT tipo_padrao, zona, condicao, valor, jogos_amostra
+               FROM padroes_zona_time WHERE time_id = %s""",
+            (time_id,),
+        )
+        linhas = cur.fetchall()
+    except Exception as e:
+        if "does not exist" not in str(e).lower():
+            raise
+        cur.connection.rollback()
+        return {}
+
+    bruto = {}
+    for tipo, zona, condicao, valor, jogos_amostra in linhas:
+        eh_percentual = tipo == "resultado"
+        bruto.setdefault(zona, {}).setdefault(tipo, {})[condicao] = {
+            "valor": round(float(valor) * 100, 1) if eh_percentual else round(float(valor), 2),
+            "jogos_amostra": jogos_amostra,
+            "eh_percentual": eh_percentual,
+        }
+
+    resultado = {}
+    for zona in ORDEM_ZONA:
+        if zona not in bruto:
+            continue
+        mercados = bruto[zona]
+        resultado[zona] = {
+            "titulo": NOMES_ZONA[zona],
+            "resultado": mercados.get("resultado"),
+            "outros": [
+                {"titulo": NOMES_TIPO_ZONA.get(tipo, tipo), **dados["geral"]}
+                for tipo, dados in sorted(mercados.items())
+                if tipo != "resultado" and "geral" in dados
+            ],
+        }
+    return resultado
+
+
 # ---------- Página de time: vizinhos na tabela + últimos jogos ----------
 def buscar_vizinhos_tabela(tabela, api_football_team_id, redor=2):
     """Recorta um pedaço da tabela do Brasileirão em volta do time (até
@@ -4849,6 +4972,7 @@ def time_detalhe(time_id):
         escudo_url = buscar_escudo_url(cur, nome_time)
         estilo_time = buscar_estilo_time(cur, time_id)
         quebras_rodada = buscar_quebras_rodada(cur, time_id)
+        padroes_zona = buscar_padroes_zona(cur, time_id)
 
         cur.execute("SELECT id, nome FROM times WHERE rastreado = TRUE ORDER BY nome")
         times_rastreados = cur.fetchall()
@@ -4873,7 +4997,7 @@ def time_detalhe(time_id):
         PAGINA_TIME, blocos=blocos, nome_time=nome_time, escudo_url=escudo_url,
         clubes=clubes, time_id=time_id, vizinhos_tabela=vizinhos_tabela,
         api_football_team_id=api_football_team_id, ultimos_jogos=ultimos_jogos,
-        estilo_time=estilo_time, quebras_rodada=quebras_rodada,
+        estilo_time=estilo_time, quebras_rodada=quebras_rodada, padroes_zona=padroes_zona,
         nav_html=barra_navegacao("times", round(banca_atual, 2)),
     )
 
