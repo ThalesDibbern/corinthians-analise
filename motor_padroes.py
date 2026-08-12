@@ -26,6 +26,8 @@ Variáveis de ambiente necessárias:
 import os
 import psycopg2
 
+from tabela import calcular_tabela
+
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 JOGOS_MINIMOS_PARA_ANALISAR = 5   # não vale a pena calcular padrão com poucos jogos
@@ -858,6 +860,192 @@ def salvar_padroes_rodada(cur, bruto_pra_salvar, quebras_pra_salvar):
         sinal = "+" if quebra["valor_depois"] >= quebra["valor_antes"] else "-"
         print(f"  [{tipo}] quebra na rodada {quebra['rodada_quebra']}: "
               f"{quebra['valor_antes']} -> {quebra['valor_depois']} ({sinal}{abs(quebra['diferenca']):.3f})")
+
+
+# NOVO (Fase C - comportamento por zona da tabela, só exibição): como
+# cada time se comporta dependendo de estar no G4, no meio de tabela, ou
+# no Z4 - e como isso muda dependendo do resultado do jogo ANTERIOR
+# (efeito de sequência/momento, ex: "ganhou 2 seguidas e sai da zona" vs
+# "perdeu 2 seguidas e afunda mais"). Usa a tabela reconstruída da Fase A
+# (tabela.py/calcular_tabela) pra saber em que zona o time estava ANTES de
+# cada jogo (rodada anterior, na mesma temporada). Zonas G4/Z4/meio -
+# aproximação simples de propósito (não distingue Libertadores/
+# Sul-Americana ainda, ver documentação da decisão).
+#
+# Cobre os mesmos mercados da Fase B (resultado + cartão, escanteio,
+# falta, chute, chute no gol, impedimento, desarme).
+#
+# Só EXIBIÇÃO por enquanto - não entra em nenhuma fórmula de
+# recomendação/VE ainda.
+JOGOS_MINIMOS_ZONA = 3  # menor que o padrão (5) de propósito - zona x condição já fatia bastante o dado
+
+_cache_tabela_temporada_rodada = {}
+
+
+def _tabela_cacheada(cur, temporada, rodada_numero):
+    """Evita recalcular a tabela reconstruída várias vezes pra
+    (temporada, rodada) iguais, entre times diferentes, na mesma
+    execução do script."""
+    chave = (temporada, rodada_numero)
+    if chave not in _cache_tabela_temporada_rodada:
+        _cache_tabela_temporada_rodada[chave] = calcular_tabela(cur, temporada, rodada_numero)
+    return _cache_tabela_temporada_rodada[chave]
+
+
+def buscar_jogos_ordenados_time(cur, time_id):
+    """Jogos desse time, em ordem cronológica, com temporada (derivada do
+    ano de data_jogo - o Brasileirão não cruza virada de ano) e resultado
+    (vitória/empate/derrota) - espinha dorsal pra computar zona/momento de
+    cada jogo."""
+    cur.execute(
+        """
+        SELECT id, EXTRACT(YEAR FROM data_jogo)::int AS temporada, rodada_numero,
+               CASE WHEN placar_corinthians > placar_adversario THEN 'vitoria'
+                    WHEN placar_corinthians = placar_adversario THEN 'empate'
+                    ELSE 'derrota' END AS resultado
+        FROM jogos
+        WHERE nosso_time_id = %s AND rodada_numero IS NOT NULL
+          AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+          AND data_jogo < CURRENT_DATE
+        ORDER BY temporada, rodada_numero
+        """,
+        (time_id,),
+    )
+    return cur.fetchall()
+
+
+def calcular_valor_por_jogo_cartao(cur, time_id):
+    """{jogo_id: cartões do NOSSO time nesse jogo} - mesma subconsulta
+    separada usada no resto do motor_padroes.py, pra não contar em
+    dobro."""
+    cur.execute(
+        """
+        SELECT contagem.jogo_id, contagem.total
+        FROM (
+            SELECT j.id AS jogo_id,
+                   (SELECT COUNT(*) FROM cartoes c WHERE c.jogo_id = j.id AND c.lado = 'mandante') AS total,
+                   COUNT(DISTINCT eg.lado) AS lados
+            FROM jogos j
+            JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
+            WHERE j.nosso_time_id = %s AND j.rodada_numero IS NOT NULL AND j.data_jogo < CURRENT_DATE
+            GROUP BY j.id
+        ) contagem
+        WHERE contagem.lados = 2
+        """,
+        (time_id,),
+    )
+    return {jogo_id: float(v) for jogo_id, v in cur.fetchall()}
+
+
+def calcular_valor_por_jogo_estatistica_jogo(cur, time_id, coluna):
+    """{jogo_id: valor do NOSSO time nesse jogo} - a partir de
+    estatisticas_jogo (lado real, precisa traduzir via jogos.mandante)."""
+    cur.execute(
+        f"""
+        SELECT eg.jogo_id, eg.{coluna}
+        FROM estatisticas_jogo eg
+        JOIN jogos j ON j.id = eg.jogo_id
+        WHERE j.nosso_time_id = %s AND j.rodada_numero IS NOT NULL AND j.data_jogo < CURRENT_DATE
+          AND eg.{coluna} IS NOT NULL
+          AND ((j.mandante = TRUE AND eg.lado = 'mandante')
+           OR (j.mandante = FALSE AND eg.lado = 'visitante'))
+        """,
+        (time_id,),
+    )
+    return {jogo_id: float(v) for jogo_id, v in cur.fetchall()}
+
+
+def calcular_valor_por_jogo_soma_jogador(cur, time_id, coluna):
+    """{jogo_id: soma do NOSSO time nesse jogo} - a partir de
+    jogador_estatisticas_jogo (mesma tradução de lado)."""
+    cur.execute(
+        f"""
+        SELECT j.id, SUM(jeg.{coluna})
+        FROM jogador_estatisticas_jogo jeg
+        JOIN jogos j ON j.id = jeg.jogo_id
+        WHERE j.nosso_time_id = %s AND j.rodada_numero IS NOT NULL AND j.data_jogo < CURRENT_DATE
+          AND jeg.{coluna} IS NOT NULL
+          AND ((j.mandante = TRUE AND jeg.lado = 'mandante')
+           OR (j.mandante = FALSE AND jeg.lado = 'visitante'))
+        GROUP BY j.id
+        """,
+        (time_id,),
+    )
+    return {jogo_id: (float(v) if v is not None else 0.0) for jogo_id, v in cur.fetchall()}
+
+
+def calcular_padroes_zona_time(cur, time_id, api_football_team_id):
+    """Calcula, pra esse time, a média/frequência de cada mercado
+    condicionada à zona da tabela (G4/meio/Z4) em que ele estava ANTES de
+    cada jogo, e ao resultado do jogo ANTERIOR (momento/sequência).
+    Devolve lista de (time_id, tipo, zona, condicao, valor, jogos_amostra)
+    pronta pra salvar."""
+    jogos_ordenados = buscar_jogos_ordenados_time(cur, time_id)
+    if not jogos_ordenados:
+        return []
+
+    valores_por_mercado = {
+        "resultado": {jid: (1.0 if res == "vitoria" else 0.0) for jid, _, _, res in jogos_ordenados},
+        "cartao": calcular_valor_por_jogo_cartao(cur, time_id),
+    }
+    for tipo, coluna in TIPOS_PADRAO_RODADA_ESTATISTICA_JOGO.items():
+        valores_por_mercado[tipo] = calcular_valor_por_jogo_estatistica_jogo(cur, time_id, coluna)
+    for tipo, coluna in TIPOS_PADRAO_RODADA_SOMA_JOGADOR.items():
+        valores_por_mercado[tipo] = calcular_valor_por_jogo_soma_jogador(cur, time_id, coluna)
+
+    # NOVO: anda cronologicamente, calculando zona ANTES de cada jogo
+    # (rodada anterior, via tabela reconstruída) e o resultado do jogo
+    # ANTERIOR (reiniciado a cada temporada nova - não carrega "momento"
+    # de uma temporada pra outra, faz sentido: elenco/contexto muda).
+    contextos = []  # (jogo_id, zona_antes, condicao)
+    resultado_anterior_por_temporada = {}
+    for jogo_id, temporada, rodada_numero, resultado in jogos_ordenados:
+        rodada_anterior = rodada_numero - 1
+        zona_antes = None
+        if rodada_anterior >= 1:
+            tabela_rodada = _tabela_cacheada(cur, temporada, rodada_anterior)
+            item = next((t for t in tabela_rodada if t["time_api_id"] == api_football_team_id), None)
+            zona_antes = item["zona"] if item else None
+
+        if zona_antes:
+            contextos.append((jogo_id, zona_antes, "geral"))
+            resultado_anterior = resultado_anterior_por_temporada.get(temporada)
+            if resultado_anterior:
+                contextos.append((jogo_id, zona_antes, f"apos_{resultado_anterior}"))
+
+        resultado_anterior_por_temporada[temporada] = resultado
+
+    agregados = {}
+    for jogo_id, zona_antes, condicao in contextos:
+        for tipo, valores in valores_por_mercado.items():
+            valor = valores.get(jogo_id)
+            if valor is None:
+                continue
+            agregados.setdefault((tipo, zona_antes, condicao), []).append(valor)
+
+    resultado_final = []
+    for (tipo, zona, condicao), valores in agregados.items():
+        if len(valores) < JOGOS_MINIMOS_ZONA:
+            continue
+        media = sum(valores) / len(valores)
+        resultado_final.append((time_id, tipo, zona, condicao, round(media, 4), len(valores)))
+
+    return resultado_final
+
+
+def salvar_padroes_zona(cur, resultados):
+    for time_id, tipo, zona, condicao, valor, jogos_amostra in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_zona_time (time_id, tipo_padrao, zona, condicao, valor, jogos_amostra, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, tipo_padrao, zona, condicao) DO UPDATE SET
+                valor = EXCLUDED.valor, jogos_amostra = EXCLUDED.jogos_amostra, atualizado_em = NOW()
+            """,
+            (time_id, tipo, zona, condicao, valor, jogos_amostra),
+        )
+    if resultados:
+        print(f"  {len(resultados)} combinação(ões) zona/condição/mercado calculadas.")
 
 
 def calcular_posse_time(cur, time_id):
@@ -1829,6 +2017,20 @@ def main():
                           "(rodadas insuficientes pra formar as janelas de comparação).")
             else:
                 print("  Dados insuficientes ainda para padrão por rodada.")
+
+            # NOVO (Fase C - comportamento por zona da tabela, só
+            # exibição): depende da tabela reconstruída pela Fase A
+            # (jogos_liga/tabela.py) - se ainda não rodou popular_tabela.py
+            # nesse banco, essa parte só não encontra nada pra calcular
+            # (calcular_tabela devolve lista vazia), sem quebrar o resto.
+            print("Calculando padrões por zona da tabela (G4/meio/Z4)...")
+            padroes_zona = calcular_padroes_zona_time(cur, time_id, time_api_football_id)
+            if padroes_zona:
+                salvar_padroes_zona(cur, padroes_zona)
+                conn.commit()
+            else:
+                print("  Dados insuficientes ainda para padrão por zona "
+                      "(ou jogos_liga/popular_tabela.py ainda não rodou nesse banco).")
 
             print("Calculando padrões de resultado final (vitória/empate/derrota)...")
             resultados_finais = calcular_padroes_resultado(cur, time_id)
