@@ -3496,6 +3496,16 @@ PAGINA_TIME = """
         .estilo-valor.neutro { color: #8b949e; }
         .estilo-detalhe { font-size: 0.76rem; color: #8b949e; }
 
+        /* NOVO (Fase B - padrão por rodada, só exibição) */
+        .quebra-rodada-item {
+            padding: 10px 0; border-top: 1px solid #21262d;
+        }
+        .quebra-rodada-item:first-of-type { border-top: none; padding-top: 4px; }
+        .quebra-rodada-titulo { font-size: 0.85rem; font-weight: 600; margin-bottom: 3px; }
+        .quebra-rodada-texto { font-size: 0.82rem; color: #c9d1d9; }
+        .quebra-rodada-texto .acima { color: #f85149; }
+        .quebra-rodada-texto .abaixo { color: #3fb950; }
+
         /* coluna 3: posição na tabela + últimos jogos */
         .tabela-vizinhos { width: 100%; border-collapse: collapse; margin-bottom: 26px; }
         .linha-vizinho td {
@@ -3625,6 +3635,30 @@ PAGINA_TIME = """
                 {% endfor %}
             </div>
             {% endif %}
+
+            {% if quebras_rodada %}
+            <div class="cartao">
+                <div class="bloco-topo">
+                    <div class="bloco-titulo">📈 Padrão por rodada</div>
+                </div>
+                <p class="estilo-aviso">
+                    Onde o comportamento do {{ nome_time }} muda de forma mais nítida ao longo do campeonato,
+                    juntando as temporadas coletadas - detectado automaticamente, sem faixa fixa definida na mão.
+                    <b>Informativo por enquanto, não afeta nenhuma recomendação.</b>
+                </p>
+                {% for q in quebras_rodada %}
+                <div class="quebra-rodada-item">
+                    <div class="quebra-rodada-titulo">{{ q.titulo }}</div>
+                    <div class="quebra-rodada-texto">
+                        Quebra detectada na rodada <b>{{ q.rodada_quebra }}</b>: antes,
+                        <b>{{ q.valor_antes }}{{ '%' if q.eh_percentual else '/jogo' }}</b> · depois,
+                        <b class="{{ 'acima' if q.subiu else 'abaixo' }}">{{ q.valor_depois }}{{ '%' if q.eh_percentual else '/jogo' }}</b>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
 
             {% if blocos %}
                 {% for bloco in blocos %}
@@ -4293,6 +4327,49 @@ def buscar_estilo_time(cur, time_id):
     return resultado
 
 
+NOMES_TIPO_QUEBRA_RODADA = {
+    "resultado": "Resultado (vitória)", "cartao": "Cartão", "escanteio": "Escanteio",
+    "falta": "Falta", "chute": "Chute", "chute_no_gol": "Chute no gol",
+    "impedimento": "Impedimento", "desarme": "Desarme",
+}
+
+
+def buscar_quebras_rodada(cur, time_id):
+    """NOVO (Fase B - padrão por rodada, só exibição): lê
+    `padroes_quebra_rodada` (calculada por
+    motor_padroes.py/calcular_padroes_rodada_time) - em qual rodada cada
+    mercado desse time muda de comportamento de forma mais nítida, achado
+    automaticamente (sem faixa fixa definida na mão). "resultado" é taxa
+    de vitória (0 a 1); os outros mercados são média de eventos por jogo.
+    NÃO afeta nenhum cálculo de recomendação/VE - é só informativo."""
+    try:
+        cur.execute(
+            """SELECT tipo_padrao, rodada_quebra, valor_antes, valor_depois, diferenca
+               FROM padroes_quebra_rodada WHERE time_id = %s ORDER BY diferenca DESC""",
+            (time_id,),
+        )
+        linhas = cur.fetchall()
+    except Exception as e:
+        if "does not exist" not in str(e).lower():
+            raise
+        cur.connection.rollback()
+        return []
+
+    resultado = []
+    for tipo, rodada_quebra, valor_antes, valor_depois, diferenca in linhas:
+        eh_percentual = tipo == "resultado"
+        resultado.append({
+            "tipo": tipo,
+            "titulo": NOMES_TIPO_QUEBRA_RODADA.get(tipo, tipo),
+            "rodada_quebra": rodada_quebra,
+            "eh_percentual": eh_percentual,
+            "valor_antes": round(float(valor_antes) * 100, 1) if eh_percentual else round(float(valor_antes), 2),
+            "valor_depois": round(float(valor_depois) * 100, 1) if eh_percentual else round(float(valor_depois), 2),
+            "subiu": float(valor_depois) >= float(valor_antes),
+        })
+    return resultado
+
+
 # ---------- Página de time: vizinhos na tabela + últimos jogos ----------
 def buscar_vizinhos_tabela(tabela, api_football_team_id, redor=2):
     """Recorta um pedaço da tabela do Brasileirão em volta do time (até
@@ -4771,6 +4848,7 @@ def time_detalhe(time_id):
         blocos = buscar_estatisticas_time(cur, time_id)
         escudo_url = buscar_escudo_url(cur, nome_time)
         estilo_time = buscar_estilo_time(cur, time_id)
+        quebras_rodada = buscar_quebras_rodada(cur, time_id)
 
         cur.execute("SELECT id, nome FROM times WHERE rastreado = TRUE ORDER BY nome")
         times_rastreados = cur.fetchall()
@@ -4795,7 +4873,7 @@ def time_detalhe(time_id):
         PAGINA_TIME, blocos=blocos, nome_time=nome_time, escudo_url=escudo_url,
         clubes=clubes, time_id=time_id, vizinhos_tabela=vizinhos_tabela,
         api_football_team_id=api_football_team_id, ultimos_jogos=ultimos_jogos,
-        estilo_time=estilo_time,
+        estilo_time=estilo_time, quebras_rodada=quebras_rodada,
         nav_html=barra_navegacao("times", round(banca_atual, 2)),
     )
 
