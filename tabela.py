@@ -177,6 +177,15 @@ def calcular_contexto_jogo(cur, api_football_team_id, adversario_api_team_id, te
 
 TOTAL_RODADAS_LIGA = 38
 
+# NOVO: só considera "jogo morto" dentro das últimas N rodadas do
+# campeonato - mesmo quando a matemática já permite concluir isso mais
+# cedo (o que pode acontecer a partir de ~19-20 rodadas jogadas, num
+# cenário bem extremo de um time vencendo tudo enquanto outro perde
+# tudo), a intenção do rótulo é sinalizar "reta final decidida", não
+# "tecnicamente já dava pra saber lá atrás" - dispara cedo demais tira a
+# credibilidade do aviso.
+RODADAS_RESTANTES_MAXIMO_PARA_JOGO_MORTO = 3
+
 
 def calcular_jogo_morto(cur, api_football_team_id, temporada, rodada_numero):
     """NOVO (Fase D - Parte 1, só rótulo informativo, NÃO afeta nenhuma
@@ -228,8 +237,15 @@ def calcular_jogo_morto(cur, api_football_team_id, temporada, rodada_numero):
         pontos_max_referencia = referencia_z4["pontos"] + rodadas_restantes * 3
         pode_cair_z4 = item_nosso["pontos"] <= pontos_max_referencia
 
+    # NOVO: mesmo se a matemática já permitir concluir "morto", só marca
+    # de verdade dentro da janela final (ver RODADAS_RESTANTES_MAXIMO_PARA_
+    # JOGO_MORTO) - fora dela, o campo "morto" fica sempre False, mas o
+    # resto da informação (zona atual, distância etc.) continua disponível
+    # normalmente pra quem quiser usar de outro jeito no futuro.
+    dentro_da_janela_final = rodadas_restantes <= RODADAS_RESTANTES_MAXIMO_PARA_JOGO_MORTO
+
     return {
-        "morto": not pode_alcancar_g4 and not pode_cair_z4,
+        "morto": dentro_da_janela_final and not pode_alcancar_g4 and not pode_cair_z4,
         "zona_atual": item_nosso["zona"],
         "posicao_atual": item_nosso["posicao"],
         "pode_alcancar_g4": pode_alcancar_g4,
