@@ -3604,6 +3604,22 @@ PAGINA_TIME = """
             border: 1px solid #21262d; border-radius: 6px; padding: 4px 8px;
         }
 
+        /* NOVO (Correlação entre estatísticas, só exibição) */
+        .cartao-correlacao {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 18px 20px;
+        }
+        .correlacao-aviso { font-size: 0.8rem; color: #8b949e; margin: 0 0 14px; }
+        .correlacao-grid { display: grid; gap: 14px; }
+        .correlacao-item {
+            background: #0d1117; border: 1px solid #21262d; border-radius: 10px; padding: 12px 14px;
+        }
+        .correlacao-titulo { font-size: 0.88rem; font-weight: 700; margin-bottom: 8px; }
+        .correlacao-linha { font-size: 0.8rem; color: #c9d1d9; margin-bottom: 4px; }
+        .correlacao-linha .acima { color: #f85149; }
+        .correlacao-linha .abaixo { color: #3fb950; }
+        .correlacao-detalhe { font-size: 0.74rem; color: #8b949e; margin-top: 6px; }
+
         /* coluna 3: posição na tabela + últimos jogos */
         .tabela-vizinhos { width: 100%; border-collapse: collapse; margin-bottom: 26px; }
         .linha-vizinho td {
@@ -3807,6 +3823,30 @@ PAGINA_TIME = """
                     {% endif %}
                 </div>
                 {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if correlacoes_time %}
+            <div class="cartao-correlacao" style="margin-top: 16px;">
+                <div class="bloco-titulo" style="margin-bottom: 8px;">🔗 Correlação entre estatísticas ({{ nome_time }})</div>
+                <p class="correlacao-aviso">
+                    A mesma relação da liga inteira (ver "Estatísticas de Times"), mas só com os jogos do
+                    {{ nome_time }} - revela se esse time tem essa relação mais forte, mais fraca, ou diferente
+                    do padrão geral. <b>Informativo por enquanto, não afeta nenhuma recomendação.</b>
+                </p>
+                <div class="correlacao-grid" style="grid-template-columns: 1fr;">
+                    {% for c in correlacoes_time %}
+                    <div class="correlacao-item">
+                        <div class="correlacao-titulo">{{ c.titulo_a }} → {{ c.titulo_b }}</div>
+                        <div class="correlacao-linha">
+                            Acima da média ({{ c.media_a }}/jogo): {{ c.titulo_b|lower }} médio é
+                            <b class="{{ 'acima' if c.sobe_junto else 'abaixo' }}">{{ c.valor_acima }}/jogo</b>
+                            · abaixo: <b class="{{ 'abaixo' if c.sobe_junto else 'acima' }}">{{ c.valor_abaixo }}/jogo</b>
+                        </div>
+                        <div class="correlacao-detalhe">{{ c.jogos_total }} jogo(s) analisados</div>
+                    </div>
+                    {% endfor %}
+                </div>
             </div>
             {% endif %}
 
@@ -4618,6 +4658,40 @@ def buscar_padroes_zona(cur, time_id):
     return resultado
 
 
+def buscar_correlacoes_time(cur, time_id):
+    """NOVO (Correlação entre estatísticas - POR TIME, só exibição): lê
+    `padroes_correlacao_time` - mesma pergunta da versão geral (que
+    aparece em /times), mas só com os jogos DESSE time, pra ver se ele
+    tem essa relação mais forte/fraca/invertida em relação ao padrão da
+    liga. NÃO afeta nenhum cálculo de recomendação/VE - é só informativo."""
+    try:
+        cur.execute(
+            """SELECT estatistica_a, estatistica_b, media_a, valor_b_acima, valor_b_abaixo,
+                      jogos_acima, jogos_abaixo, jogos_total
+               FROM padroes_correlacao_time WHERE time_id = %s ORDER BY id""",
+            (time_id,),
+        )
+        linhas = cur.fetchall()
+    except Exception as e:
+        if "does not exist" not in str(e).lower():
+            raise
+        cur.connection.rollback()
+        return []
+
+    resultado = []
+    for (a, b, media_a, valor_acima, valor_abaixo, jogos_acima, jogos_abaixo, jogos_total) in linhas:
+        resultado.append({
+            "titulo_a": NOMES_ESTATISTICA_CORRELACAO.get(a, a),
+            "titulo_b": NOMES_ESTATISTICA_CORRELACAO.get(b, b),
+            "media_a": float(media_a),
+            "valor_acima": float(valor_acima),
+            "valor_abaixo": float(valor_abaixo),
+            "sobe_junto": float(valor_acima) >= float(valor_abaixo),
+            "jogos_acima": jogos_acima, "jogos_abaixo": jogos_abaixo, "jogos_total": jogos_total,
+        })
+    return resultado
+
+
 # ---------- Página de time: vizinhos na tabela + últimos jogos ----------
 def buscar_vizinhos_tabela(tabela, api_football_team_id, redor=2):
     """Recorta um pedaço da tabela do Brasileirão em volta do time (até
@@ -5132,6 +5206,7 @@ def time_detalhe(time_id):
         estilo_time = buscar_estilo_time(cur, time_id)
         quebras_rodada = buscar_quebras_rodada(cur, time_id)
         padroes_zona = buscar_padroes_zona(cur, time_id)
+        correlacoes_time = buscar_correlacoes_time(cur, time_id)
 
         cur.execute("SELECT id, nome FROM times WHERE rastreado = TRUE ORDER BY nome")
         times_rastreados = cur.fetchall()
@@ -5157,6 +5232,7 @@ def time_detalhe(time_id):
         clubes=clubes, time_id=time_id, vizinhos_tabela=vizinhos_tabela,
         api_football_team_id=api_football_team_id, ultimos_jogos=ultimos_jogos,
         estilo_time=estilo_time, quebras_rodada=quebras_rodada, padroes_zona=padroes_zona,
+        correlacoes_time=correlacoes_time,
         nav_html=barra_navegacao("times", round(banca_atual, 2)),
     )
 
