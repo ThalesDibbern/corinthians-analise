@@ -1,4 +1,3 @@
-
 """
 Motor de padrões - Cartões, faltas, desarmes, chutes e impedimentos de
 jogador + Escanteios do time + perfil de cada árbitro + NOVO: escanteios e
@@ -642,6 +641,223 @@ def salvar_estilo_times(cur, resultados):
         sinal = "+" if desvio >= 0 else ""
         print(f"  [{tipo}/{papel}] time_id={time_id}: média {media}/jogo vs. liga {baseline}/jogo "
               f"({sinal}{desvio}%, {jogos} jogo(s))")
+
+
+# NOVO (Fase B - padrão por rodada, detecção automática de quebra): pra
+# cada time rastreado, calcula o comportamento em CADA número de rodada
+# (1, 2, 3... até 38), juntando as ~5 temporadas coletadas - ex: "na
+# rodada 1, esse time venceu 4 das 5 vezes". Isso é o dado BRUTO, uma
+# linha por rodada, sem suavização nenhuma.
+#
+# Em cima desse bruto, desliza uma "régua" de algumas rodadas (ver
+# TAMANHO_JANELA_QUEBRA) comparando um pedaço com o pedaço seguinte, e
+# marca onde a diferença entre as duas médias é a MAIOR de todas - esse é
+# o "ponto de quebra" (ex: "entre a rodada 3 e a 4, a taxa de vitória cai
+# de 85% pra 42%"). É estatística simples (média e subtração), não um
+# método acadêmico de detecção de mudança - de propósito, pra ficar fácil
+# de conferir/explicar.
+#
+# Cobre "resultado" (taxa de vitória) e os mesmos mercados que já têm
+# padrão geral por time hoje (cartão, escanteio, falta, chute, chute no
+# gol, impedimento, desarme) - usando média de eventos por jogo pra esses
+# últimos, em vez de escolher uma linha específica (mesma filosofia do
+# Estilo de Jogo).
+#
+# Só EXIBIÇÃO por enquanto (ver /time/<id> em app.py) - não entra em
+# nenhuma fórmula de recomendação/VE ainda.
+TIPOS_PADRAO_RODADA_ESTATISTICA_JOGO = {
+    "escanteio": "escanteios",
+    "falta": "faltas",
+    "chute": "finalizacoes",
+}
+TIPOS_PADRAO_RODADA_SOMA_JOGADOR = {
+    "chute_no_gol": "chutes_no_gol",
+    "impedimento": "impedimentos",
+    "desarme": "desarmes",
+}
+TAMANHO_JANELA_QUEBRA = 3
+
+
+def calcular_bruto_rodada_resultado(cur, time_id):
+    """{rodada_numero: [1.0 se venceu, 0.0 se não, por jogo]} - placar_
+    corinthians já representa o placar do NOSSO time (nome legado de
+    quando só existia 1 time rastreado), sempre comparável direto com
+    placar_adversario, independente de mandante/visitante."""
+    cur.execute(
+        """
+        SELECT rodada_numero, CASE WHEN placar_corinthians > placar_adversario THEN 1.0 ELSE 0.0 END
+        FROM jogos
+        WHERE nosso_time_id = %s AND rodada_numero IS NOT NULL
+          AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+          AND data_jogo < CURRENT_DATE
+        """,
+        (time_id,),
+    )
+    por_rodada = {}
+    for rodada_numero, venceu in cur.fetchall():
+        por_rodada.setdefault(rodada_numero, []).append(float(venceu))
+    return por_rodada
+
+
+def calcular_bruto_rodada_cartao(cur, time_id):
+    """{rodada_numero: [cartões do NOSSO time, por jogo]} - mesma
+    subconsulta separada (sem JOIN direto com cartoes) usada em todo o
+    resto do motor_padroes.py, pra não contar em dobro (ver correção
+    histórica do bug de cartão total)."""
+    cur.execute(
+        """
+        SELECT contagem.rodada_numero, contagem.total
+        FROM (
+            SELECT j.id AS jogo_id, j.rodada_numero,
+                   (SELECT COUNT(*) FROM cartoes c WHERE c.jogo_id = j.id AND c.lado = 'mandante') AS total,
+                   COUNT(DISTINCT eg.lado) AS lados
+            FROM jogos j
+            JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
+            WHERE j.nosso_time_id = %s AND j.rodada_numero IS NOT NULL AND j.data_jogo < CURRENT_DATE
+            GROUP BY j.id, j.rodada_numero
+        ) contagem
+        WHERE contagem.lados = 2
+        """,
+        (time_id,),
+    )
+    por_rodada = {}
+    for rodada_numero, valor in cur.fetchall():
+        por_rodada.setdefault(rodada_numero, []).append(float(valor))
+    return por_rodada
+
+
+def calcular_bruto_rodada_estatistica_jogo(cur, time_id, coluna):
+    """{rodada_numero: [valor do NOSSO time, por jogo]} - a partir de
+    estatisticas_jogo (lado MANDANTE/VISITANTE real, precisa traduzir via
+    jogos.mandante)."""
+    cur.execute(
+        f"""
+        SELECT j.rodada_numero, eg.{coluna}
+        FROM estatisticas_jogo eg
+        JOIN jogos j ON j.id = eg.jogo_id
+        WHERE j.nosso_time_id = %s AND j.rodada_numero IS NOT NULL AND j.data_jogo < CURRENT_DATE
+          AND eg.{coluna} IS NOT NULL
+          AND ((j.mandante = TRUE AND eg.lado = 'mandante')
+           OR (j.mandante = FALSE AND eg.lado = 'visitante'))
+        """,
+        (time_id,),
+    )
+    por_rodada = {}
+    for rodada_numero, valor in cur.fetchall():
+        por_rodada.setdefault(rodada_numero, []).append(float(valor))
+    return por_rodada
+
+
+def calcular_bruto_rodada_soma_jogador(cur, time_id, coluna):
+    """{rodada_numero: [soma do NOSSO time naquele jogo, por jogo]} - a
+    partir de jogador_estatisticas_jogo (mesma tradução de lado)."""
+    cur.execute(
+        f"""
+        SELECT j.rodada_numero, SUM(jeg.{coluna})
+        FROM jogador_estatisticas_jogo jeg
+        JOIN jogos j ON j.id = jeg.jogo_id
+        WHERE j.nosso_time_id = %s AND j.rodada_numero IS NOT NULL AND j.data_jogo < CURRENT_DATE
+          AND jeg.{coluna} IS NOT NULL
+          AND ((j.mandante = TRUE AND jeg.lado = 'mandante')
+           OR (j.mandante = FALSE AND jeg.lado = 'visitante'))
+        GROUP BY j.id, j.rodada_numero
+        """,
+        (time_id,),
+    )
+    por_rodada = {}
+    for rodada_numero, valor in cur.fetchall():
+        por_rodada.setdefault(rodada_numero, []).append(float(valor) if valor is not None else 0.0)
+    return por_rodada
+
+
+def detectar_quebra(bruto_por_rodada):
+    """Desliza uma janela de TAMANHO_JANELA_QUEBRA rodadas por cima do
+    dado bruto (ordenado por número de rodada), comparando cada janela com
+    a janela seguinte - devolve onde a diferença entre as duas médias é a
+    MAIOR de todas. None se não tiver rodada suficiente pra formar 2
+    janelas completas (jogos_amostra de cada rodada não entra na conta
+    aqui - só o número de POSIÇÕES de rodada com pelo menos 1 dado)."""
+    pontos = sorted(
+        (rodada_numero, sum(valores) / len(valores))
+        for rodada_numero, valores in bruto_por_rodada.items()
+        if valores
+    )
+    n = len(pontos)
+    if n < TAMANHO_JANELA_QUEBRA * 2:
+        return None
+
+    melhor = None
+    for i in range(0, n - TAMANHO_JANELA_QUEBRA * 2 + 1):
+        janela_antes = pontos[i:i + TAMANHO_JANELA_QUEBRA]
+        janela_depois = pontos[i + TAMANHO_JANELA_QUEBRA:i + TAMANHO_JANELA_QUEBRA * 2]
+        media_antes = sum(v for _, v in janela_antes) / TAMANHO_JANELA_QUEBRA
+        media_depois = sum(v for _, v in janela_depois) / TAMANHO_JANELA_QUEBRA
+        diferenca = abs(media_depois - media_antes)
+        if melhor is None or diferenca > melhor["diferenca"]:
+            melhor = {
+                "rodada_quebra": janela_depois[0][0],
+                "valor_antes": round(media_antes, 4),
+                "valor_depois": round(media_depois, 4),
+                "diferenca": round(diferenca, 4),
+            }
+    return melhor
+
+
+def calcular_padroes_rodada_time(cur, time_id):
+    """Calcula o bruto por rodada + a quebra detectada, pra todos os
+    mercados cobertos, de UM time. Devolve (bruto_pra_salvar, quebras_pra_salvar)."""
+    fontes = {"resultado": lambda: calcular_bruto_rodada_resultado(cur, time_id),
+              "cartao": lambda: calcular_bruto_rodada_cartao(cur, time_id)}
+    for tipo, coluna in TIPOS_PADRAO_RODADA_ESTATISTICA_JOGO.items():
+        fontes[tipo] = lambda coluna=coluna: calcular_bruto_rodada_estatistica_jogo(cur, time_id, coluna)
+    for tipo, coluna in TIPOS_PADRAO_RODADA_SOMA_JOGADOR.items():
+        fontes[tipo] = lambda coluna=coluna: calcular_bruto_rodada_soma_jogador(cur, time_id, coluna)
+
+    bruto_pra_salvar = []
+    quebras_pra_salvar = []
+    for tipo, funcao_busca in fontes.items():
+        bruto_por_rodada = funcao_busca()
+        for rodada_numero, valores in bruto_por_rodada.items():
+            if not valores:
+                continue
+            media = sum(valores) / len(valores)
+            bruto_pra_salvar.append((time_id, tipo, rodada_numero, round(media, 4), len(valores)))
+
+        quebra = detectar_quebra(bruto_por_rodada)
+        if quebra:
+            quebras_pra_salvar.append((time_id, tipo, quebra))
+
+    return bruto_pra_salvar, quebras_pra_salvar
+
+
+def salvar_padroes_rodada(cur, bruto_pra_salvar, quebras_pra_salvar):
+    for time_id, tipo, rodada_numero, valor, jogos_amostra in bruto_pra_salvar:
+        cur.execute(
+            """
+            INSERT INTO padroes_rodada_bruto (time_id, tipo_padrao, rodada_numero, valor, jogos_amostra, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, tipo_padrao, rodada_numero) DO UPDATE SET
+                valor = EXCLUDED.valor, jogos_amostra = EXCLUDED.jogos_amostra, atualizado_em = NOW()
+            """,
+            (time_id, tipo, rodada_numero, valor, jogos_amostra),
+        )
+
+    for time_id, tipo, quebra in quebras_pra_salvar:
+        cur.execute(
+            """
+            INSERT INTO padroes_quebra_rodada
+                (time_id, tipo_padrao, rodada_quebra, valor_antes, valor_depois, diferenca, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, tipo_padrao) DO UPDATE SET
+                rodada_quebra = EXCLUDED.rodada_quebra, valor_antes = EXCLUDED.valor_antes,
+                valor_depois = EXCLUDED.valor_depois, diferenca = EXCLUDED.diferenca, atualizado_em = NOW()
+            """,
+            (time_id, tipo, quebra["rodada_quebra"], quebra["valor_antes"],
+             quebra["valor_depois"], quebra["diferenca"]),
+        )
+        sinal = "+" if quebra["valor_depois"] >= quebra["valor_antes"] else "-"
+        print(f"  [{tipo}] quebra na rodada {quebra['rodada_quebra']}: "
+              f"{quebra['valor_antes']} -> {quebra['valor_depois']} ({sinal}{abs(quebra['diferenca']):.3f})")
 
 
 def calcular_posse_time(cur, time_id):
@@ -1598,6 +1814,21 @@ def main():
             else:
                 salvar_posse_time(cur, media_posse, jogos_posse, time_id)
                 conn.commit()
+
+            # NOVO (Fase B - padrão por rodada, só exibição): calcula o
+            # comportamento desse time em cada rodada (juntando as
+            # temporadas coletadas) e detecta automaticamente onde está a
+            # maior mudança de padrão, pra cada mercado coberto.
+            print("Calculando padrões por rodada (detecção automática de quebra)...")
+            bruto_rodada, quebras_rodada = calcular_padroes_rodada_time(cur, time_id)
+            if bruto_rodada:
+                salvar_padroes_rodada(cur, bruto_rodada, quebras_rodada)
+                conn.commit()
+                if not quebras_rodada:
+                    print("  Dado bruto salvo, mas nenhuma quebra detectada ainda "
+                          "(rodadas insuficientes pra formar as janelas de comparação).")
+            else:
+                print("  Dados insuficientes ainda para padrão por rodada.")
 
             print("Calculando padrões de resultado final (vitória/empate/derrota)...")
             resultados_finais = calcular_padroes_resultado(cur, time_id)
