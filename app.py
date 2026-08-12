@@ -776,6 +776,11 @@ from combinacoes import (
 # diferentes já causou bug grande no passado (funções duplicadas divergindo aos
 # poucos), então agora essa é a ÚNICA fonte de verdade dessa lógica.
 
+from tabela import calcular_jogo_morto, calcular_contexto_jogo
+# NOVO (Fase D): mesmo módulo compartilhado da Fase A/C - "jogo morto" e o
+# contexto de tabela de um confronto são calculados aqui, reaproveitando a
+# tabela reconstruída (jogos_liga), sem duplicar a lógica de reconstrução.
+
 
 def descobrir_motivo(cur):
     """Quando não há recomendação, descobre e explica o motivo mais provável."""
@@ -2590,6 +2595,15 @@ PAGINA_CLUBE = """
             background: #1f6feb18; border: 1px solid #1f6feb44; border-radius: 12px;
             padding: 12px 18px; margin-bottom: 20px; font-size: 0.85rem;
         }
+        /* NOVO (Fase D, só exibição) */
+        .jogo-morto-aviso {
+            background: #f8514912; border: 1px solid #f8514944; border-radius: 12px;
+            padding: 10px 18px; margin: -12px 0 20px; font-size: 0.8rem; color: #ffa198;
+        }
+        .contexto-jogo-aviso {
+            background: #16212e; border: 1px solid #21262d; border-radius: 12px;
+            padding: 10px 18px; margin: -12px 0 20px; font-size: 0.8rem; color: #c9d1d9;
+        }
         .botoes-topo { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
         .btn-acao {
             background: #21262d; color: #e6edf3; border: 1px solid #30363d;
@@ -2725,6 +2739,28 @@ PAGINA_CLUBE = """
         📅 Próximo jogo: <b>{{ proximo_jogo.data_jogo }} · {{ nome_clube }} x {{ proximo_jogo.adversario }}</b> -
         as apostas manuais criadas abaixo são pra esse jogo.
     </div>
+    {% if jogo_morto and jogo_morto.morto %}
+    <div class="jogo-morto-aviso">
+        ⚠️ Jogo sem nada em jogo pro {{ nome_clube }} - matematicamente não pode mais alcançar o G4 nem cair no Z4
+        ({{ jogo_morto.rodadas_restantes }} rodada(s) restante(s), atualmente na {{ jogo_morto.posicao_atual }}ª
+        posição). Cenário simplificado (não considera Libertadores/Sul-Americana ainda) - só informativo.
+    </div>
+    {% endif %}
+    {% if contexto_jogo %}
+    <div class="contexto-jogo-aviso">
+        📊 Contexto: {{ nome_clube }} está na {{ contexto_jogo.posicao }}ª posição ({{ contexto_jogo.pontos }} pts)
+        {% if contexto_jogo.distancia_objetivo is not none and contexto_jogo.distancia_objetivo > 0 %}
+            · a {{ contexto_jogo.distancia_objetivo }} ponto(s) de {{ contexto_jogo.objetivo }}
+        {% elif contexto_jogo.zona == 'g4' %}
+            · já está no G4
+        {% endif %}
+        {% if contexto_jogo.distancia_z4 is not none %}
+            · {{ contexto_jogo.distancia_z4 }} ponto(s) acima da saída do Z4
+        {% endif %}
+        · adversário ({{ proximo_jogo.adversario }}) está na {{ contexto_jogo.adversario_posicao }}ª posição
+        {% if contexto_jogo.adversario_forca %}(considerado <b>{{ contexto_jogo.adversario_forca }}</b>){% endif %}.
+    </div>
+    {% endif %}
     <div class="botoes-topo">
         <button class="btn-acao" onclick="gerarTresApostas()">🎯 Gerar 3 apostas automáticas</button>
         <button class="btn-acao" onclick="limparSelecao()">🧹 Limpar seleção</button>
@@ -4823,10 +4859,15 @@ def buscar_proximo_jogo(cur, time_id):
     (uma por perspectiva - ver arquitetura multi-time na documentação).
     Isso podia pegar a linha do ADVERSÁRIO por engano e mostrar "Santos x
     Santos" na página do Santos (quando o adversário também é rastreado).
-    Agora filtra direto por `nosso_time_id`, que é único por perspectiva."""
+    Agora filtra direto por `nosso_time_id`, que é único por perspectiva.
+    NOVO (Fase D): também traz rodada_numero, temporada (derivada do ano
+    de data_jogo) e o api_football_team_id do adversário - usado pra
+    calcular "jogo morto" e o contexto de tabela desse confronto."""
     cur.execute(
         """
-        SELECT j.id, j.data_jogo, j.adversario
+        SELECT j.id, j.data_jogo, j.adversario, j.rodada_numero,
+               EXTRACT(YEAR FROM j.data_jogo)::int AS temporada,
+               CASE WHEN j.mandante THEN j.visitante_id ELSE j.mandante_id END AS adversario_time_id
         FROM jogos j
         WHERE j.nosso_time_id = %s
           AND ((j.datahora_jogo IS NOT NULL AND j.datahora_jogo >= NOW())
@@ -4839,8 +4880,18 @@ def buscar_proximo_jogo(cur, time_id):
     row = cur.fetchone()
     if not row:
         return None
-    jogo_id, data_jogo, adversario = row
-    return {"jogo_id": jogo_id, "data_jogo": data_jogo, "adversario": adversario}
+    jogo_id, data_jogo, adversario, rodada_numero, temporada, adversario_time_id = row
+
+    adversario_api_id = None
+    if adversario_time_id:
+        cur.execute("SELECT api_football_team_id FROM times WHERE id = %s", (adversario_time_id,))
+        r = cur.fetchone()
+        adversario_api_id = r[0] if r else None
+
+    return {
+        "jogo_id": jogo_id, "data_jogo": data_jogo, "adversario": adversario,
+        "rodada_numero": rodada_numero, "temporada": temporada, "adversario_api_id": adversario_api_id,
+    }
 
 
 @app.route("/jogadores")
@@ -4885,12 +4936,12 @@ def clube(time_id):
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
-        cur.execute("SELECT nome FROM times WHERE id = %s AND rastreado = TRUE", (time_id,))
+        cur.execute("SELECT nome, api_football_team_id FROM times WHERE id = %s AND rastreado = TRUE", (time_id,))
         row = cur.fetchone()
         if not row:
             cur.close()
             return "Clube não encontrado.", 404
-        nome_clube = row[0]
+        nome_clube, api_football_team_id = row
 
         lista = buscar_estatisticas_jogadores(cur, time_id)
         ultima_escalacao = buscar_ultima_escalacao_titular(cur, time_id)
@@ -4899,6 +4950,24 @@ def clube(time_id):
         elenco_por_posicao = buscar_elenco_por_posicao(cur, time_id)
         lideres_time = buscar_lideres_estatisticas_jogadores_time(cur, time_id)
         banca_atual = buscar_banca(cur, session["usuario_id"])
+
+        # NOVO (Fase D, só exibição - não afeta recomendação/VE): "jogo
+        # morto" (o time já não tem mais nada em jogo matematicamente) e o
+        # contexto de tabela desse confronto específico (posição, distância
+        # até o objetivo, força do adversário) - só calcula se o próximo
+        # jogo e o api_football_team_id do time estiverem disponíveis.
+        jogo_morto = None
+        contexto_jogo = None
+        if proximo_jogo and api_football_team_id and proximo_jogo["rodada_numero"]:
+            jogo_morto = calcular_jogo_morto(
+                cur, api_football_team_id, proximo_jogo["temporada"], proximo_jogo["rodada_numero"]
+            )
+            if proximo_jogo["adversario_api_id"]:
+                contexto_jogo = calcular_contexto_jogo(
+                    cur, api_football_team_id, proximo_jogo["adversario_api_id"],
+                    proximo_jogo["temporada"], proximo_jogo["rodada_numero"],
+                )
+
         cur.close()
     finally:
         conn.close()
@@ -4915,7 +4984,7 @@ def clube(time_id):
         PAGINA_CLUBE, jogadores=lista, ultima_escalacao=ultima_escalacao,
         proximo_jogo=proximo_jogo, nome_clube=nome_clube, escudo_url=escudo_url,
         time_id=time_id, elenco_por_posicao=elenco_por_posicao, lideres_time=lideres_time,
-        jogadores_na_regua=jogadores_na_regua,
+        jogadores_na_regua=jogadores_na_regua, jogo_morto=jogo_morto, contexto_jogo=contexto_jogo,
         nav_html=barra_navegacao("jogadores", round(banca_atual, 2)),
     )
 
