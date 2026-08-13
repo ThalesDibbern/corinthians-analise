@@ -320,6 +320,8 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                             "jogador_id": p["jogador_id"],
                             "tipo_padrao": p["tipo_padrao"],
                             "descricao": p["descricao"],
+                            "linha": p["linha"],
+                            "direcao": p["direcao"],
                         }
                         for p in combo
                     ],
