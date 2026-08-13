@@ -20,6 +20,7 @@ Variáveis de ambiente necessárias:
 
 import os
 import json
+import re
 import secrets
 import subprocess
 import sys
@@ -1951,6 +1952,23 @@ def avaliar_perna_manual(cur, perna):
     return "pendente"
 
 
+def _extrair_linha_direcao_da_descricao(descricao):
+    """NOVO (correção, 4ª tentativa de casamento): tenta extrair linha e
+    direção de dentro do TEXTO de uma descrição salva antes da correção
+    que passou a gravar linha/direção estruturados numa perna (ex:
+    "Cartões Total do Jogo - Mais de 5.5" -> linha=5.5, direção='mais') -
+    só usado como último recurso, quando as tentativas anteriores não
+    encontraram (ou encontraram de forma ambígua, mais de uma linha
+    candidata) o resultado real dessa perna."""
+    if not descricao:
+        return None, None
+    m = re.search(r"(Mais|Menos) de (\d+(?:\.\d+)?)", descricao, re.IGNORECASE)
+    if not m:
+        return None, None
+    direcao = "mais" if m.group(1).lower() == "mais" else "menos"
+    return float(m.group(2)), direcao
+
+
 def resolver_apostas_pendentes(cur):
     """NOVO: pra cada aposta salva ainda 'pendente', confere se TODAS as
     pernas dela já têm resultado em historico_recomendacoes - só resolve
@@ -2022,6 +2040,27 @@ def resolver_apostas_pendentes(cur):
                 candidatos = cur.fetchall()
                 if len(candidatos) == 1:
                     row = candidatos[0]
+
+            # NOVO (correção, 4ª tentativa): se a 3ª deu ambígua (mais de
+            # uma linha candidata pro mesmo mercado/jogo/jogador) ou não
+            # achou nada, tenta extrair a linha/direção de dentro do
+            # próprio texto salvo (ex: "Mais de 5.5") e casar com precisão
+            # - resolve o caso comum de um jogo com várias linhas do mesmo
+            # mercado arquivadas (ex: cartão total "mais de 4.5" e "mais
+            # de 5.5" do mesmo jogo, cada uma uma recomendação diferente).
+            if row is None and perna.get("linha") is None and perna.get("direcao") is None:
+                linha_extraida, direcao_extraida = _extrair_linha_direcao_da_descricao(perna.get("descricao"))
+                if linha_extraida is not None:
+                    cur.execute(
+                        """SELECT resultado FROM historico_recomendacoes
+                           WHERE jogo_id = %s AND tipo_padrao = %s
+                             AND jogador_id IS NOT DISTINCT FROM %s
+                             AND linha = %s AND direcao = %s
+                           ORDER BY id DESC LIMIT 1""",
+                        (perna["jogo_id"], perna["tipo_padrao"], perna.get("jogador_id"),
+                         linha_extraida, direcao_extraida),
+                    )
+                    row = cur.fetchone()
 
             resultados_pernas.append(row[0] if row else "pendente")
 
