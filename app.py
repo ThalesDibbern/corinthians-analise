@@ -782,6 +782,14 @@ from tabela import calcular_jogo_morto, calcular_contexto_jogo
 # contexto de tabela de um confronto são calculados aqui, reaproveitando a
 # tabela reconstruída (jogos_liga), sem duplicar a lógica de reconstrução.
 
+from avaliacao import avaliar_resultado
+# NOVO (Criador de Odd): a lógica de avaliação (comparar aposta com
+# resultado real) foi extraída pro módulo avaliacao.py, compartilhado com
+# arquivar_recomendacoes.py - usada tanto pras recomendações automáticas
+# quanto pras apostas manuais (Criador de Odd), cobrindo os 10 tipos de
+# mercado, com a mesma correção de bug pros dois (jogador que ficou no
+# banco sem entrar não fica mais "pendente" pra sempre).
+
 
 def descobrir_motivo(cur):
     """Quando não há recomendação, descobre e explica o motivo mais provável."""
@@ -1890,68 +1898,6 @@ PAGINA_ROI = """
 """
 
 
-def avaliar_perna_manual(cur, perna):
-    """NOVO: avalia uma perna de aposta MANUAL (montada a partir da
-    estatística de jogador, sem odd real correspondente - ver 'Criar
-    Aposta Manual' em /clube/<time>). Diferente das pernas normais (que
-    vieram de uma recomendação real, já avaliada em historico_recomendacoes),
-    essas nunca passaram pelo motor de recomendações - então a avaliação
-    aqui vai direto nas tabelas de estatística real do jogo, mesma lógica
-    usada em arquivar_recomendacoes.py."""
-    jogo_id = perna["jogo_id"]
-    jogador_id = perna.get("jogador_id")
-    tipo = perna["tipo_padrao"]
-    linha = perna.get("linha")
-    direcao = (perna.get("direcao") or "").strip().lower()
-
-    if tipo == "cartao":
-        cur.execute("SELECT 1 FROM cartoes WHERE jogo_id = %s AND jogador_id = %s", (jogo_id, jogador_id))
-        recebeu = cur.fetchone() is not None
-        cur.execute(
-            "SELECT 1 FROM jogador_estatisticas_jogo WHERE jogo_id = %s AND jogador_id = %s",
-            (jogo_id, jogador_id),
-        )
-        tem_dado = cur.fetchone() is not None
-        if not recebeu and not tem_dado:
-            return "pendente"
-        if direcao == "sim":
-            return "acertou" if recebeu else "errou"
-        return "acertou" if not recebeu else "errou"
-
-    if tipo in ("falta_cometida", "desarme", "chute_no_gol", "chute_total", "falta_sofrida"):
-        coluna = {
-            "falta_cometida": "faltas_cometidas", "desarme": "desarmes",
-            "chute_no_gol": "chutes_no_gol", "chute_total": "chutes",
-            "falta_sofrida": "faltas_sofridas",
-        }[tipo]
-        cur.execute(
-            f"SELECT {coluna} FROM jogador_estatisticas_jogo WHERE jogo_id = %s AND jogador_id = %s",
-            (jogo_id, jogador_id),
-        )
-        row = cur.fetchone()
-        if row is None or row[0] is None:
-            return "pendente"
-        valor_real = float(row[0])
-        if direcao == "mais":
-            return "acertou" if valor_real > float(linha) else "errou"
-        return "acertou" if valor_real <= float(linha) else "errou"
-
-    if tipo == "impedimento":
-        cur.execute(
-            "SELECT impedimentos FROM jogador_estatisticas_jogo WHERE jogo_id = %s AND jogador_id = %s",
-            (jogo_id, jogador_id),
-        )
-        row = cur.fetchone()
-        if row is None or row[0] is None:
-            return "pendente"
-        ocorreu = row[0] > 0
-        if direcao == "sim":
-            return "acertou" if ocorreu else "errou"
-        return "acertou" if not ocorreu else "errou"
-
-    return "pendente"
-
-
 def _extrair_linha_direcao_da_descricao(descricao):
     """NOVO (correção, 4ª tentativa de casamento): tenta extrair linha e
     direção de dentro do TEXTO de uma descrição salva antes da correção
@@ -1986,7 +1932,16 @@ def resolver_apostas_pendentes(cur):
         resultados_pernas = []
         for perna in pernas:
             if perna.get("fonte") == "manual":
-                resultados_pernas.append(avaliar_perna_manual(cur, perna))
+                # NOVO: usa a mesma função de avaliação compartilhada com
+                # arquivar_recomendacoes.py (avaliacao.py) - antes usava
+                # avaliar_perna_manual, uma cópia divergente que não
+                # cobria todos os mercados nem tinha a correção de
+                # "jogador ficou no banco sem entrar" que a versão
+                # automática já tinha ganho.
+                resultados_pernas.append(avaliar_resultado(
+                    cur, perna["tipo_padrao"], perna.get("jogador_id"), perna["jogo_id"],
+                    perna.get("linha"), perna.get("descricao"), perna.get("direcao"),
+                ))
                 continue
 
             # NOVO (correção): casar por (tipo_padrao, linha, direção) em
