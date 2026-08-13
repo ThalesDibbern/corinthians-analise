@@ -41,6 +41,35 @@ das 3 escalações seguidas, é sinal de lesão/suspensão/corte do time, e a
 recomendação é descartada. Evita recomendar aposta em jogador fora de
 campo.
 
+NOVO (Grupo A de integração - Estilo de Jogo, Padrão por Rodada, Zona da
+Tabela, 11/08/2026): três recursos que antes eram só visuais passam a
+ajustar recomendações de verdade, nos 4 pontos de encaixe onde existe um
+mercado apostável no nível certo (time ou jogador, batendo com o que a
+OddsPapi oferece):
+  - Resultado final (time): Zona da Tabela + Padrão por Rodada
+  - Escanteio de time: Zona da Tabela + Padrão por Rodada
+  - Cartão de jogador: Estilo de Jogo (ofensivo do nosso time + defensivo
+    do adversário) + Árbitro (já existia)
+  - Impedimento de jogador: Estilo de Jogo (ofensivo do nosso time +
+    defensivo do adversário)
+As outras estatísticas de Zona/Rodada (falta, chute, chute no gol,
+desarme, cartão do time) ficam de fora dessa integração de propósito -
+só existem como mercado POR JOGADOR na OddsPapi, não como total de time,
+então não há onde encaixar um ajuste calculado no nível de time sem
+inventar uma correspondência que o dado não sustenta.
+
+Cada fator individual continua com piso/teto próprio (0.85x-1.15x, igual
+Árbitro/Forma recente já usavam) - é a primeira camada de segurança. Por
+cima disso, o PRODUTO de todos os fatores que atuam no mesmo mercado ao
+mesmo tempo é limitado a um TETO COMBINADO (0.75x-1.25x) - segunda camada,
+garante que múltiplos ajustes concordando entre si nunca dominam sobre o
+padrão histórico real, mesmo no pior caso (3 fatores empilhados em
+Resultado Final ou Cartão de Jogador).
+
+Cada fator só entra na conta se tiver pelo menos
+JOGOS_MINIMOS_FATOR_RECOMENDACAO jogos de amostra - abaixo disso, o fator
+é ignorado silenciosamente (sem quebrar a recomendação, só não ajusta).
+
 Fórmula usada (valor esperado por unidade apostada):
     VE = (probabilidade_historica * odd) - 1
 Se VE > 0, a aposta é estatisticamente favorável no longo prazo, segundo
@@ -59,6 +88,8 @@ Variáveis de ambiente necessárias:
 
 import os
 import psycopg2
+
+from tabela import calcular_tabela
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -82,11 +113,36 @@ FATOR_FORMA_MAXIMO = 1.15
 # REDUZ a probabilidade de "mais de X cartões" (por isso o teto é 1.0,
 # nunca aumenta), com um piso pra não dominar sobre o padrão real mesmo
 # em cenários extremos (ex: os 2 times inteiros na régua).
+# DESATIVADO (11/08/2026): testado numa rodada real e não se comportou
+# bem - tirado da fórmula de cartao_total por pedido do dono do projeto.
+# As constantes e a função continuam aqui, só não são mais chamadas.
 FATOR_SUSPENSAO_MINIMO = 0.80
 FATOR_SUSPENSAO_MAXIMO = 1.00
 FATOR_SUSPENSAO_ESCALA = 0.15
 PESO_PADRAO_SEM_HISTORICO_CARTAO = 0.15  # jogador na régua sem padrão calculado ainda (poucos jogos) - peso neutro
 TEMPORADA_ATUAL = 2026  # cartão não carrega de uma temporada pra outra
+
+# NOVO (Grupo A): piso/teto individual dos 4 fatores novos - igualado ao
+# mesmo intervalo que Árbitro/Forma recente já usam, por consistência.
+FATOR_ZONA_MINIMO = 0.85
+FATOR_ZONA_MAXIMO = 1.15
+FATOR_RODADA_MINIMO = 0.85
+FATOR_RODADA_MAXIMO = 1.15
+FATOR_ESTILO_MINIMO = 0.85
+FATOR_ESTILO_MAXIMO = 1.15
+
+# NOVO (Grupo A): teto combinado - depois de multiplicar TODOS os fatores
+# que atuam no mesmo mercado ao mesmo tempo, o produto final nunca passa
+# desse intervalo, não importa quantos fatores concordaram entre si.
+TETO_COMBINADO_MINIMO = 0.75
+TETO_COMBINADO_MAXIMO = 1.25
+
+# NOVO (Grupo A): amostra mínima pra um fator valer numa recomendação de
+# verdade - mais rígido que o mínimo usado nos cards visuais (3, pra não
+# ficar tudo vazio na tela), porque aqui o número já influencia dinheiro.
+JOGOS_MINIMOS_FATOR_RECOMENDACAO = 5
+
+
 
 # NOVO (disponibilidade de jogador): quantos jogos recentes olhar pra decidir
 # se um jogador "sumiu" da escalação (sinal de lesão/suspensão/corte do
@@ -153,12 +209,17 @@ def buscar_odds_futuras(cur):
     padroes_confronto_direto.
 
     NOVO (multi-time): também traz j.nosso_time_id - cada odd agora sabe de
-    qual time rastreado ela é, em vez de assumir sempre Corinthians."""
+    qual time rastreado ela é, em vez de assumir sempre Corinthians.
+
+    NOVO (Grupo A - Zona/Rodada): também traz rodada_numero e a temporada
+    (derivada do ano de data_jogo) - usados pra descobrir em que zona da
+    tabela e em que ponto do padrão por rodada esse jogo específico cai."""
     cur.execute(
         """
         SELECT o.id, o.jogo_id, o.jogador_id, o.casa_aposta, o.mercado,
                o.valor_odd, o.linha, o.direcao, j.data_jogo, j.adversario,
-               j.mandante, j.arbitro, j.mandante_id, j.visitante_id, j.nosso_time_id
+               j.mandante, j.arbitro, j.mandante_id, j.visitante_id, j.nosso_time_id,
+               j.rodada_numero, EXTRACT(YEAR FROM j.data_jogo)::int
         FROM odds o
         JOIN jogos j ON j.id = o.jogo_id
         WHERE (j.datahora_jogo IS NOT NULL AND j.datahora_jogo >= NOW())
@@ -470,6 +531,161 @@ def resultado_do_ponto_de_vista_corinthians(direcao, mandante):
     return None
 
 
+# ==================== NOVO (Grupo A de integração) ====================
+
+def combinar_fatores(fatores):
+    """Recebe uma lista de (fator_ou_None, descricao_curta). Ignora os
+    None (fator não pôde ser calculado ou amostra insuficiente), multiplica
+    o resto, e aplica o TETO COMBINADO por cima do produto - segunda
+    camada de segurança, por cima do piso/teto que cada fator individual
+    já tem. Devolve (fator_combinado_ou_None, [descricoes_aplicadas])."""
+    validos = [(f, d) for f, d in fatores if f is not None]
+    if not validos:
+        return None, []
+    produto = 1.0
+    for f, _ in validos:
+        produto *= f
+    produto = max(TETO_COMBINADO_MINIMO, min(TETO_COMBINADO_MAXIMO, produto))
+    return round(produto, 4), [d for _, d in validos]
+
+
+def buscar_media_geral_time(cur, time_id, tipo_padrao):
+    """Média geral do time nesse tipo de padrão, usada como denominador
+    pra transformar o valor bruto de Zona/Rodada num FATOR (valor / média
+    geral) - só existe pra "resultado" (taxa de vitória) e "escanteio"
+    (média de escanteios do próprio time), os dois únicos tipos de
+    Zona/Rodada com mercado apostável correspondente hoje."""
+    if tipo_padrao == "resultado":
+        cur.execute(
+            """
+            SELECT AVG(CASE WHEN placar_corinthians > placar_adversario THEN 1.0 ELSE 0.0 END)
+            FROM jogos
+            WHERE nosso_time_id = %s AND data_jogo < CURRENT_DATE
+              AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+            """,
+            (time_id,),
+        )
+    elif tipo_padrao == "escanteio":
+        cur.execute(
+            """
+            SELECT AVG(eg.escanteios)
+            FROM jogos j JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
+            WHERE j.nosso_time_id = %s AND j.data_jogo < CURRENT_DATE
+              AND ((j.mandante = TRUE AND eg.lado = 'mandante') OR (j.mandante = FALSE AND eg.lado = 'visitante'))
+            """,
+            (time_id,),
+        )
+    else:
+        return None
+    row = cur.fetchone()
+    return float(row[0]) if row and row[0] is not None else None
+
+
+def buscar_contexto_zona_time(cur, time_id, api_football_team_id, temporada, rodada_numero):
+    """Zona (g4/meio/z4) em que o time está ANTES desse jogo (rodada
+    anterior, mesma temporada) + condição de momento ("apos_vitoria"/
+    "apos_empate"/"apos_derrota"/"geral") baseada no resultado do jogo
+    anterior dele nessa temporada. Devolve (None, "geral") se faltar dado
+    (início de temporada, ou jogos_liga/popular_tabela.py sem cobertura)."""
+    if not rodada_numero or not temporada or not api_football_team_id or rodada_numero < 2:
+        return None, "geral"
+
+    rodada_anterior = rodada_numero - 1
+    tab = calcular_tabela(cur, temporada, rodada_anterior)
+    item = next((t for t in tab if t["time_api_id"] == api_football_team_id), None)
+    if item is None:
+        return None, "geral"
+
+    cur.execute(
+        """
+        SELECT CASE WHEN placar_corinthians > placar_adversario THEN 'vitoria'
+                    WHEN placar_corinthians = placar_adversario THEN 'empate'
+                    ELSE 'derrota' END
+        FROM jogos
+        WHERE nosso_time_id = %s AND rodada_numero = %s
+          AND EXTRACT(YEAR FROM data_jogo) = %s
+          AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+        LIMIT 1
+        """,
+        (time_id, rodada_anterior, temporada),
+    )
+    row = cur.fetchone()
+    condicao = f"apos_{row[0]}" if row else "geral"
+    return item["zona"], condicao
+
+
+def buscar_fator_zona(cur, time_id, zona, condicao, tipo_padrao):
+    """Fator = valor guardado em padroes_zona_time / média geral do time
+    nesse tipo. Se a condição específica (apos_vitoria etc.) não tiver
+    amostra suficiente, cai pra "geral" dessa zona antes de desistir -
+    mesma filosofia de fallback do confronto direto (fonte mais
+    específica primeiro, mais genérica depois, nunca None se tiver
+    QUALQUER dado aproveitável)."""
+    if zona is None:
+        return None
+
+    def _buscar(cond):
+        cur.execute(
+            "SELECT valor, jogos_amostra FROM padroes_zona_time "
+            "WHERE time_id = %s AND tipo_padrao = %s AND zona = %s AND condicao = %s",
+            (time_id, tipo_padrao, zona, cond),
+        )
+        return cur.fetchone()
+
+    row = _buscar(condicao)
+    if (not row or row[1] < JOGOS_MINIMOS_FATOR_RECOMENDACAO) and condicao != "geral":
+        row = _buscar("geral")
+    if not row or row[1] < JOGOS_MINIMOS_FATOR_RECOMENDACAO:
+        return None
+
+    media_geral = buscar_media_geral_time(cur, time_id, tipo_padrao)
+    if not media_geral:
+        return None
+    fator = float(row[0]) / media_geral
+    return max(FATOR_ZONA_MINIMO, min(FATOR_ZONA_MAXIMO, fator))
+
+
+def buscar_fator_rodada(cur, time_id, rodada_numero, tipo_padrao):
+    """Fator = valor guardado em padroes_rodada_bruto (na rodada exata
+    desse jogo) / média geral do time nesse tipo."""
+    if not rodada_numero:
+        return None
+    cur.execute(
+        "SELECT valor, jogos_amostra FROM padroes_rodada_bruto "
+        "WHERE time_id = %s AND tipo_padrao = %s AND rodada_numero = %s",
+        (time_id, tipo_padrao, rodada_numero),
+    )
+    row = cur.fetchone()
+    if not row or row[1] < JOGOS_MINIMOS_FATOR_RECOMENDACAO:
+        return None
+
+    media_geral = buscar_media_geral_time(cur, time_id, tipo_padrao)
+    if not media_geral:
+        return None
+    fator = float(row[0]) / media_geral
+    return max(FATOR_RODADA_MINIMO, min(FATOR_RODADA_MAXIMO, fator))
+
+
+def buscar_fator_estilo(cur, time_id, tipo, papel):
+    """Fator já vem pronto em padroes_estilo_time (media_time/media_liga),
+    só precisa aplicar o piso/teto individual - diferente de Zona/Rodada,
+    que guardam valor bruto e precisam dividir pela média geral aqui."""
+    if time_id is None:
+        return None
+    cur.execute(
+        "SELECT fator, jogos_analisados FROM padroes_estilo_time "
+        "WHERE time_id = %s AND tipo = %s AND papel = %s",
+        (time_id, tipo, papel),
+    )
+    row = cur.fetchone()
+    if not row or row[1] < JOGOS_MINIMOS_FATOR_RECOMENDACAO:
+        return None
+    fator = float(row[0])
+    return max(FATOR_ESTILO_MINIMO, min(FATOR_ESTILO_MAXIMO, fator))
+
+# ================== fim das funções novas do Grupo A ==================
+
+
 def jogador_disponivel(cur, jogador_id, jogo_id):
     """Evita recomendar aposta em jogador que provavelmente não vai jogar
     (suspenso, lesionado, cortado do time).
@@ -557,16 +773,20 @@ def calcular_recomendacoes(cur):
     # resposta da OddsPapi), usado pra montar a descrição do resultado
     # final com o nome certo e pra identificar de quem é um mercado de
     # escanteio_time (ver uso mais abaixo).
-    cur.execute("SELECT id, nome, apelidos FROM times")
+    # NOVO (Grupo A): também guarda api_football_team_id por time - usado
+    # pra achar a posição na tabela reconstruída (Zona da Tabela).
+    cur.execute("SELECT id, nome, apelidos, api_football_team_id FROM times")
     variantes_times = {}
     nomes_times = {}
-    for time_id_row, nome_row, apelidos_row in cur.fetchall():
+    api_ids_times = {}
+    for time_id_row, nome_row, apelidos_row, api_id_row in cur.fetchall():
         nomes_times[time_id_row] = nome_row
         variantes_times[time_id_row] = {nome_row.lower()} | {a.lower() for a in (apelidos_row or [])}
+        api_ids_times[time_id_row] = api_id_row
 
     for (odd_id, jogo_id, jogador_id, casa, mercado, valor_odd,
          linha, direcao, data_jogo, adversario, mandante, arbitro,
-         mandante_id, visitante_id, nosso_time_id) in odds:
+         mandante_id, visitante_id, nosso_time_id, rodada_numero, temporada) in odds:
 
         tipo = identificar_tipo_padrao(mercado)
         if tipo is None:
@@ -582,8 +802,9 @@ def calcular_recomendacoes(cur):
         resultado_cor = None
         fator_arbitro_aplicado = None
         veio_de_confronto_direto = False
-        fator_forma_aplicado = None
         fator_suspensao_aplicado = None
+        descricoes_grupo_a = []  # NOVO (Grupo A): nomes dos fatores novos aplicados nessa perna
+        fator_grupo_a_aplicado = None  # NOVO (Grupo A): multiplicador final já combinado+limitado
 
         # NOVO (confronto direto): identifica o adversário por ID (não por
         # texto - evita o problema de nomes grafados diferente entre
@@ -598,6 +819,12 @@ def calcular_recomendacoes(cur):
             adversario_id = visitante_id if mandante_id == nosso_time_id else mandante_id
         mandante_filtro_atual = "mandante" if mandante else "visitante"
 
+        # NOVO (Grupo A): api_football_team_id do nosso time - usado pra
+        # achar a posição na tabela reconstruída (Zona da Tabela). Pode
+        # ser None (time não cadastrado/sem api id) - as funções de fator
+        # tratam isso como "sem dado", sem quebrar nada.
+        nosso_time_api_id = api_ids_times.get(nosso_time_id)
+
         # NOVO: suporte ao lado "Menos"/"Não" de cada mercado, além do "Mais"/
         # "Sim" que já existia. A tabela de padrão sempre guarda a frequência
         # do lado "Mais"/"Sim" (ex: "frequência de passar de 7.5 escanteios");
@@ -611,12 +838,24 @@ def calcular_recomendacoes(cur):
         if tipo == "cartao" and jogador_id and direcao_normalizada in ("sim", "não", "nao"):
             frequencia_bruta = buscar_frequencia_cartao(cur, jogador_id)
             if frequencia_bruta is not None:
-                # NOVO: aplica o ajuste de árbitro, se disponível - sempre em
-                # cima da frequência do lado "Sim", antes de inverter pro "Não"
-                fator = calcular_fator_arbitro(cur, arbitro, media_geral_cartoes, "cartao")
-                if fator is not None:
-                    frequencia_bruta = min(round(frequencia_bruta * fator, 2), 100.0)
-                    fator_arbitro_aplicado = fator
+                # NOVO (Grupo A): árbitro (já existia) + Estilo de Jogo -
+                # ofensivo do NOSSO time (nosso time tende a levar mais/
+                # menos cartão por conta própria) + defensivo do
+                # ADVERSÁRIO (jogar contra esse adversário tende a fazer a
+                # gente levar mais/menos cartão). Os três juntos, cada um
+                # já limitado individualmente, com um teto combinado por
+                # cima (ver combinar_fatores).
+                fator_arbitro = calcular_fator_arbitro(cur, arbitro, media_geral_cartoes, "cartao")
+                fator_estilo_ofensivo = buscar_fator_estilo(cur, nosso_time_id, "cartao", "ofensivo")
+                fator_estilo_defensivo = buscar_fator_estilo(cur, adversario_id, "cartao", "defensivo")
+
+                fator_grupo_a_aplicado, descricoes_grupo_a = combinar_fatores([
+                    (fator_arbitro, "árbitro"),
+                    (fator_estilo_ofensivo, "estilo ofensivo"),
+                    (fator_estilo_defensivo, "estilo defensivo do adversário"),
+                ])
+                if fator_grupo_a_aplicado is not None:
+                    frequencia_bruta = min(round(frequencia_bruta * fator_grupo_a_aplicado, 2), 100.0)
 
                 frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
@@ -644,6 +883,18 @@ def calcular_recomendacoes(cur):
         elif tipo == "impedimento" and jogador_id and direcao_normalizada in ("sim", "não", "nao"):
             frequencia_bruta = buscar_frequencia_simples_jogador(cur, jogador_id, "impedimento")
             if frequencia_bruta is not None:
+                # NOVO (Grupo A): mesma ideia do cartão de jogador, sem o
+                # árbitro (não faz sentido árbitro afetar impedimento).
+                fator_estilo_ofensivo = buscar_fator_estilo(cur, nosso_time_id, "impedimento", "ofensivo")
+                fator_estilo_defensivo = buscar_fator_estilo(cur, adversario_id, "impedimento", "defensivo")
+
+                fator_grupo_a_aplicado, descricoes_grupo_a = combinar_fatores([
+                    (fator_estilo_ofensivo, "estilo ofensivo"),
+                    (fator_estilo_defensivo, "estilo defensivo do adversário"),
+                ])
+                if fator_grupo_a_aplicado is not None:
+                    frequencia_bruta = min(round(frequencia_bruta * fator_grupo_a_aplicado, 2), 100.0)
+
                 frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "escanteio_time" and not jogador_id \
@@ -676,6 +927,24 @@ def calcular_recomendacoes(cur):
             # segurança, em vez de aplicar a frequência do time errado.
             if bate_nosso_time and not bate_adversario:
                 frequencia_bruta = buscar_frequencia_escanteio_time(cur, linha, nosso_time_id)
+
+                # NOVO (Grupo A): Zona da Tabela + Padrão por Rodada, os
+                # dois calculados em cima da própria média geral do time
+                # nesse mercado (ver buscar_media_geral_time).
+                if frequencia_bruta is not None:
+                    zona_atual, condicao_momento = buscar_contexto_zona_time(
+                        cur, nosso_time_id, nosso_time_api_id, temporada, rodada_numero
+                    )
+                    fator_zona = buscar_fator_zona(cur, nosso_time_id, zona_atual, condicao_momento, "escanteio")
+                    fator_rodada = buscar_fator_rodada(cur, nosso_time_id, rodada_numero, "escanteio")
+
+                    fator_grupo_a_aplicado, descricoes_grupo_a = combinar_fatores([
+                        (fator_zona, "zona da tabela"),
+                        (fator_rodada, "padrão por rodada"),
+                    ])
+                    if fator_grupo_a_aplicado is not None:
+                        frequencia_bruta = min(round(frequencia_bruta * fator_grupo_a_aplicado, 2), 100.0)
+
                 if frequencia_bruta is not None:
                     frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
@@ -707,17 +976,17 @@ def calcular_recomendacoes(cur):
             else:
                 frequencia_bruta = buscar_frequencia_cartao_total(cur, linha, nosso_time_id)
 
-            # NOVO (cartão x suspensão): belisca a frequência "mais de X"
-            # (seja ela do confronto direto ou do padrão geral) pra baixo
-            # quando tem muita gente na régua da suspensão nos dois times -
-            # ver docstring de calcular_fator_suspensao. Aplicado ANTES de
-            # separar mais/menos, pra "menos" herdar o complemento certo
-            # (100 - frequência já ajustada), sem precisar duplicar a conta.
-            if frequencia_bruta is not None:
-                fator_suspensao = calcular_fator_suspensao(cur, nosso_time_id, adversario_id)
-                if fator_suspensao is not None:
-                    frequencia_bruta = round(frequencia_bruta * fator_suspensao, 2)
-                    fator_suspensao_aplicado = fator_suspensao
+            # DESATIVADO (11/08/2026): o ajuste de suspensão (belisca a
+            # frequência de cartão total pra baixo quando tem muita gente
+            # na régua da suspensão) foi testado numa rodada real e não
+            # se comportou bem - o dono do projeto pediu pra tirar ele da
+            # FÓRMULA de recomendação. A função `calcular_fator_suspensao`
+            # continua existindo no arquivo (não foi apagada), só não é
+            # mais chamada aqui - fácil de reativar se um dia quiserem
+            # revisitar com outro desenho. O aviso visual de "jogadores na
+            # régua da suspensão" (card em /clube/<id>, em app.py) é
+            # informativo/separado e continua funcionando normalmente,
+            # sem relação com essa fórmula.
 
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
@@ -739,16 +1008,34 @@ def calcular_recomendacoes(cur):
                     lado = "mandante" if mandante else "visitante"
                     frequencia = buscar_frequencia_resultado(cur, lado, resultado_cor, nosso_time_id)
 
-                # NOVO (forma recente): belisca a probabilidade (seja ela do
-                # confronto direto ou do padrão geral) com base no momento
-                # atual do time - nunca domina sobre a fonte principal, só
-                # ajusta dentro de um intervalo estreito (ver docstring de
-                # calcular_fator_forma_recente).
+                # NOVO (forma recente, já existia) + Grupo A (Zona da
+                # Tabela + Padrão por Rodada). IMPORTANTE: Zona/Rodada só
+                # têm o mercado "resultado" calculado como TAXA DE VITÓRIA
+                # - não existe separação por empate/derrota nesses dois
+                # recursos - então só entram na conta quando o mercado
+                # sendo avaliado é justamente "Vitória", nunca em Empate/
+                # Derrota (aplicar um fator de "esse time vence mais aqui"
+                # na aposta de Empate/Derrota não faria sentido com o dado
+                # que temos).
                 if frequencia is not None:
                     fator_forma = calcular_fator_forma_recente(cur, resultado_cor, nosso_time_id)
-                    if fator_forma is not None:
-                        frequencia = min(round(frequencia * fator_forma, 2), 100.0)
-                        fator_forma_aplicado = fator_forma
+
+                    fator_zona = None
+                    fator_rodada = None
+                    if resultado_cor == "vitoria":
+                        zona_atual, condicao_momento = buscar_contexto_zona_time(
+                            cur, nosso_time_id, nosso_time_api_id, temporada, rodada_numero
+                        )
+                        fator_zona = buscar_fator_zona(cur, nosso_time_id, zona_atual, condicao_momento, "resultado")
+                        fator_rodada = buscar_fator_rodada(cur, nosso_time_id, rodada_numero, "resultado")
+
+                    fator_grupo_a_aplicado, descricoes_grupo_a = combinar_fatores([
+                        (fator_forma, "forma recente"),
+                        (fator_zona, "zona da tabela"),
+                        (fator_rodada, "padrão por rodada"),
+                    ])
+                    if fator_grupo_a_aplicado is not None:
+                        frequencia = min(round(frequencia * fator_grupo_a_aplicado, 2), 100.0)
 
         if frequencia is None:
             continue  # não temos padrão calculado pra cruzar com essa odd ainda
@@ -769,11 +1056,17 @@ def calcular_recomendacoes(cur):
         if fator_arbitro_aplicado is not None:
             descricao_final += f" (ajustado pelo árbitro, fator {fator_arbitro_aplicado:.2f}x)"
 
-        if fator_forma_aplicado is not None:
-            descricao_final += f" (ajustado pela forma recente, fator {fator_forma_aplicado:.2f}x)"
-
         if fator_suspensao_aplicado is not None:
             descricao_final += f" (ajustado por jogadores na régua da suspensão, fator {fator_suspensao_aplicado:.2f}x)"
+
+        # NOVO (Grupo A): descrição unificada dos fatores novos (+ árbitro/
+        # forma recente, quando entram na mesma combinação) - substitui as
+        # tags individuais antigas nesses 4 mercados específicos (cartão de
+        # jogador, impedimento, escanteio de time, resultado final), já que
+        # agora eles podem se combinar entre si com um teto conjunto.
+        if descricoes_grupo_a and fator_grupo_a_aplicado is not None:
+            lista_fatores = " + ".join(descricoes_grupo_a)
+            descricao_final += f" (ajustado por {lista_fatores}, fator combinado {fator_grupo_a_aplicado:.2f}x)"
 
         if veio_de_confronto_direto:
             descricao_final += " (confronto direto)"
