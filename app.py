@@ -2925,9 +2925,32 @@ PAGINA_CLUBE = """
         .tabela-lider td { padding: 6px; font-weight: 600; border-top: 1px solid #21262d; }
         .vazio-pequeno { color: #8b949e; font-size: 0.8rem; font-style: italic; }
 
-        .busca {
-            width: 100%; padding: 10px 14px; margin: 16px 0 24px;
-            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+        /* NOVO (Últimos 5 jogos do jogador) */
+        .ultimos-jogos-jogador-toggle {
+            display: flex; justify-content: space-between; align-items: center;
+            cursor: pointer; font-weight: 600; font-size: 0.85rem; padding: 4px 0;
+        }
+        .jogo-seta { color: #8b949e; transition: transform 0.15s; }
+        .ultimos-jogos-jogador-lista {
+            display: none; margin-top: 8px;
+        }
+        .ultimos-jogos-jogador-lista.aberto { display: block; }
+        .jogo-jogador-card {
+            background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
+            padding: 8px 10px; margin-bottom: 6px; cursor: pointer;
+        }
+        .jogo-jogador-linha {
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 0.8rem; gap: 8px;
+        }
+        .jogo-jogador-data { color: #8b949e; font-size: 0.74rem; white-space: nowrap; }
+        .jogo-jogador-detalhe { display: none; margin-top: 8px; }
+        .jogo-jogador-card.aberto .jogo-jogador-detalhe { display: block; }
+        .tabela-detalhe-jogo { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+        .tabela-detalhe-jogo td { padding: 5px 4px; border-top: 1px solid #21262d; }
+        .tabela-detalhe-jogo td:first-child { color: #8b949e; }
+        .tabela-detalhe-jogo td:last-child { text-align: right; font-weight: 600; }
+
             border-radius: 8px; font-size: 0.9rem;
         }
         .cartao {
@@ -3232,6 +3255,51 @@ PAGINA_CLUBE = """
                 </div>
             </div>
             {% endif %}
+
+            {% if j.ultimos_jogos is not none %}
+            <div class="bloco">
+                <div class="ultimos-jogos-jogador-toggle" onclick="toggleUltimosJogosJogador({{ j.jogador_id }})">
+                    🗓️ Últimos 5 jogos <span class="jogo-seta">▾</span>
+                </div>
+                <div class="ultimos-jogos-jogador-lista" id="ultimos-jogos-jogador-{{ j.jogador_id }}">
+                    {% if j.ultimos_jogos %}
+                        {% for jg in j.ultimos_jogos %}
+                        <div class="jogo-jogador-card" id="jogo-jogador-{{ j.jogador_id }}-{{ jg.jogo_id }}"
+                             onclick="toggleJogoJogador({{ j.jogador_id }}, {{ jg.jogo_id }})">
+                            <div class="jogo-jogador-linha">
+                                {% if jg.mandante %}
+                                    <span>{{ jg.nosso_time_nome }} {{ jg.placar_nosso }} x {{ jg.placar_adversario }} {{ jg.adversario }}</span>
+                                {% else %}
+                                    <span>{{ jg.adversario }} {{ jg.placar_adversario }} x {{ jg.placar_nosso }} {{ jg.nosso_time_nome }}</span>
+                                {% endif %}
+                                <span class="jogo-jogador-data">{{ jg.data_jogo }}</span>
+                            </div>
+                            <div class="jogo-jogador-detalhe">
+                                {% if jg.estatisticas %}
+                                <table class="tabela-detalhe-jogo">
+                                    <tbody>
+                                        <tr><td>Minutos jogados</td><td>{{ jg.estatisticas.minutos if jg.estatisticas.minutos is not none else "-" }}</td></tr>
+                                        <tr><td>Cartões</td><td>{{ jg.estatisticas.cartoes }}</td></tr>
+                                        <tr><td>Faltas cometidas</td><td>{{ jg.estatisticas.faltas_cometidas if jg.estatisticas.faltas_cometidas is not none else "-" }}</td></tr>
+                                        <tr><td>Faltas sofridas</td><td>{{ jg.estatisticas.faltas_sofridas if jg.estatisticas.faltas_sofridas is not none else "-" }}</td></tr>
+                                        <tr><td>Chutes (total)</td><td>{{ jg.estatisticas.chutes if jg.estatisticas.chutes is not none else "-" }}</td></tr>
+                                        <tr><td>Chutes no gol</td><td>{{ jg.estatisticas.chutes_no_gol if jg.estatisticas.chutes_no_gol is not none else "-" }}</td></tr>
+                                        <tr><td>Desarmes</td><td>{{ jg.estatisticas.desarmes if jg.estatisticas.desarmes is not none else "-" }}</td></tr>
+                                        <tr><td>Impedimentos</td><td>{{ jg.estatisticas.impedimentos if jg.estatisticas.impedimentos is not none else "-" }}</td></tr>
+                                    </tbody>
+                                </table>
+                                {% else %}
+                                <div class="vazio-pequeno">Sem dado detalhado desse jogo.</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="vazio-pequeno">Nenhum jogo com dado ainda pra esse jogador.</div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
         </div>
         {% endfor %}
     {% else %}
@@ -3396,6 +3464,14 @@ PAGINA_CLUBE = """
         function limparSelecao() {
             document.querySelectorAll('.item-selecionavel').forEach(el => el.checked = false);
             atualizarCarrinho();
+        }
+
+        // NOVO (Últimos 5 jogos do jogador)
+        function toggleUltimosJogosJogador(jogadorId) {
+            document.getElementById('ultimos-jogos-jogador-' + jogadorId).classList.toggle('aberto');
+        }
+        function toggleJogoJogador(jogadorId, jogoId) {
+            document.getElementById('jogo-jogador-' + jogadorId + '-' + jogoId).classList.toggle('aberto');
         }
 
         function gerarTresApostas() {
@@ -5366,7 +5442,72 @@ def buscar_cartoes_para_suspensao(cur):
     return contagem_atual
 
 
-def buscar_estatisticas_jogadores(cur, time_id=None, busca=None):
+def buscar_ultimos_jogos_jogador(cur, jogador_id, limite=5):
+    """NOVO: últimos jogos já concluídos em que esse JOGADOR tem dado
+    registrado (jogou), mais recentes primeiro - mesma ideia de
+    buscar_ultimos_jogos_time, só que no nível do jogador. Alimenta o
+    retângulo "🗓️ Últimos 5 jogos" de cada jogador em /clube/<id>."""
+    cur.execute(
+        """
+        SELECT j.id, j.data_jogo, j.adversario, j.mandante,
+               j.placar_corinthians, j.placar_adversario, t.nome
+        FROM jogador_estatisticas_jogo jeg
+        JOIN jogos j ON j.id = jeg.jogo_id
+        JOIN times t ON t.id = j.nosso_time_id
+        WHERE jeg.jogador_id = %s
+          AND j.placar_corinthians IS NOT NULL AND j.placar_adversario IS NOT NULL
+        ORDER BY j.data_jogo DESC
+        LIMIT %s
+        """,
+        (jogador_id, limite),
+    )
+    jogos = []
+    for jogo_id, data_jogo, adversario, mandante, placar_nosso, placar_adv, nosso_time_nome in cur.fetchall():
+        jogos.append({
+            "jogo_id": jogo_id,
+            "data_jogo": data_jogo,
+            "adversario": adversario,
+            "mandante": mandante,
+            "nosso_time_nome": nosso_time_nome,
+            "placar_nosso": placar_nosso,
+            "placar_adversario": placar_adv,
+            "escudo_adversario": buscar_escudo_url(cur, adversario),
+            "estatisticas": buscar_estatisticas_jogador_jogo(cur, jogador_id, jogo_id),
+        })
+    return jogos
+
+
+def buscar_estatisticas_jogador_jogo(cur, jogador_id, jogo_id):
+    """NOVO: estatísticas desse JOGADOR específico, NESSE jogo específico -
+    o "retângulo" que abre ao clicar num jogo dentro de "Últimos 5 jogos"
+    de um jogador (equivalente ao que já existe pra time, só que no nível
+    individual)."""
+    cur.execute(
+        """
+        SELECT minutos, faltas_cometidas, faltas_sofridas, chutes, chutes_no_gol,
+               desarmes, impedimentos, posicao
+        FROM jogador_estatisticas_jogo
+        WHERE jogador_id = %s AND jogo_id = %s
+        """,
+        (jogador_id, jogo_id),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    (minutos, faltas_cometidas, faltas_sofridas, chutes,
+     chutes_no_gol, desarmes, impedimentos, posicao) = row
+
+    cur.execute("SELECT COUNT(*) FROM cartoes WHERE jogo_id = %s AND jogador_id = %s", (jogo_id, jogador_id))
+    total_cartoes = cur.fetchone()[0]
+
+    return {
+        "minutos": minutos, "faltas_cometidas": faltas_cometidas, "faltas_sofridas": faltas_sofridas,
+        "chutes": chutes, "chutes_no_gol": chutes_no_gol, "desarmes": desarmes,
+        "impedimentos": impedimentos, "cartoes": total_cartoes, "posicao": posicao,
+    }
+
+
+def buscar_estatisticas_jogadores(cur, time_id=None, busca=None, incluir_ultimos_jogos=False):
     """Monta a frequência histórica de cada jogador (cartão, faltas,
     desarmes, chutes no gol, impedimento), lendo direto das tabelas de
     padrão já calculadas pelo motor_padroes.py - não depende de nenhuma
@@ -5483,6 +5624,7 @@ def buscar_estatisticas_jogadores(cur, time_id=None, busca=None):
             "blocos_linha": blocos_linha,
             "cartoes_suspensao": cartoes_suspensao.get(jogador_id, 0),
             "correlacao_jogador": correlacoes_jogador.get(jogador_id),
+            "ultimos_jogos": buscar_ultimos_jogos_jogador(cur, jogador_id) if incluir_ultimos_jogos else None,
         })
 
     lista.sort(key=lambda p: p["nome"])
@@ -5626,7 +5768,7 @@ def clube(time_id):
             return "Clube não encontrado.", 404
         nome_clube, api_football_team_id = row
 
-        lista = buscar_estatisticas_jogadores(cur, time_id)
+        lista = buscar_estatisticas_jogadores(cur, time_id, incluir_ultimos_jogos=True)
         ultima_escalacao = buscar_ultima_escalacao_titular(cur, time_id)
         proximo_jogo = buscar_proximo_jogo(cur, time_id)
         escudo_url = buscar_escudo_url(cur, nome_clube)
