@@ -32,7 +32,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 import psycopg2
-from flask import Flask, render_template_string, request, redirect, Response, session, url_for, flash, get_flashed_messages
+from flask import Flask, render_template_string, request, redirect, Response, session, url_for, flash, get_flashed_messages, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -1678,6 +1678,62 @@ PAGINA_ROI = """
             padding: 18px; margin-bottom: 28px;
         }
         .grafico-titulo { font-size: 0.85rem; color: #8b949e; margin-bottom: 10px; }
+
+        /* NOVO (Criador de Odd) */
+        .criador-odd-box {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 16px 20px; margin-bottom: 28px; display: flex; align-items: center;
+            gap: 14px; cursor: pointer; transition: border-color 0.15s;
+        }
+        .criador-odd-box:hover { border-color: #58a6ff; }
+        .criador-odd-icone { font-size: 1.6rem; }
+        .criador-odd-titulo { font-weight: 700; font-size: 0.95rem; }
+        .criador-odd-sub { color: #8b949e; font-size: 0.8rem; margin-top: 2px; }
+        .modal-overlay {
+            display: none; position: fixed; inset: 0; background: #000000aa;
+            align-items: center; justify-content: center; z-index: 1000; padding: 20px;
+        }
+        .modal-overlay.aberto { display: flex; }
+        .modal-caixa {
+            background: #0d1117; border: 1px solid #30363d; border-radius: 14px;
+            padding: 24px; max-width: 560px; width: 100%; max-height: 88vh; overflow-y: auto;
+        }
+        .modal-caixa h2 { margin: 0 0 4px; font-size: 1.15rem; }
+        .modal-caixa .modal-sub { color: #8b949e; font-size: 0.8rem; margin: 0 0 18px; }
+        .modal-campo { margin-bottom: 14px; }
+        .modal-campo label {
+            display: block; font-size: 0.78rem; color: #8b949e; margin-bottom: 5px;
+        }
+        .modal-campo select, .modal-campo input {
+            width: 100%; background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+            color: #e6edf3; padding: 9px 12px; font-size: 0.88rem;
+        }
+        .modal-linha-dupla { display: flex; gap: 10px; }
+        .modal-linha-dupla > div { flex: 1; }
+        .btn-adicionar-perna {
+            width: 100%; background: #1f6feb22; border: 1px solid #1f6feb66; color: #58a6ff;
+            border-radius: 8px; padding: 10px; font-size: 0.85rem; font-weight: 600;
+            cursor: pointer; margin-top: 4px;
+        }
+        .btn-adicionar-perna:hover { background: #1f6feb33; }
+        .pernas-adicionadas { margin: 16px 0; }
+        .perna-adicionada-item {
+            background: #161b22; border: 1px solid #21262d; border-radius: 8px;
+            padding: 8px 12px; font-size: 0.8rem; margin-bottom: 6px;
+            display: flex; justify-content: space-between; align-items: center; gap: 8px;
+        }
+        .perna-adicionada-remover {
+            color: #f85149; cursor: pointer; font-size: 0.75rem; flex-shrink: 0;
+        }
+        .modal-botoes-finais { display: flex; gap: 10px; margin-top: 18px; }
+        .modal-botoes-finais button {
+            flex: 1; padding: 11px; border-radius: 8px; font-size: 0.85rem; font-weight: 600;
+            cursor: pointer; border: none;
+        }
+        .btn-fechar-modal { background: #21262d; color: #e6edf3; }
+        .btn-salvar-odd { background: #238636; color: white; }
+        .btn-salvar-odd:disabled { background: #21262d; color: #8b949e; cursor: not-allowed; }
+
         .cartao {
             background: #161b22; border: 1px solid #30363d; border-radius: 12px;
             padding: 16px 20px; margin-bottom: 12px;
@@ -1771,11 +1827,217 @@ PAGINA_ROI = """
         function alternarExtrato() {
             document.getElementById('extrato-lista').classList.toggle('aberta');
         }
+
+        // NOVO (Criador de Odd) --------------------------------------------
+        const JOGOS_CRIADOR_ODD = {{ jogos_criador_odd|tojson }};
+        const MERCADOS_CRIADOR_ODD = {
+            "cartao": {"label": "Cartão de Jogador", "jogador": true, "modo": "binario"},
+            "impedimento": {"label": "Impedimento (Jogador)", "jogador": true, "modo": "binario"},
+            "falta_cometida": {"label": "Faltas Cometidas (Jogador)", "jogador": true, "modo": "linha"},
+            "falta_sofrida": {"label": "Faltas Sofridas (Jogador)", "jogador": true, "modo": "linha"},
+            "desarme": {"label": "Desarmes (Jogador)", "jogador": true, "modo": "linha"},
+            "chute_no_gol": {"label": "Chutes no Gol (Jogador)", "jogador": true, "modo": "linha"},
+            "chute_total": {"label": "Chutes Total (Jogador)", "jogador": true, "modo": "linha"},
+            "escanteio_time": {"label": "Escanteios do Nosso Time", "jogador": false, "modo": "linha"},
+            "escanteio_total": {"label": "Escanteios Total do Jogo", "jogador": false, "modo": "linha"},
+            "cartao_total": {"label": "Cartões Total do Jogo", "jogador": false, "modo": "linha"},
+            "resultado_final": {"label": "Resultado Final", "jogador": false, "modo": "resultado"},
+        };
+        let pernasCriadorOdd = [];
+
+        function abrirCriadorOdd() {
+            const selectJogo = document.getElementById('criador-odd-jogo');
+            selectJogo.innerHTML = JOGOS_CRIADOR_ODD.map(j =>
+                `<option value="${j.id}">${j.data_jogo} · ${j.nosso_time} x ${j.adversario}</option>`
+            ).join('');
+
+            const selectMercado = document.getElementById('criador-odd-mercado');
+            selectMercado.innerHTML = Object.entries(MERCADOS_CRIADOR_ODD).map(([chave, m]) =>
+                `<option value="${chave}">${m.label}</option>`
+            ).join('');
+
+            pernasCriadorOdd = [];
+            renderizarPernasCriadorOdd();
+            document.getElementById('criador-odd-linha').value = '';
+            document.getElementById('criador-odd-valor').value = '';
+            document.getElementById('criador-odd-odd').value = '';
+            atualizarCamposCriadorOdd();
+            atualizarJogadoresCriadorOdd();
+            document.getElementById('modal-criador-odd').classList.add('aberto');
+        }
+
+        function fecharCriadorOdd() {
+            document.getElementById('modal-criador-odd').classList.remove('aberto');
+        }
+
+        function atualizarCamposCriadorOdd() {
+            const mercado = MERCADOS_CRIADOR_ODD[document.getElementById('criador-odd-mercado').value];
+            document.getElementById('campo-criador-odd-jogador').style.display = mercado.jogador ? 'block' : 'none';
+            document.getElementById('campo-criador-odd-linha').style.display = mercado.modo === 'linha' ? 'block' : 'none';
+
+            const selectDirecao = document.getElementById('criador-odd-direcao');
+            if (mercado.modo === 'binario') {
+                selectDirecao.innerHTML = '<option value="sim">Sim</option><option value="não">Não</option>';
+            } else if (mercado.modo === 'resultado') {
+                selectDirecao.innerHTML = '<option value="vitoria">Vitória</option><option value="empate">Empate</option><option value="derrota">Derrota</option>';
+            } else {
+                selectDirecao.innerHTML = '<option value="mais">Mais de</option><option value="menos">Menos de</option>';
+            }
+
+            if (mercado.jogador) atualizarJogadoresCriadorOdd();
+        }
+
+        function atualizarJogadoresCriadorOdd() {
+            const mercado = MERCADOS_CRIADOR_ODD[document.getElementById('criador-odd-mercado').value];
+            if (!mercado.jogador) return;
+            const jogoId = document.getElementById('criador-odd-jogo').value;
+            const selectJogador = document.getElementById('criador-odd-jogador');
+            selectJogador.innerHTML = '<option>Carregando...</option>';
+            fetch(`/api/jogadores-jogo/${jogoId}`)
+                .then(r => r.json())
+                .then(jogadores => {
+                    selectJogador.innerHTML = jogadores.map(j => `<option value="${j.id}">${j.nome}</option>`).join('')
+                        || '<option value="">Nenhum jogador com dado nesse jogo ainda</option>';
+                });
+        }
+
+        function adicionarPernaCriadorOdd() {
+            const jogoId = document.getElementById('criador-odd-jogo').value;
+            const jogoInfo = JOGOS_CRIADOR_ODD.find(j => String(j.id) === String(jogoId));
+            const tipoPadrao = document.getElementById('criador-odd-mercado').value;
+            const mercado = MERCADOS_CRIADOR_ODD[tipoPadrao];
+            const direcao = document.getElementById('criador-odd-direcao').value;
+            const linha = document.getElementById('criador-odd-linha').value;
+            const selectJogador = document.getElementById('criador-odd-jogador');
+            const jogadorId = mercado.jogador ? parseInt(selectJogador.value) : null;
+            const jogadorNome = mercado.jogador ? selectJogador.options[selectJogador.selectedIndex].text : null;
+
+            if (mercado.modo === 'linha' && !linha) {
+                alert('Preenche a linha (ex: 3.5).');
+                return;
+            }
+            if (mercado.jogador && !jogadorId) {
+                alert('Escolhe um jogador.');
+                return;
+            }
+
+            let descricao;
+            if (mercado.modo === 'binario') {
+                descricao = `${mercado.label} - ${direcao === 'sim' ? 'Sim' : 'Não'} - ${jogadorNome}`;
+            } else if (mercado.modo === 'resultado') {
+                const rotulos = {"vitoria": `Vitória do ${jogoInfo.nosso_time}`, "empate": "Empate", "derrota": `Derrota do ${jogoInfo.nosso_time}`};
+                descricao = `Resultado Final - ${rotulos[direcao]}`;
+            } else {
+                const rotuloDirecao = direcao === 'mais' ? 'Mais de' : 'Menos de';
+                descricao = `${mercado.label} - ${rotuloDirecao} ${linha}` + (jogadorNome ? ` - ${jogadorNome}` : '');
+            }
+
+            pernasCriadorOdd.push({
+                jogo_id: parseInt(jogoId),
+                jogador_id: jogadorId,
+                tipo_padrao: tipoPadrao,
+                linha: mercado.modo === 'linha' ? parseFloat(linha) : null,
+                direcao: direcao,
+                descricao: descricao,
+                fonte: "manual",
+            });
+            renderizarPernasCriadorOdd();
+        }
+
+        function removerPernaCriadorOdd(indice) {
+            pernasCriadorOdd.splice(indice, 1);
+            renderizarPernasCriadorOdd();
+        }
+
+        function renderizarPernasCriadorOdd() {
+            const container = document.getElementById('criador-odd-pernas-lista');
+            container.innerHTML = pernasCriadorOdd.map((p, i) =>
+                `<div class="perna-adicionada-item">
+                    <span>${p.descricao}</span>
+                    <span class="perna-adicionada-remover" onclick="removerPernaCriadorOdd(${i})">✕ remover</span>
+                </div>`
+            ).join('');
+            document.getElementById('btn-salvar-criador-odd').disabled = pernasCriadorOdd.length === 0;
+        }
+
+        function salvarCriadorOdd() {
+            if (pernasCriadorOdd.length === 0) return;
+            const valor = document.getElementById('criador-odd-valor').value;
+            const odd = document.getElementById('criador-odd-odd').value;
+            if (!valor || !odd) {
+                alert('Preenche o valor apostado e a odd.');
+                return;
+            }
+            document.getElementById('campo-criador-odd-descricao').value = pernasCriadorOdd.map(p => p.descricao).join(' + ');
+            document.getElementById('campo-criador-odd-pernas').value = JSON.stringify(pernasCriadorOdd);
+            document.getElementById('campo-criador-odd-valor').value = valor;
+            document.getElementById('campo-criador-odd-odd').value = odd;
+            document.getElementById('form-criador-odd').submit();
+        }
     </script>
 </head>
 <body>
     <h1>💰 Minhas Apostas</h1>
     <p class="subtitulo">Só o que você salvou com valor apostado - não inclui recomendações não salvas</p>
+
+    <div class="modal-overlay" id="modal-criador-odd">
+        <div class="modal-caixa">
+            <h2>💡 Criador de Odd</h2>
+            <p class="modal-sub">Apostou fora do app? Monta aqui, perna por perna, e salva - entra no seu ROI normalmente.</p>
+
+            <div class="modal-campo">
+                <label>Jogo</label>
+                <select id="criador-odd-jogo" onchange="atualizarJogadoresCriadorOdd()"></select>
+            </div>
+            <div class="modal-campo">
+                <label>Mercado</label>
+                <select id="criador-odd-mercado" onchange="atualizarCamposCriadorOdd()"></select>
+            </div>
+            <div class="modal-campo" id="campo-criador-odd-jogador">
+                <label>Jogador</label>
+                <select id="criador-odd-jogador"></select>
+            </div>
+            <div class="modal-linha-dupla">
+                <div class="modal-campo" id="campo-criador-odd-linha">
+                    <label>Linha</label>
+                    <input type="number" step="0.5" id="criador-odd-linha" placeholder="ex: 3.5">
+                </div>
+                <div class="modal-campo">
+                    <label>Direção</label>
+                    <select id="criador-odd-direcao"></select>
+                </div>
+            </div>
+            <button type="button" class="btn-adicionar-perna" onclick="adicionarPernaCriadorOdd()">+ Adicionar perna</button>
+
+            <div class="pernas-adicionadas" id="criador-odd-pernas-lista"></div>
+
+            <div class="modal-linha-dupla">
+                <div class="modal-campo">
+                    <label>Valor apostado (R$)</label>
+                    <input type="number" step="0.01" min="0.01" id="criador-odd-valor">
+                </div>
+                <div class="modal-campo">
+                    <label>Odd final (a combinada, se for múltipla)</label>
+                    <input type="number" step="0.01" min="1.01" id="criador-odd-odd">
+                </div>
+            </div>
+
+            <form method="POST" action="/salvar-aposta" id="form-criador-odd">
+                <input type="hidden" name="descricao" id="campo-criador-odd-descricao">
+                <input type="hidden" name="casa_aposta" value="Anotado manualmente">
+                <input type="hidden" name="pernas" id="campo-criador-odd-pernas">
+                <input type="hidden" name="valor_apostado" id="campo-criador-odd-valor">
+                <input type="hidden" name="odd_combinada" id="campo-criador-odd-odd">
+                <input type="hidden" name="voltar" value="/minhas-apostas">
+            </form>
+
+            <div class="modal-botoes-finais">
+                <button type="button" class="btn-fechar-modal" onclick="fecharCriadorOdd()">Cancelar</button>
+                <button type="button" class="btn-salvar-odd" id="btn-salvar-criador-odd" onclick="salvarCriadorOdd()" disabled>💾 Salvar aposta</button>
+            </div>
+        </div>
+    </div>
+
     {{ nav_html|safe }}
 
     {% with mensagens = get_flashed_messages(with_categories=true) %}
@@ -1807,6 +2069,14 @@ PAGINA_ROI = """
             <input type="number" step="0.01" min="0.01" name="valor" placeholder="Valor a resgatar (R$)" required>
             <button type="submit" class="btn-banca btn-confirmar-resgate">Confirmar resgate</button>
         </form>
+    </div>
+
+    <div class="criador-odd-box" onclick="abrirCriadorOdd()">
+        <div class="criador-odd-icone">💡</div>
+        <div>
+            <div class="criador-odd-titulo">Criador de Odd</div>
+            <div class="criador-odd-sub">Apostou fora do app (na Superbet, por exemplo)? Anota aqui pra entrar no seu ROI.</div>
+        </div>
     </div>
 
     {% if movimentos_banca %}
@@ -2102,6 +2372,55 @@ def buscar_movimentos_banca(cur, usuario_id, limite=20):
     return [dict(zip(colunas, row)) for row in cur.fetchall()]
 
 
+def buscar_jogos_para_criador_odd(cur):
+    """NOVO (Criador de Odd): jogos dos times rastreados, numa janela
+    razoável em torno de "agora" (45 dias pra trás, 30 pra frente) - usado
+    no seletor de jogo do popup. Não lista TODOS os jogos já coletados
+    (seriam milhares, com 10 times x 5 temporadas) - só uma janela prática
+    que cobre tanto uma aposta recente (já feita, só precisa ser anotada)
+    quanto um jogo que ainda vai acontecer."""
+    cur.execute(
+        """
+        SELECT j.id, t.nome, j.adversario, j.data_jogo
+        FROM jogos j
+        JOIN times t ON t.id = j.nosso_time_id
+        WHERE j.data_jogo BETWEEN CURRENT_DATE - INTERVAL '45 days' AND CURRENT_DATE + INTERVAL '30 days'
+        ORDER BY j.data_jogo DESC
+        """
+    )
+    return [
+        {"id": row[0], "nosso_time": row[1], "adversario": row[2], "data_jogo": str(row[3])}
+        for row in cur.fetchall()
+    ]
+
+
+@app.route("/api/jogadores-jogo/<int:jogo_id>")
+def api_jogadores_jogo(jogo_id):
+    """NOVO (Criador de Odd): lista os jogadores com dado registrado nesse
+    jogo específico (os DOIS lados - não só o nosso time, já que dá pra
+    apostar em jogador do adversário também) - usado pelo popup só quando
+    o mercado escolhido é de jogador, buscado sob demanda (AJAX) porque
+    cada jogo tem um elenco diferente."""
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT DISTINCT jeg.jogador_id, jog.nome
+            FROM jogador_estatisticas_jogo jeg
+            JOIN jogadores jog ON jog.id = jeg.jogador_id
+            WHERE jeg.jogo_id = %s
+            ORDER BY jog.nome
+            """,
+            (jogo_id,),
+        )
+        jogadores = [{"id": row[0], "nome": row[1]} for row in cur.fetchall()]
+        cur.close()
+    finally:
+        conn.close()
+    return jsonify(jogadores)
+
+
 @app.route("/minhas-apostas")
 def minhas_apostas():
     conn = psycopg2.connect(DATABASE_URL)
@@ -2113,6 +2432,7 @@ def minhas_apostas():
         apostas = buscar_apostas_salvas(cur, session["usuario_id"])
         banca_atual = buscar_banca(cur, session["usuario_id"])
         movimentos_banca = buscar_movimentos_banca(cur, session["usuario_id"])
+        jogos_criador_odd = buscar_jogos_para_criador_odd(cur)
         cur.close()
     finally:
         conn.close()
@@ -2154,6 +2474,7 @@ def minhas_apostas():
         PAGINA_ROI, resumo=resumo, apostas=apostas,
         pontos_grafico=pontos_grafico, svg_grafico=svg_grafico,
         banca_atual=round(banca_atual, 2), movimentos_banca=movimentos_banca,
+        jogos_criador_odd=jogos_criador_odd,
         nav_html=barra_navegacao("roi", round(banca_atual, 2)),
     )
 
