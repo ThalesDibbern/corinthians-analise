@@ -81,6 +81,25 @@ def avaliar_binario(ocorreu, direcao):
     return "pendente"
 
 
+def _jogo_totalmente_processado(cur, jogo_id):
+    """NOVO (correção de bug): um jogo é considerado "totalmente
+    processado" quando as estatísticas de TIME dos dois lados já foram
+    salvas - depois disso, não vai chegar mais dado novo pra esse jogo
+    (popular_banco.py já processou ele por completo, pra sempre). Usado
+    pra distinguir "ainda não temos o dado desse jogador" (esperar mais)
+    de "esse jogador simplesmente não jogou esse jogo" (pode avaliar como
+    zero, sem ficar pendente pra sempre) - antes, recomendação de jogador
+    que ficou no banco sem entrar (chute no gol, falta, desarme,
+    impedimento, cartão) nunca tinha jeito de ser avaliada, porque nunca
+    ia aparecer uma linha em jogador_estatisticas_jogo pra ele."""
+    cur.execute(
+        "SELECT COUNT(DISTINCT lado) FROM estatisticas_jogo WHERE jogo_id = %s",
+        (jogo_id,),
+    )
+    row = cur.fetchone()
+    return row is not None and row[0] == 2
+
+
 def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, direcao):
     """Compara a recomendação com o resultado real do jogo, se disponível.
     Retorna 'acertou', 'errou' ou 'pendente' (se ainda não temos o dado real)."""
@@ -89,16 +108,15 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, d
     if tipo_padrao == "cartao":
         cur.execute("SELECT 1 FROM cartoes WHERE jogo_id = %s AND jogador_id = %s", (jogo_id, jogador_id))
         recebeu_cartao = cur.fetchone() is not None
-
-        cur.execute(
-            "SELECT 1 FROM jogador_estatisticas_jogo WHERE jogo_id = %s AND jogador_id = %s",
-            (jogo_id, jogador_id),
-        )
-        jogador_tem_dado = cur.fetchone() is not None
-
-        if not recebeu_cartao and not jogador_tem_dado:
-            return "pendente"  # ainda não temos as estatísticas desse jogo
-        return avaliar_binario(recebeu_cartao, d)
+        if recebeu_cartao:
+            return avaliar_binario(True, d)
+        # NOVO (correção): não recebeu cartão registrado - só resolve como
+        # "de fato não recebeu" (podendo ser porque nem jogou) se o jogo já
+        # estiver totalmente processado - senão pode ser só falta de dado
+        # chegando ainda, fica pendente por segurança.
+        if _jogo_totalmente_processado(cur, jogo_id):
+            return avaliar_binario(False, d)
+        return "pendente"
 
     if tipo_padrao in ("falta_cometida", "desarme", "chute_no_gol", "chute_total"):
         coluna = {
@@ -112,9 +130,17 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, d
             (jogo_id, jogador_id),
         )
         row = cur.fetchone()
-        if row is None or row[0] is None:
-            return "pendente"
-        return avaliar_linha(float(row[0]), linha, d)
+        if row is not None and row[0] is not None:
+            return avaliar_linha(float(row[0]), linha, d)
+        # NOVO (correção do bug real): jogador sem linha nenhuma em
+        # jogador_estatisticas_jogo - antes ficava "pendente" pra sempre
+        # nesse caso, mesmo quando o motivo era só "ficou no banco e não
+        # entrou" (0 de tudo, não falta de dado). Só decide como zero se o
+        # jogo já está totalmente processado - senão continua pendente
+        # esperando o dado chegar de verdade.
+        if _jogo_totalmente_processado(cur, jogo_id):
+            return avaliar_linha(0.0, linha, d)
+        return "pendente"
 
     if tipo_padrao == "impedimento":
         cur.execute(
@@ -122,9 +148,12 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, d
             (jogo_id, jogador_id),
         )
         row = cur.fetchone()
-        if row is None or row[0] is None:
-            return "pendente"
-        return avaliar_binario(row[0] > 0, d)
+        if row is not None and row[0] is not None:
+            return avaliar_binario(row[0] > 0, d)
+        # NOVO (mesma correção)
+        if _jogo_totalmente_processado(cur, jogo_id):
+            return avaliar_binario(False, d)
+        return "pendente"
 
     if tipo_padrao == "escanteio_time":
         cur.execute("SELECT mandante FROM jogos WHERE id = %s", (jogo_id,))
