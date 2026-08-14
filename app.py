@@ -2957,7 +2957,28 @@ PAGINA_CLUBE = """
             background: #161b22; border: 1px solid #30363d; border-radius: 12px;
             padding: 16px 20px; margin-bottom: 12px;
         }
-        .nome-jogador { font-weight: 700; font-size: 1rem; margin-bottom: 10px; }
+        /* NOVO: card de jogador com separação bem mais forte que o .cartao
+           genérico - cada jogador tem bastante conteúdo empilhado
+           (cartão, faltas, chutes, desarmes...), então a borda sutil de
+           1px do .cartao normal se perdia de vista ao rolar a página.
+           Mais espaço entre um jogador e outro (28px) + borda mais clara
+           + fundo levemente diferente do resto da página, pra ficar
+           óbvio onde um jogador termina e o outro começa. */
+        .jogador-card {
+            background: #161b22; border: 1px solid #3d444d; border-radius: 14px;
+            padding: 20px 22px; margin-bottom: 28px;
+            box-shadow: 0 0 0 1px #ffffff08, 0 4px 12px #00000033;
+        }
+        .nome-jogador {
+            display: inline-block; font-weight: 700; font-size: 1rem;
+            background: #1f6feb1f; color: #79c0ff; padding: 5px 14px;
+            border-radius: 999px; margin-bottom: 14px;
+        }
+        .busca {
+            width: 100%; padding: 10px 14px; margin-bottom: 14px;
+            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+            border-radius: 8px; font-size: 0.9rem;
+        }
         .bloco { margin-bottom: 10px; }
         .bloco-titulo { color: #8b949e; font-size: 0.78rem; text-transform: uppercase;
             letter-spacing: 0.03em; margin-bottom: 6px; }
