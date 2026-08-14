@@ -22,6 +22,18 @@ from itertools import combinations
 
 MERCADOS_JOGO_INTEIRO = {"escanteio_total", "cartao_total"}
 
+# NOVO (correção de bug real): mercados que pertencem a um JOGADOR
+# específico - cartão, falta, chute, chute no gol, desarme, impedimento.
+# Precisam do MESMO tipo de deduplicação que MERCADOS_JOGO_INTEIRO já
+# tinha, mas por um motivo ligeiramente diferente: não é que a aposta seja
+# "do jogo inteiro" - é que o JOGADOR é sempre a mesma pessoa,
+# independente de qual dos dois times está sendo tratado como "nosso"
+# naquela linha específica. Sem isso, quando os DOIS times de um jogo são
+# rastreados, a estatística do mesmo jogador aparecia 2x na lista (uma por
+# perspectiva) - e pior, as duas cópias podiam entrar JUNTAS na mesma
+# múltipla, contando a mesma perna 2x na probabilidade combinada.
+MERCADOS_JOGADOR = {"cartao", "falta_cometida", "chute_no_gol", "chute_total", "desarme", "impedimento"}
+
 # largura mínima de uma faixa, em "unidades de linha" (como as linhas são
 # sempre .5, isso equivale ao número mínimo de valores inteiros que a
 # faixa precisa cobrir pra ser aceita). Ex: "mais de 9.5" + "menos de
@@ -43,33 +55,59 @@ LIMITE_POOL_PARA_4_PERNAS = 90
 MAX_MULTIPLAS_RESULTADO = 300
 
 
-def deduplicar_mercados_jogo_inteiro(recomendacoes, colunas_a_manter):
-    """Mercados "do jogo inteiro" (escanteio total, cartão total) descrevem
-    a partida real inteira, não um lado específico - quando os DOIS times
-    de um jogo são rastreados, o mesmo jogo real gera uma linha separada
-    por time (visões diferentes, por desenho), mas pra ESSES mercados
-    específicos é literalmente A MESMA aposta real (mesma odd, mesmo
-    evento) - só a estimativa de probabilidade diverge, vinda do histórico
-    de times diferentes. Mantém só uma cópia por (fixture_id_api,
-    descricao, casa) - a de maior probabilidade histórica, quando há
-    divergência entre as duas visões. `colunas_a_manter` é quantas
-    colunas manter no resultado final (a última coluna da query sempre
-    precisa ser fixture_id_api, usado só aqui pra deduplicar e descartado
-    depois)."""
+def deduplicar_recomendacoes(recomendacoes, colunas_a_manter):
+    """Remove as duplicatas causadas pela arquitetura multi-time: o mesmo
+    jogo real entre DOIS times rastreados gera 2 linhas em `jogos` (uma
+    por perspectiva), e isso faz alguns mercados aparecerem 2x nas
+    recomendações - mesmo sendo literalmente a MESMA aposta real. Dois
+    grupos afetados, cada um com sua identidade de "mesma aposta":
+
+    - MERCADOS_JOGO_INTEIRO (escanteio total, cartão total): mesma aposta
+      em qualquer perspectiva - identidade = (fixture_id_api, descricao,
+      casa). A estimativa de probabilidade pode divergir entre as duas
+      visões (vem do histórico de times diferentes) - fica com a maior.
+
+    - MERCADOS_JOGADOR (cartão, falta, chute, chute no gol, desarme,
+      impedimento): o jogador é a mesma pessoa em qualquer perspectiva -
+      identidade = (fixture_id_api, tipo_padrao, jogador_id, linha,
+      direção, casa). A probabilidade AQUI é sempre idêntica entre as
+      duas cópias (vem só de padroes_jogador_*, que não depende de qual
+      time é "nosso" na linha) - mas a deduplicação continua necessária
+      pra não contar a mesma perna 2x numa múltipla.
+
+    Mercados de TIME específico (escanteio_time, resultado_final) NÃO
+    entram nessa deduplicação de propósito - são legitimamente diferentes
+    por perspectiva (escanteio do Fluminense ≠ escanteio do Palmeiras,
+    mesmo jogo real).
+
+    `colunas_a_manter` é quantas colunas manter no resultado final (a
+    última coluna da query sempre precisa ser fixture_id_api, usado só
+    aqui pra deduplicar e descartado depois)."""
     melhores = {}
     resultado = []
     for rec in recomendacoes:
         tipo_padrao = rec[8]
-        if tipo_padrao not in MERCADOS_JOGO_INTEIRO:
+        fixture_id_api, descricao, casa, prob = rec[-1], rec[2], rec[3], rec[5]
+        jogador_id, linha, direcao = rec[1], rec[9], rec[10]
+
+        if tipo_padrao in MERCADOS_JOGO_INTEIRO:
+            chave = ("jogo_inteiro", fixture_id_api, descricao, casa)
+        elif tipo_padrao in MERCADOS_JOGADOR:
+            chave = ("jogador", fixture_id_api, tipo_padrao, jogador_id, linha, direcao, casa)
+        else:
             resultado.append(rec[:colunas_a_manter])
             continue
-        fixture_id_api, descricao, casa, prob = rec[-1], rec[2], rec[3], rec[5]
-        chave = (fixture_id_api, descricao, casa)
+
         if chave not in melhores or prob > melhores[chave][5]:
             melhores[chave] = rec
 
     resultado.extend(rec[:colunas_a_manter] for rec in melhores.values())
     return resultado
+
+
+# NOVO: nome antigo mantido como apelido, pra não quebrar nada que ainda
+# importe pelo nome anterior - só chama a versão nova (escopo ampliado).
+deduplicar_mercados_jogo_inteiro = deduplicar_recomendacoes
 
 
 def buscar_recomendacoes(cur):
@@ -86,7 +124,7 @@ def buscar_recomendacoes(cur):
         JOIN times t ON t.id = j.nosso_time_id
         """
     )
-    return deduplicar_mercados_jogo_inteiro(cur.fetchall(), colunas_a_manter=14)
+    return deduplicar_recomendacoes(cur.fetchall(), colunas_a_manter=14)
 
 
 def identidade_jogo(p):
