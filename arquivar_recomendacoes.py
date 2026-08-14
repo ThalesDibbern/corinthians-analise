@@ -58,31 +58,73 @@ from avaliacao import avaliar_resultado
 # Odd / apostas manuais) - antes existiam duas cópias divergindo, agora
 # essa é a ÚNICA fonte de verdade.
 
+from combinacoes import MERCADOS_JOGO_INTEIRO, MERCADOS_JOGADOR
+# NOVO (correção de bug real, encontrado via consulta direta no banco): a
+# mesma duplicata multi-time já corrigida em combinacoes.py (jogo entre 2
+# times rastreados gera 2 linhas em `jogos`, duplicando odds/recomendações
+# de mercado de jogador e de jogo inteiro) também afetava o ARQUIVAMENTO -
+# `arquivar_recomendacoes.py` lê `recomendacoes` direto, sem passar pela
+# deduplicação que já existia só em combinacoes.py/buscar_recomendacoes.
+# Isso significava que a MESMA recomendação real virava DUAS entradas em
+# historico_recomendacoes, inflando artificialmente as contagens de
+# acerto/erro do /historico. Reaproveita a mesma classificação de
+# mercados (MERCADOS_JOGO_INTEIRO/MERCADOS_JOGADOR), pra não duplicar
+# essa lógica de novo.
+
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 def buscar_recomendacoes_para_arquivar(cur):
     """NOVO: arquiva TODO jogo já passado, sem exceção de "últimas rodadas
-    mantidas detalhadas" (ver nota no topo do arquivo)."""
+    mantidas detalhadas" (ver nota no topo do arquivo).
+
+    NOVO (correção de duplicata): agrupa por identidade real da aposta
+    (ver MERCADOS_JOGO_INTEIRO/MERCADOS_JOGADOR) - quando duas linhas em
+    `recomendacoes` são, na prática, a MESMA aposta real (vindas das duas
+    perspectivas de um jogo entre times rastreados), só a de maior
+    probabilidade histórica vira uma entrada em historico_recomendacoes;
+    a(s) outra(s) ainda são apagadas de `recomendacoes` (não ficam presas
+    lá pra sempre), só não geram um registro duplicado no histórico."""
     cur.execute(
         """
         SELECT r.id, r.jogo_id, r.jogador_id, r.tipo_padrao, r.descricao, r.casa_aposta,
                r.odd_oferecida, r.probabilidade_historica, r.valor_esperado, r.linha,
-               r.direcao, j.data_jogo
+               r.direcao, j.data_jogo, j.fixture_id_api
         FROM recomendacoes r
         JOIN jogos j ON j.id = r.jogo_id
         WHERE (j.datahora_jogo IS NOT NULL AND j.datahora_jogo < NOW())
            OR (j.datahora_jogo IS NULL AND j.data_jogo < CURRENT_DATE)
         """
     )
-    return cur.fetchall()
+    linhas = cur.fetchall()
+
+    grupos = {}
+    for rec in linhas:
+        (rec_id, jogo_id, jogador_id, tipo_padrao, descricao, casa,
+         odd, prob, ve, linha, direcao, data_jogo, fixture_id_api) = rec
+
+        if tipo_padrao in MERCADOS_JOGO_INTEIRO:
+            chave = ("jogo_inteiro", fixture_id_api, descricao, casa)
+        elif tipo_padrao in MERCADOS_JOGADOR:
+            chave = ("jogador", fixture_id_api, tipo_padrao, jogador_id, linha, direcao, casa)
+        else:
+            chave = ("unico", rec_id)  # mercado sem risco de duplicata - grupo de 1, comportamento inalterado
+
+        grupos.setdefault(chave, []).append(rec)
+
+    resultado = []
+    for recs in grupos.values():
+        melhor = max(recs, key=lambda r: r[7])  # maior probabilidade histórica, entre as cópias
+        ids_duplicados = [r[0] for r in recs if r[0] != melhor[0]]
+        resultado.append(melhor[:12] + (ids_duplicados,))
+    return resultado
 
 
 def arquivar(cur, recomendacoes):
     contagem = {"acertou": 0, "errou": 0, "pendente": 0}
 
     for (rec_id, jogo_id, jogador_id, tipo_padrao, descricao, casa,
-         odd, prob, ve, linha, direcao, data_jogo) in recomendacoes:
+         odd, prob, ve, linha, direcao, data_jogo, ids_duplicados) in recomendacoes:
 
         resultado = avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, direcao)
         contagem[resultado] += 1
@@ -97,6 +139,12 @@ def arquivar(cur, recomendacoes):
              linha, direcao, resultado, data_jogo),
         )
         cur.execute("DELETE FROM recomendacoes WHERE id = %s", (rec_id,))
+        if ids_duplicados:
+            # NOVO: apaga as cópias duplicadas (vindas da outra perspectiva
+            # do mesmo jogo real) sem gerar outro registro no histórico -
+            # senão ficariam presas em `recomendacoes` pra sempre, mesmo
+            # com o jogo já encerrado.
+            cur.execute("DELETE FROM recomendacoes WHERE id = ANY(%s)", (ids_duplicados,))
 
     return contagem
 
