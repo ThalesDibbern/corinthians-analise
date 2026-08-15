@@ -83,8 +83,17 @@ def buscar_times_rastreados(cur):
 # "tempo completo" captura especificamente o mercado "Resultado Tempo Completo"
 # (confirmado manualmente na OddsPapi) - sem pegar por engano os mercados de
 # resultado do 1º/2º tempo, que têm nomes parecidos mas não têm "completo".
+# CORRIGIDO: "cart" (não "cartão"/"cartao" por extenso) - o plural em
+# português de "cartão" é "cartões" (troca irregular, não é só "+s"), então
+# "cartão"/"cartao" nunca batia com nomes de mercado que vêm no plural
+# ("Cartões - Mais/Menos Equipe 1", "Cartões - Handicap", "Cartões -
+# Ímpar/Par"...) - esses mercados eram descartados silenciosamente, mesmo
+# tendo preço real na Superbet. Confirmado comparando com o catálogo real
+# da OddsPapi: "cart" não aparece em nenhum nome de mercado que não seja
+# sobre cartão. Mesma lição já aplicada em identificar_tipo_padrao()
+# (motor_recomendacoes.py) pro "cartao_total".
 PALAVRAS_MERCADO_INTERESSE = [
-    "card", "cartão", "cartao", "corner", "escanteio",
+    "card", "cart", "corner", "escanteio",
     "falta", "desarme", "chute", "impediment", "tempo completo",
 ]
 
