@@ -177,7 +177,14 @@ def identificar_tipo_padrao(mercado):
     # exatamente como aconteceu com escanteio/escanteios.
     if "cart" in nome and "total do jogo" in nome:
         return "cartao_total"
-    if "cartão" in nome or "cartao" in nome or "card" in nome:
+    # CORRIGIDO: era "cartão"/"cartao" (singular) - "cartões" (plural) tem
+    # troca irregular (não é só "+s"), então nunca batia com mercados que
+    # vêm no plural ("Cartões - Mais/Menos Equipe 1/2", "Cartões -
+    # Handicap", "Cartões - Ímpar/Par"...). Trocado por "cart" (substring
+    # que cobre singular e plural), mesma lógica já usada 2 linhas acima
+    # pro "cartao_total". Confirmado no catálogo real: "cart" não aparece
+    # em nenhum nome de mercado que não seja sobre cartão.
+    if "cart" in nome or "card" in nome:
         return "cartao"
     if "falta" in nome:
         return "falta_cometida"
@@ -186,7 +193,14 @@ def identificar_tipo_padrao(mercado):
     # NOVO: "chute no gol" precisa ser checado ANTES do genérico "chute" -
     # senão "Chutes do Jogador" (chute total, sem "no gol" no nome) cairia
     # por engano no tipo errado, já que "chute" sozinho bate nos dois.
-    if ("chute" in nome and "no gol" in nome) or "shotsongoal" in nome or "shots on goal" in nome:
+    # CORRIGIDO: o mercado principal (tempo completo) da OddsPapi vem
+    # escrito "Mais/Menos chutes A gol do jogador" - com "a", não "no". Só
+    # as variações por período (1º/2º/3º) usam "no Gol" corretamente. Sem
+    # essa checagem extra, "chute no gol" do jogo inteiro caía no tipo
+    # genérico "chute_total", misturado com chute total de verdade.
+    # Confirmado que "a gol" não aparece em nenhum outro nome de mercado de
+    # chute (só nesses dois casos).
+    if ("chute" in nome and ("no gol" in nome or "a gol" in nome)) or "shotsongoal" in nome or "shots on goal" in nome:
         return "chute_no_gol"
     if "chute" in nome or "shot" in nome:
         return "chute_total"
