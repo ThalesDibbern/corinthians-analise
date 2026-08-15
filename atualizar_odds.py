@@ -670,7 +670,41 @@ def existem_odds_utilizaveis(dados_odds):
     return False
 
 
-def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, adversario, nosso_nome):
+def ja_existe_odd_jogador(cur, fixture_id_api, jogador_id, mercado, casa, linha, direcao):
+    """NOVO (correção de bug real - duplicata multi-time, raiz do problema
+    já corrigido nas camadas de exibição): quando os DOIS times de um jogo
+    são rastreados, esse jogo real gera 2 linhas em `jogos` (uma por
+    perspectiva) - e como a OddsPapi devolve a folha de odds INTEIRA do
+    confronto (os DOIS lados) pra cada busca, o mesmo mercado de JOGADOR
+    acabava sendo salvo duas vezes: uma quando processamos a perspectiva
+    do time A, outra quando processamos a do time B. Antes de inserir uma
+    odd de jogador, confere se ela já existe pra esse MESMO jogo real
+    (mesmo fixture_id_api), vinda da OUTRA perspectiva - se sim, não
+    insere de novo.
+    Só se aplica a mercados de JOGADOR (jogador_id preenchido) - mercados
+    de time (escanteio de time, resultado final, escanteio/cartão total
+    do jogo) NÃO entram aqui de propósito: pra esses, a estimativa de
+    probabilidade calculada depois É diferente por perspectiva (vem do
+    histórico de cada time), então guardar as duas cópias é intencional -
+    ver deduplicar_recomendacoes() em combinacoes.py, que já lida com
+    isso na hora de ler, escolhendo a de maior probabilidade."""
+    if jogador_id is None or fixture_id_api is None:
+        return False
+    cur.execute(
+        """
+        SELECT 1 FROM odds o
+        JOIN jogos j ON j.id = o.jogo_id
+        WHERE j.fixture_id_api = %s AND o.jogador_id = %s AND o.casa_aposta = %s
+          AND o.mercado = %s AND o.linha IS NOT DISTINCT FROM %s AND o.direcao IS NOT DISTINCT FROM %s
+        LIMIT 1
+        """,
+        (fixture_id_api, jogador_id, casa, mercado, linha, direcao),
+    )
+    return cur.fetchone() is not None
+
+
+def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, adversario, nosso_nome,
+                         fixture_id_api=None):
     """Percorre as odds de todas as casas/mercados retornados e salva só os
     mercados de interesse (cartão de jogador + escanteios do time), incluindo
     a linha (handicap) e a direção (Mais/Menos/Sim/Não) de cada odd.
@@ -681,8 +715,13 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, a
     MARKET_TYPES_TOTAL_DO_JOGO (escanteios/cartões somando os dois times)
     usam um nome fixo e inequívoco, em vez do nome genérico do catálogo -
     evita confundir com o mercado por time (que também contém a palavra
-    "escanteio"/"cartão", mas se refere só a um lado)."""
+    "escanteio"/"cartão", mas se refere só a um lado).
+    NOVO (correção de duplicata na raiz): recebe `fixture_id_api` do jogo
+    - usado só pra checar, via ja_existe_odd_jogador, se uma odd de
+    JOGADOR já foi salva pela outra perspectiva desse mesmo jogo real
+    antes de inserir de novo."""
     salvos = 0
+    pulados_duplicados = 0
     bookmaker_odds = dados_odds.get("bookmakerOdds", {})
 
     for casa, info_casa in bookmaker_odds.items():
@@ -728,6 +767,12 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, a
                         nome_mercado, linha, direcao, mandante, adversario, nosso_nome, player_name
                     )
 
+                    if jogador_id is not None and ja_existe_odd_jogador(
+                        cur, fixture_id_api, jogador_id, descricao_mercado, casa, linha, direcao
+                    ):
+                        pulados_duplicados += 1
+                        continue
+
                     cur.execute(
                         """INSERT INTO odds (jogo_id, jogador_id, casa_aposta, mercado, valor_odd, linha, direcao)
                            VALUES (%s, %s, %s, %s, %s, %s, %s)""",
@@ -735,6 +780,9 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, a
                     )
                     salvos += 1
 
+    if pulados_duplicados:
+        print(f"  ({pulados_duplicados} odd(s) de jogador não salva(s) de novo - já existiam "
+              f"pela outra perspectiva desse mesmo jogo real.)")
     return salvos
 
 
@@ -837,7 +885,8 @@ def main():
                 if existem_odds_utilizaveis(dados_odds):
                     cur.execute("DELETE FROM odds WHERE jogo_id = %s", (jogo_id,))
                     salvos = salvar_odds_do_jogo(
-                        cur, jogo_id, dados_odds, catalogo_mercados, eh_mandante, adversario, time_nome
+                        cur, jogo_id, dados_odds, catalogo_mercados, eh_mandante, adversario, time_nome,
+                        fixture_id_api=fixture_id_api_do_jogo,
                     )
                     print(f"  -> {salvos} odds salvas.")
                 else:
