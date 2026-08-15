@@ -37,6 +37,18 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
+# NOVO (busca de confronto direto, "Estatísticas de Times"): os 20 times da
+# Série A atual (api_football_team_id), pra alimentar o campo de busca de
+# confronto direto em /time/<id> - aceita como adversário só um desses 20,
+# mesmo que o time selecionado já tenha enfrentado outros clubes (copas,
+# estaduais etc.) que não entram na busca. Precisa ser atualizada na mão se
+# a composição da Série A mudar (acesso/queda) - não é lida do banco porque
+# não existe hoje uma tabela de temporada->divisão.
+TIMES_SERIE_A_API_IDS = [
+    131, 134, 794, 128, 124, 121, 133, 135, 127, 7848,   # rastreados
+    118, 120, 1062, 147, 126, 136, 119, 130, 1198, 132,  # aguardando ativação
+]
+
 app = Flask(__name__)
 # NOVO: chave usada pra assinar o cookie de sessão (login). Configure a
 # variável de ambiente SECRET_KEY no Railway com um valor aleatório - sem
@@ -2421,6 +2433,27 @@ def api_jogadores_jogo(jogo_id):
     return jsonify(jogadores)
 
 
+@app.route("/api/confronto/<int:time_id>/<int:adversario_id>")
+def api_confronto_direto(time_id, adversario_id):
+    """NOVO (busca de confronto direto): endpoint AJAX chamado pelo campo
+    de busca do card "Últimos Jogos" em /time/<id> - devolve TODOS os
+    confrontos diretos já concluídos entre os dois times, cada um já com as
+    estatísticas completas do jogo embutidas (mesmo formato usado pela
+    lista padrão de "Últimos Jogos"). Buscado sob demanda porque só uma
+    fração pequena dos confrontos possíveis (10 times rastreados x 20 da
+    Série A) vai ser consultada de fato."""
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        jogos = buscar_confronto_direto(cur, time_id, adversario_id)
+        for jogo in jogos:
+            jogo["estatisticas"] = buscar_estatisticas_jogo_completo(cur, jogo["jogo_id"], jogo["mandante"])
+        cur.close()
+    finally:
+        conn.close()
+    return jsonify(jogos)
+
+
 @app.route("/minhas-apostas")
 def minhas_apostas():
     conn = psycopg2.connect(DATABASE_URL)
@@ -4147,6 +4180,22 @@ PAGINA_TIME = """
         .tabela-detalhe-jogo th:first-child { text-align: left; }
         .tabela-detalhe-jogo td { padding: 6px 4px; text-align: center; border-top: 1px solid #21262d; }
         .tabela-detalhe-jogo td:first-child { text-align: left; color: #8b949e; }
+
+        /* NOVO (busca de confronto direto) */
+        .confronto-busca-wrap { position: relative; margin-bottom: 12px; }
+        .confronto-busca-wrap .busca { margin-bottom: 0; padding-right: 76px; }
+        .confronto-limpar {
+            position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+            color: #8b949e; font-size: 0.72rem; cursor: pointer; white-space: nowrap;
+        }
+        .confronto-limpar:hover { color: #f85149; }
+        .confronto-data { color: #8b949e; font-size: 0.74rem; padding: 0 16px 10px; margin-top: -6px; }
+        .btn-ver-mais-confronto {
+            display: block; width: 100%; background: #161b22; border: 1px solid #30363d;
+            color: #58a6ff; border-radius: 8px; padding: 10px; margin-bottom: 10px;
+            font-size: 0.82rem; font-weight: 600; cursor: pointer;
+        }
+        .btn-ver-mais-confronto:hover { border-color: #58a6ff; }
     </style>
 </head>
 <body>
@@ -4411,7 +4460,21 @@ PAGINA_TIME = """
             </table>
             {% endif %}
 
-            <div class="titulo-coluna">Últimos Jogos</div>
+            <div class="titulo-coluna" id="titulo-ultimos-jogos">Últimos Jogos</div>
+
+            <div class="confronto-busca-wrap">
+                <input type="text" class="busca" id="busca-confronto" list="lista-adversarios-confronto"
+                       placeholder="Buscar confronto direto (ex: Palmeiras)..."
+                       oninput="buscarConfrontoDireto()" autocomplete="off">
+                <datalist id="lista-adversarios-confronto">
+                    {% for t in times_serie_a %}
+                    <option value="{{ t.nome }}">
+                    {% endfor %}
+                </datalist>
+                <span class="confronto-limpar" id="confronto-limpar" onclick="limparConfrontoDireto()" style="display:none;">✕ limpar</span>
+            </div>
+
+            <div id="lista-ultimos-jogos">
             {% if ultimos_jogos %}
                 {% for jogo in ultimos_jogos %}
                 <div class="jogo-card" id="card-jogo-{{ jogo.jogo_id }}" onclick="toggleJogo({{ jogo.jogo_id }})">
@@ -4460,10 +4523,106 @@ PAGINA_TIME = """
             {% else %}
                 <div class="vazio">Nenhum jogo concluído ainda pra esse time.</div>
             {% endif %}
+            </div>
+            <button class="btn-ver-mais-confronto" id="confronto-ver-mais" onclick="mostrarTodosConfronto()" style="display:none;">Ver todos os confrontos ↓</button>
         </div>
     </div>
 
     <script>
+        // NOVO (busca de confronto direto)
+        const NOME_TIME_ATUAL = {{ nome_time|tojson }};
+        const ESCUDO_URL_ATUAL = {{ (escudo_url or "")|tojson }};
+        const TIMES_SERIE_A_CONFRONTO = {{ times_serie_a|tojson }};
+        const TIME_ID_ATUAL = {{ time_id }};
+        const ULTIMOS_JOGOS_HTML_ORIGINAL = document.getElementById('lista-ultimos-jogos').innerHTML;
+        let confrontoJogosCompletos = [];
+
+        function buscarConfrontoDireto() {
+            const termo = document.getElementById('busca-confronto').value.trim();
+            if (!termo) { limparConfrontoDireto(); return; }
+            const encontrado = TIMES_SERIE_A_CONFRONTO.find(t => t.nome.toLowerCase() === termo.toLowerCase());
+            if (!encontrado) return; // ainda digitando - espera bater com uma opção da lista
+
+            document.getElementById('confronto-limpar').style.display = '';
+            document.getElementById('titulo-ultimos-jogos').textContent = `Confrontos: ${NOME_TIME_ATUAL} x ${encontrado.nome}`;
+            document.getElementById('lista-ultimos-jogos').innerHTML = '<div class="vazio">Buscando confrontos...</div>';
+            document.getElementById('confronto-ver-mais').style.display = 'none';
+
+            fetch(`/api/confronto/${TIME_ID_ATUAL}/${encontrado.id}`)
+                .then(r => r.json())
+                .then(jogos => {
+                    confrontoJogosCompletos = jogos;
+                    renderizarConfrontoDireto(jogos.slice(0, 5));
+                    if (jogos.length > 5) {
+                        document.getElementById('confronto-ver-mais').style.display = '';
+                    }
+                });
+        }
+
+        function mostrarTodosConfronto() {
+            renderizarConfrontoDireto(confrontoJogosCompletos);
+            document.getElementById('confronto-ver-mais').style.display = 'none';
+        }
+
+        function limparConfrontoDireto() {
+            document.getElementById('busca-confronto').value = '';
+            document.getElementById('confronto-limpar').style.display = 'none';
+            document.getElementById('confronto-ver-mais').style.display = 'none';
+            document.getElementById('titulo-ultimos-jogos').textContent = 'Últimos Jogos';
+            document.getElementById('lista-ultimos-jogos').innerHTML = ULTIMOS_JOGOS_HTML_ORIGINAL;
+        }
+
+        function renderizarConfrontoDireto(jogos) {
+            const cont = document.getElementById('lista-ultimos-jogos');
+            if (!jogos.length) {
+                cont.innerHTML = '<div class="vazio">Nenhum confronto direto registrado ainda entre esses dois times.</div>';
+                return;
+            }
+            const escapar = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+            const val = (v, suf) => (v === null || v === undefined) ? '-' : (v + (suf || ''));
+            cont.innerHTML = jogos.map(jogo => {
+                const escudoNosso = ESCUDO_URL_ATUAL ? `<img src="${ESCUDO_URL_ATUAL}" class="escudo-jogo">` : '';
+                const escudoAdv = jogo.escudo_adversario ? `<img src="${jogo.escudo_adversario}" class="escudo-jogo">` : '';
+                const nomeAdv = escapar(jogo.adversario);
+                const linhaPlacar = jogo.mandante
+                    ? `<div class="jogo-time">${escudoNosso}${escapar(NOME_TIME_ATUAL)}</div>
+                       <div class="jogo-placar">${jogo.placar_nosso} x ${jogo.placar_adversario}</div>
+                       <div class="jogo-time jogo-time-direita">${nomeAdv}${escudoAdv}</div>`
+                    : `<div class="jogo-time">${escudoAdv}${nomeAdv}</div>
+                       <div class="jogo-placar">${jogo.placar_adversario} x ${jogo.placar_nosso}</div>
+                       <div class="jogo-time jogo-time-direita">${escapar(NOME_TIME_ATUAL)}${escudoNosso}</div>`;
+                const en = (jogo.estatisticas && jogo.estatisticas.nosso) || {};
+                const ea = (jogo.estatisticas && jogo.estatisticas.adversario) || {};
+                return `<div class="jogo-card" id="card-confronto-${jogo.jogo_id}" onclick="toggleJogoConfronto(${jogo.jogo_id})">
+                    <div class="jogo-placar-linha">
+                        ${linhaPlacar}
+                        <span class="jogo-seta">▾</span>
+                    </div>
+                    <div class="confronto-data">${jogo.data_jogo}</div>
+                    <div class="jogo-detalhe">
+                        <table class="tabela-detalhe-jogo">
+                            <thead><tr><th>Estatística</th><th>${escapar(NOME_TIME_ATUAL)}</th><th>${nomeAdv}</th></tr></thead>
+                            <tbody>
+                                <tr><td>Posse de bola</td><td>${val(en.posse, '%')}</td><td>${val(ea.posse, '%')}</td></tr>
+                                <tr><td>Escanteios</td><td>${val(en.escanteios)}</td><td>${val(ea.escanteios)}</td></tr>
+                                <tr><td>Chutes (total)</td><td>${val(en.chutes)}</td><td>${val(ea.chutes)}</td></tr>
+                                <tr><td>Chutes no gol</td><td>${val(en.chutes_no_gol)}</td><td>${val(ea.chutes_no_gol)}</td></tr>
+                                <tr><td>Faltas</td><td>${val(en.faltas)}</td><td>${val(ea.faltas)}</td></tr>
+                                <tr><td>Desarmes</td><td>${val(en.desarmes)}</td><td>${val(ea.desarmes)}</td></tr>
+                                <tr><td>Cartões</td><td>${en.cartoes != null ? en.cartoes : 0}</td><td>${ea.cartoes != null ? ea.cartoes : 0}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function toggleJogoConfronto(jogoId) {
+            document.getElementById('card-confronto-' + jogoId).classList.toggle('aberto');
+        }
+
         function toggleJogo(jogoId) {
             document.getElementById('card-jogo-' + jogoId).classList.toggle('aberto');
         }
@@ -5335,6 +5494,59 @@ def buscar_ultimos_jogos_time(cur, time_id, limite=5):
     return jogos
 
 
+def buscar_times_serie_a(cur, excluir_time_id=None):
+    """NOVO (busca de confronto direto): times da Série A pra alimentar o
+    campo de busca em /time/<id> - lista fixa por api_football_team_id (ver
+    TIMES_SERIE_A_API_IDS), não pela coluna `rastreado` - o adversário
+    buscado pode não estar entre os 10 rastreados hoje e ainda assim ser um
+    dos 20 da Série A. `excluir_time_id` tira o próprio time da lista (não
+    faz sentido buscar confronto de um time contra ele mesmo)."""
+    cur.execute(
+        "SELECT id, nome FROM times WHERE api_football_team_id = ANY(%s) ORDER BY nome",
+        (TIMES_SERIE_A_API_IDS,),
+    )
+    return [
+        {"id": tid, "nome": nome}
+        for tid, nome in cur.fetchall()
+        if tid != excluir_time_id
+    ]
+
+
+def buscar_confronto_direto(cur, time_id, adversario_id):
+    """NOVO (busca de confronto direto): todos os jogos já concluídos entre
+    `time_id` e um adversário específico (um dos 20 times da Série A),
+    mais recentes primeiro - alimenta a busca dentro do card "Últimos
+    Jogos" de /time/<id>. Mesmo formato de buscar_ultimos_jogos_time, mas
+    filtra pelo ADVERSÁRIO via ID (mandante_id/visitante_id), não por texto
+    - evita o mesmo problema de nome grafado diferente entre fontes já
+    corrigido antes com a coluna `apelidos` (ver motor_recomendacoes.py).
+    Sem LIMIT aqui de propósito - quem decide quantos exibir de cara e
+    quando liberar o "ver mais" é o front-end, em cima da lista completa."""
+    cur.execute(
+        """
+        SELECT id, data_jogo, adversario, mandante, placar_corinthians, placar_adversario
+        FROM jogos
+        WHERE nosso_time_id = %s
+          AND (CASE WHEN mandante THEN visitante_id ELSE mandante_id END) = %s
+          AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+        ORDER BY data_jogo DESC
+        """,
+        (time_id, adversario_id),
+    )
+    jogos = []
+    for jogo_id, data_jogo, adversario, mandante, placar_nosso, placar_adv in cur.fetchall():
+        jogos.append({
+            "jogo_id": jogo_id,
+            "data_jogo": str(data_jogo),
+            "adversario": adversario,
+            "mandante": mandante,
+            "escudo_adversario": buscar_escudo_url(cur, adversario),
+            "placar_nosso": placar_nosso,
+            "placar_adversario": placar_adv,
+        })
+    return jogos
+
+
 def buscar_estatisticas_jogo_completo(cur, jogo_id, mandante_bool):
     """Estatísticas completas de UM jogo específico, já separadas em
     "nosso" e "adversário" - é o "retângulo" que abre ao clicar num jogo em
@@ -5905,6 +6117,10 @@ def time_detalhe(time_id):
         for jogo in ultimos_jogos:
             jogo["estatisticas"] = buscar_estatisticas_jogo_completo(cur, jogo["jogo_id"], jogo["mandante"])
 
+        # NOVO (busca de confronto direto): times da Série A pra alimentar
+        # o campo de busca do card "Últimos Jogos" (ver seção 6-C/documentação).
+        times_serie_a = buscar_times_serie_a(cur, excluir_time_id=time_id)
+
         banca_atual = buscar_banca(cur, session["usuario_id"])
         cur.close()
     finally:
@@ -5919,6 +6135,7 @@ def time_detalhe(time_id):
         api_football_team_id=api_football_team_id, ultimos_jogos=ultimos_jogos,
         estilo_time=estilo_time, quebras_rodada=quebras_rodada, padroes_zona=padroes_zona,
         correlacoes_time=correlacoes_time, correlacoes_categoria_time=correlacoes_categoria_time,
+        times_serie_a=times_serie_a,
         nav_html=barra_navegacao("times", round(banca_atual, 2)),
     )
 
