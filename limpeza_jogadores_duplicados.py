@@ -24,6 +24,11 @@ import psycopg2
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
+# NOVO (correção após crash): tabelas de padrão CALCULADO (não dado real)
+# - o conteúdo é sempre derivado/recalculável, então o fantasma só precisa
+# ser apagado daqui, nunca reatribuído.
+PREFIXOS_PARA_DELETAR = ("padroes_",)
+
 # NOVO: pares (id_fantasma, id_real) - Grupo 1, só casos de ALTA
 # CONFIANÇA, onde o nome bate EXATAMENTE depois de remover acento (não
 # usa abreviação de primeiro nome, que tem risco maior de juntar duas
@@ -81,19 +86,48 @@ PARES_PARA_JUNTAR = [
 
 
 def juntar_jogador(cur, id_fantasma, id_real):
-    cur.execute("UPDATE jogador_estatisticas_jogo SET jogador_id = %s WHERE jogador_id = %s", (id_real, id_fantasma))
-    cur.execute("UPDATE cartoes SET jogador_id = %s WHERE jogador_id = %s", (id_real, id_fantasma))
-    cur.execute("UPDATE odds SET jogador_id = %s WHERE jogador_id = %s", (id_real, id_fantasma))
-    cur.execute("UPDATE recomendacoes SET jogador_id = %s WHERE jogador_id = %s", (id_real, id_fantasma))
-    cur.execute("UPDATE historico_recomendacoes SET jogador_id = %s WHERE jogador_id = %s", (id_real, id_fantasma))
+    # NOVO (correção após crash real): em vez de listar as tabelas que
+    # referenciam `jogadores` na mão (a lista original esqueceu a tabela
+    # `gols`, causando um ForeignKeyViolation e derrubando o serviço),
+    # descobre DINAMICAMENTE, direto do banco, toda tabela+coluna que tem
+    # uma chave estrangeira apontando pra jogadores(id) - nunca mais
+    # esquece uma tabela nova que apareça no futuro.
+    cur.execute(
+        """
+        SELECT tc.table_name, kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.constraint_column_usage ccu
+          ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_schema = 'public'
+          AND ccu.table_name = 'jogadores' AND ccu.column_name = 'id'
+        """
+    )
+    tabelas_referenciando = cur.fetchall()
+
+    for tabela, coluna in tabelas_referenciando:
+        if tabela.startswith(PREFIXOS_PARA_DELETAR):
+            # tabelas de padrão CALCULADO (padroes_jogador_*) - apaga o
+            # fantasma, não reatribui: reatribuir daria erro de chave
+            # duplicada se o jogador real já tiver uma linha pro mesmo
+            # (tipo, linha); o motor_padroes.py recria do zero mesmo,
+            # combinando o histórico completo dos dois lados
+            cur.execute(f'DELETE FROM "{tabela}" WHERE "{coluna}" = %s', (id_fantasma,))
+        else:
+            # tabelas de dado real (estatísticas, cartões, gols, odds,
+            # recomendações...) - reatribui de verdade, não apaga nada
+            cur.execute(f'UPDATE "{tabela}" SET "{coluna}" = %s WHERE "{coluna}" = %s', (id_real, id_fantasma))
+
+    # multiplas_candidatas guarda jogador_id DENTRO de um campo JSONB, não
+    # é uma chave estrangeira de verdade - não aparece na busca acima,
+    # precisa ser tratado à parte
     cur.execute(
         "UPDATE multiplas_candidatas SET jogos = REPLACE(jogos::text, %s, %s)::jsonb WHERE jogos::text LIKE %s",
         (f'"jogador_id": {id_fantasma}', f'"jogador_id": {id_real}', f'%"jogador_id": {id_fantasma}%'),
     )
-    cur.execute("DELETE FROM padroes_jogador_linha WHERE jogador_id = %s", (id_fantasma,))
-    cur.execute("DELETE FROM padroes_jogador_cartao WHERE jogador_id = %s", (id_fantasma,))
-    cur.execute("DELETE FROM padroes_jogador_frequencia WHERE jogador_id = %s", (id_fantasma,))
-    cur.execute("DELETE FROM padroes_correlacao_jogador WHERE jogador_id = %s", (id_fantasma,))
+
     cur.execute("DELETE FROM jogadores WHERE id = %s", (id_fantasma,))
 
 
