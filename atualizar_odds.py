@@ -298,6 +298,16 @@ def normalizar_nome_oddspapi(nome):
     return nome
 
 
+_NOMES_CASADOS_JA_AVISADOS = set()
+# NOVO: guarda quais nomes da OddsPapi já geraram o aviso de "casado por
+# sobrenome+inicial" NESSA EXECUÇÃO do script - evita repetir o mesmo
+# aviso uma vez por odd (um jogador pode ter várias odds diferentes no
+# mesmo jogo - falta, chute, desarme...), o que deixava o log gigante
+# sem necessidade quando vários jogadores caíam nesse caso de uma vez.
+# Reseta sozinho a cada rodada do script, já que é uma variável de módulo
+# e o processo inteiro é reiniciado do zero em cada execução.
+
+
 def get_or_create_jogador(cur, nome):
     """NOVO: normaliza o nome (ver normalizar_nome_oddspapi) antes de
     procurar/criar - assim, o jogador criado aqui casa com o mesmo registro
@@ -354,8 +364,10 @@ def get_or_create_jogador(cur, nome):
 
         if len(candidatos) == 1:
             jogador_id_casado, nome_existente = candidatos[0]
-            print(f"  (nome OddsPapi \"{nome}\" casado por sobrenome+inicial com "
-                  f"jogador já existente \"{nome_existente}\" - id {jogador_id_casado})")
+            if nome not in _NOMES_CASADOS_JA_AVISADOS:
+                _NOMES_CASADOS_JA_AVISADOS.add(nome)
+                print(f"  (nome OddsPapi \"{nome}\" casado por sobrenome+inicial com "
+                      f"jogador já existente \"{nome_existente}\" - id {jogador_id_casado})")
             return jogador_id_casado
 
     cur.execute("INSERT INTO jogadores (nome) VALUES (%s) RETURNING id", (nome_normalizado,))
