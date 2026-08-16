@@ -1755,6 +1755,7 @@ PAGINA_ROI = """
             margin-bottom: 8px; flex-wrap: wrap; gap: 8px;
         }
         .descricao { color: #c9d1d9; font-size: 0.88rem; margin-bottom: 8px; line-height: 1.5; }
+        .jogos-label { color: #58a6ff; font-size: 0.78rem; margin-bottom: 8px; font-weight: 600; }
         .metricas { display: flex; gap: 18px; font-size: 0.78rem; color: #8b949e; flex-wrap: wrap; }
         .metricas b { color: #e6edf3; }
         .badge {
@@ -2154,6 +2155,9 @@ PAGINA_ROI = """
                 <span class="badge badge-{{ a.resultado }}">{{ a.resultado }}</span>
             </div>
             <div class="descricao">{{ a.descricao }}</div>
+            {% if a.jogos_label %}
+            <div class="jogos-label">🏟️ {{ a.jogos_label }}</div>
+            {% endif %}
             <div class="metricas">
                 <span>{{ a.casa_aposta }}</span>
                 <span>Odd: <b>{{ a.odd_combinada }}</b></span>
@@ -2329,10 +2333,42 @@ def resolver_apostas_pendentes(cur):
             )
 
 
+def buscar_nomes_jogos(cur, jogo_ids):
+    """NOVO: monta um rótulo legível ("Time A x Time B (dd/mm)") pra cada
+    jogo_id - usado pra mostrar em /minhas-apostas a qual jogo real cada
+    aposta salva se refere. Antes a tela só mostrava a descrição do mercado
+    e a data em que a APOSTA foi salva (criado_em), sem indicar o jogo."""
+    jogo_ids = [jid for jid in jogo_ids if jid is not None]
+    if not jogo_ids:
+        return {}
+    cur.execute(
+        """
+        SELECT j.id, tm.nome, tv.nome, j.data_jogo
+        FROM jogos j
+        LEFT JOIN times tm ON tm.id = j.mandante_id
+        LEFT JOIN times tv ON tv.id = j.visitante_id
+        WHERE j.id = ANY(%s)
+        """,
+        (jogo_ids,),
+    )
+    nomes = {}
+    for jogo_id, nome_mandante, nome_visitante, data_jogo in cur.fetchall():
+        data_str = data_jogo.strftime("%d/%m") if data_jogo else "?"
+        if nome_mandante and nome_visitante:
+            nomes[jogo_id] = f"{nome_mandante} x {nome_visitante} ({data_str})"
+        else:
+            # fallback de segurança - não deveria acontecer em jogo já
+            # processado (mandante_id/visitante_id sempre preenchidos),
+            # mas evita quebrar a tela se algum dado antigo não tiver isso
+            nomes[jogo_id] = f"Jogo de {data_str}"
+    return nomes
+
+
 def buscar_apostas_salvas(cur, usuario_id):
     cur.execute(
         """
-        SELECT id, descricao, casa_aposta, odd_combinada, valor_apostado, resultado, retorno, criado_em
+        SELECT id, descricao, casa_aposta, odd_combinada, valor_apostado,
+               resultado, retorno, criado_em, pernas
         FROM apostas_salvas
         WHERE usuario_id = %s
         ORDER BY criado_em DESC
@@ -2340,8 +2376,28 @@ def buscar_apostas_salvas(cur, usuario_id):
         (usuario_id,),
     )
     colunas = ["id", "descricao", "casa_aposta", "odd_combinada", "valor_apostado",
-               "resultado", "retorno", "criado_em"]
-    return [dict(zip(colunas, row)) for row in cur.fetchall()]
+               "resultado", "retorno", "criado_em", "pernas"]
+    apostas = [dict(zip(colunas, row)) for row in cur.fetchall()]
+
+    # NOVO: extrai o(s) jogo_id de cada perna (uma aposta pode ser uma
+    # múltipla cruzando jogos diferentes, ver seção 6-B do Criador de Odd)
+    # e monta o rótulo de cada jogo envolvido, numa única consulta pra
+    # todas as apostas da página (evita 1 consulta por aposta).
+    todos_jogo_ids = set()
+    for a in apostas:
+        pernas = a["pernas"] if isinstance(a["pernas"], list) else json.loads(a["pernas"])
+        a["_jogo_ids"] = sorted({p.get("jogo_id") for p in pernas if p.get("jogo_id") is not None})
+        todos_jogo_ids.update(a["_jogo_ids"])
+
+    nomes_jogos = buscar_nomes_jogos(cur, todos_jogo_ids)
+    for a in apostas:
+        a["jogos_label"] = " + ".join(
+            nomes_jogos.get(jid, f"jogo #{jid}") for jid in a["_jogo_ids"]
+        )
+        del a["_jogo_ids"]
+        del a["pernas"]
+
+    return apostas
 
 
 def montar_svg_grafico(pontos):
