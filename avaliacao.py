@@ -16,6 +16,14 @@ Cobre os 10 tipos de mercado que o projeto sabe calcular a partir do
 próprio banco (API-Football): cartao, falta_cometida, desarme,
 chute_no_gol, chute_total, falta_sofrida, impedimento, escanteio_time,
 escanteio_total, cartao_total, resultado_final.
+
+ATUALIZADO: "cartao" agora cobre DOIS formatos de mercado, distinguidos
+por jogador_id ser preenchido ou não - correção do bug de plural em
+atualizar_odds.py/motor_recomendacoes.py ("Cartões" não batia com
+"cartão"/"cartao") destravou a captura de "Cartões - Mais/Menos Equipe
+1/2" (por TIME, mercado de linha), que antes nem chegava a ser salvo.
+Até então "cartao" só existia no formato de JOGADOR (mercado binário
+Sim/Não, jogador_id sempre preenchido).
 """
 
 
@@ -71,13 +79,33 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, d
     d = normalizar(direcao)
 
     if tipo_padrao == "cartao":
-        cur.execute("SELECT 1 FROM cartoes WHERE jogo_id = %s AND jogador_id = %s", (jogo_id, jogador_id))
-        recebeu_cartao = cur.fetchone() is not None
-        if recebeu_cartao:
-            return avaliar_binario(True, d)
-        if jogo_totalmente_processado(cur, jogo_id):
-            return avaliar_binario(False, d)
-        return "pendente"
+        if jogador_id is not None:
+            # Cartão de JOGADOR (mercado binário Sim/Não) - formato original.
+            cur.execute("SELECT 1 FROM cartoes WHERE jogo_id = %s AND jogador_id = %s", (jogo_id, jogador_id))
+            recebeu_cartao = cur.fetchone() is not None
+            if recebeu_cartao:
+                return avaliar_binario(True, d)
+            if jogo_totalmente_processado(cur, jogo_id):
+                return avaliar_binario(False, d)
+            return "pendente"
+
+        # NOVO: cartão por TIME (mercado de linha Mais/Menos, "Cartões -
+        # Mais/Menos Equipe 1/2") - jogador_id vem None. Destravado pela
+        # correção do bug de plural em atualizar_odds.py/
+        # motor_recomendacoes.py ("Cartões" não batia com "cartão"/
+        # "cartao"). Mesmo padrão de "lado" (mandante/visitante) já usado
+        # em escanteio_time - soma os cartões (tabela `cartoes` já traz
+        # `lado` por linha) do lado do NOSSO time nesse jogo específico.
+        if not jogo_totalmente_processado(cur, jogo_id):
+            return "pendente"
+        cur.execute("SELECT mandante FROM jogos WHERE id = %s", (jogo_id,))
+        info_jogo = cur.fetchone()
+        if not info_jogo:
+            return "pendente"
+        lado = "mandante" if info_jogo[0] else "visitante"
+        cur.execute("SELECT COUNT(*) FROM cartoes WHERE jogo_id = %s AND lado = %s", (jogo_id, lado))
+        total_cartoes_time = cur.fetchone()[0]
+        return avaliar_linha(float(total_cartoes_time), linha, d)
 
     if tipo_padrao in ("falta_cometida", "desarme", "chute_no_gol", "chute_total", "falta_sofrida"):
         coluna = {
