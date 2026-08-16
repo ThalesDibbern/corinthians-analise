@@ -83,17 +83,8 @@ def buscar_times_rastreados(cur):
 # "tempo completo" captura especificamente o mercado "Resultado Tempo Completo"
 # (confirmado manualmente na OddsPapi) - sem pegar por engano os mercados de
 # resultado do 1º/2º tempo, que têm nomes parecidos mas não têm "completo".
-# CORRIGIDO: "cart" (não "cartão"/"cartao" por extenso) - o plural em
-# português de "cartão" é "cartões" (troca irregular, não é só "+s"), então
-# "cartão"/"cartao" nunca batia com nomes de mercado que vêm no plural
-# ("Cartões - Mais/Menos Equipe 1", "Cartões - Handicap", "Cartões -
-# Ímpar/Par"...) - esses mercados eram descartados silenciosamente, mesmo
-# tendo preço real na Superbet. Confirmado comparando com o catálogo real
-# da OddsPapi: "cart" não aparece em nenhum nome de mercado que não seja
-# sobre cartão. Mesma lição já aplicada em identificar_tipo_padrao()
-# (motor_recomendacoes.py) pro "cartao_total".
 PALAVRAS_MERCADO_INTERESSE = [
-    "card", "cart", "corner", "escanteio",
+    "card", "cartão", "cartao", "corner", "escanteio",
     "falta", "desarme", "chute", "impediment", "tempo completo",
 ]
 
@@ -326,6 +317,46 @@ def get_or_create_jogador(cur, nome):
         row = cur.fetchone()
         if row:
             return row[0]
+
+    # NOVO (correção de bug real - jogador duplicado por formato de
+    # primeiro nome): a API-Football às vezes guarda o jogador com o
+    # primeiro nome ABREVIADO (ex: "R. Garro"), enquanto a OddsPapi manda
+    # o nome completo, já normalizado acima pra "Nome Sobrenome" (ex:
+    # "Rodrigo Garro") - a comparação exata de cima nunca bate nesse caso,
+    # e cada nova odd criava um jogador fantasma sem api_football_id (foi
+    # o que aconteceu com Rodrigo Garro/R. Garro - descoberto comparando
+    # a probabilidade mostrada numa recomendação com a mostrada na página
+    # do jogador, os dois deveriam ser sempre o mesmo número).
+    # Tenta casar por SOBRENOME + inicial do primeiro nome, só entre
+    # jogadores que JÁ têm api_football_id confirmado (nunca casa com
+    # outro fantasma) - só aplica o casamento se encontrar EXATAMENTE UM
+    # candidato, pra não arriscar juntar duas pessoas diferentes.
+    partes_normalizado = nome_normalizado.split()
+    if len(partes_normalizado) >= 2:
+        primeiro_nome, sobrenome = partes_normalizado[0], partes_normalizado[-1]
+        cur.execute(
+            "SELECT id, nome FROM jogadores WHERE api_football_id IS NOT NULL AND nome ILIKE %s",
+            (f"% {sobrenome}",),
+        )
+        candidatos = []
+        for jogador_id_existente, nome_existente in cur.fetchall():
+            partes_existente = nome_existente.split()
+            if len(partes_existente) < 2:
+                continue
+            primeiro_nome_existente = partes_existente[0].rstrip(".")
+            bate_inicial = (
+                len(primeiro_nome_existente) <= 2
+                and primeiro_nome.lower().startswith(primeiro_nome_existente.lower())
+            )
+            bate_nome_completo = primeiro_nome_existente.lower() == primeiro_nome.lower()
+            if bate_inicial or bate_nome_completo:
+                candidatos.append((jogador_id_existente, nome_existente))
+
+        if len(candidatos) == 1:
+            jogador_id_casado, nome_existente = candidatos[0]
+            print(f"  (nome OddsPapi \"{nome}\" casado por sobrenome+inicial com "
+                  f"jogador já existente \"{nome_existente}\" - id {jogador_id_casado})")
+            return jogador_id_casado
 
     cur.execute("INSERT INTO jogadores (nome) VALUES (%s) RETURNING id", (nome_normalizado,))
     return cur.fetchone()[0]
