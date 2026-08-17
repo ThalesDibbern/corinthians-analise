@@ -259,6 +259,24 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, d
             acertou = (d in ("2x", "12")) if mandante else (d in ("1x", "12"))
         return "acertou" if acertou else "errou"
 
+    # NOVO (Handicap Asiático - só linha de meio gol, ver decisão de
+    # arquitetura de 17/08/2026): `linha` é o handicap bruto (convenção
+    # OddsPapi, sempre relativo ao mandante). Com placar de futebol
+    # sempre inteiro, meio gol nunca empata matematicamente - resultado
+    # sempre binário, sem "push".
+    if tipo_padrao == "handicap_asiatico":
+        cur.execute(
+            "SELECT mandante, placar_corinthians, placar_adversario FROM jogos WHERE id = %s",
+            (jogo_id,),
+        )
+        row = cur.fetchone()
+        if row is None or row[1] is None or row[2] is None:
+            return "pendente"
+        mandante, placar_nosso, placar_adversario = row
+        diferenca = placar_nosso - placar_adversario
+        limite = -linha if mandante else linha
+        return "acertou" if diferenca > limite else "errou"
+
     if tipo_padrao == "resultado_final":
         cur.execute(
             "SELECT placar_corinthians, placar_adversario FROM jogos WHERE id = %s",
