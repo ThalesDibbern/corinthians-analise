@@ -2412,6 +2412,182 @@ def salvar_padroes_resultado(cur, resultados, time_id):
         print(f"  {lado} - {resultado}: {ocorrencias}/{total} jogos ({frequencia}%)")
 
 
+def calcular_padroes_dupla_chance_tempo(cur, time_id):
+    """NOVO (Onda 2 - Dupla Chance por tempo): frequência de cada resultado
+    de Dupla Chance (1X/12/2X) por tempo (1º/2º), separado por mandante/
+    visitante - mesmo padrão de calcular_padroes_resultado, mas calculado
+    em cima do placar de cada TEMPO isolado (intervalo pro 1º tempo,
+    final-menos-intervalo pro 2º), não do placar final do jogo inteiro."""
+    resultados_finais = []
+    for lado_bool, lado_nome in [(True, "mandante"), (False, "visitante")]:
+        cur.execute(
+            """
+            SELECT placar_corinthians, placar_adversario,
+                   placar_corinthians_intervalo, placar_adversario_intervalo
+            FROM jogos
+            WHERE nosso_time_id = %s AND mandante = %s
+              AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+              AND placar_corinthians_intervalo IS NOT NULL AND placar_adversario_intervalo IS NOT NULL
+            ORDER BY data_jogo DESC
+            LIMIT %s
+            """,
+            (time_id, lado_bool, JANELA_MAXIMA_DE_JOGOS),
+        )
+        jogos = cur.fetchall()
+        total = len(jogos)
+        if total < JOGOS_MINIMOS_PARA_ANALISAR:
+            continue
+
+        janelas_periodo = [
+            ("1T", lambda pc, pa, pci, pai: (pci, pai)),
+            ("2T", lambda pc, pa, pci, pai: (pc - pci, pa - pai)),
+        ]
+        for periodo_nome, calc_placar in janelas_periodo:
+            contagem = {"1X": 0, "12": 0, "2X": 0}
+            for placar_cor, placar_adv, placar_cor_int, placar_adv_int in jogos:
+                nosso_periodo, adv_periodo = calc_placar(placar_cor, placar_adv, placar_cor_int, placar_adv_int)
+                if nosso_periodo == adv_periodo:
+                    contagem["1X"] += 1
+                    contagem["2X"] += 1
+                elif nosso_periodo > adv_periodo:
+                    # nosso time venceu esse período
+                    contagem["1X" if lado_bool else "2X"] += 1
+                    contagem["12"] += 1
+                else:
+                    # nosso time perdeu esse período
+                    contagem["2X" if lado_bool else "1X"] += 1
+                    contagem["12"] += 1
+
+            for resultado, ocorrencias in contagem.items():
+                frequencia = round(100 * ocorrencias / total, 2)
+                resultados_finais.append((periodo_nome, lado_nome, resultado, total, frequencia))
+
+    return resultados_finais
+
+
+def salvar_padroes_dupla_chance_tempo(cur, resultados, time_id):
+    for periodo, lado, resultado, jogos_analisados, frequencia in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_dupla_chance_tempo (time_id, periodo, lado, resultado, jogos_analisados, frequencia, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, periodo, lado, resultado) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                frequencia = EXCLUDED.frequencia,
+                atualizado_em = NOW()
+            """,
+            (time_id, periodo, lado, resultado, jogos_analisados, frequencia),
+        )
+        print(f"  [{periodo}/{lado}] {resultado}: {frequencia}% ({jogos_analisados} jogos)")
+
+
+def calcular_padroes_ambas_marcam_tempo(cur, time_id):
+    """NOVO (Onda 2 - Ambas Marcam por tempo): frequência binária de Ambas
+    Equipes Marcarem nesse tempo (1º/2º), separado por mandante/visitante -
+    mesma fonte de dado (placar de intervalo) de calcular_padroes_dupla_chance_tempo."""
+    resultados_finais = []
+    for lado_bool, lado_nome in [(True, "mandante"), (False, "visitante")]:
+        cur.execute(
+            """
+            SELECT placar_corinthians, placar_adversario,
+                   placar_corinthians_intervalo, placar_adversario_intervalo
+            FROM jogos
+            WHERE nosso_time_id = %s AND mandante = %s
+              AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+              AND placar_corinthians_intervalo IS NOT NULL AND placar_adversario_intervalo IS NOT NULL
+            ORDER BY data_jogo DESC
+            LIMIT %s
+            """,
+            (time_id, lado_bool, JANELA_MAXIMA_DE_JOGOS),
+        )
+        jogos = cur.fetchall()
+        total = len(jogos)
+        if total < JOGOS_MINIMOS_PARA_ANALISAR:
+            continue
+
+        janelas_periodo = [
+            ("1T", lambda pc, pa, pci, pai: (pci, pai)),
+            ("2T", lambda pc, pa, pci, pai: (pc - pci, pa - pai)),
+        ]
+        for periodo_nome, calc_placar in janelas_periodo:
+            com_ambas = 0
+            for placar_cor, placar_adv, placar_cor_int, placar_adv_int in jogos:
+                nosso_periodo, adv_periodo = calc_placar(placar_cor, placar_adv, placar_cor_int, placar_adv_int)
+                if nosso_periodo > 0 and adv_periodo > 0:
+                    com_ambas += 1
+            frequencia = round(100 * com_ambas / total, 2)
+            resultados_finais.append((periodo_nome, lado_nome, total, com_ambas, frequencia))
+
+    return resultados_finais
+
+
+def salvar_padroes_ambas_marcam_tempo(cur, resultados, time_id):
+    for periodo, lado, jogos_analisados, jogos_com_ambas, frequencia in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_ambas_marcam_tempo (time_id, periodo, lado, jogos_analisados, jogos_com_ambas, frequencia, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, periodo, lado) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                jogos_com_ambas = EXCLUDED.jogos_com_ambas,
+                frequencia = EXCLUDED.frequencia,
+                atualizado_em = NOW()
+            """,
+            (time_id, periodo, lado, jogos_analisados, jogos_com_ambas, frequencia),
+        )
+        print(f"  [{periodo}/{lado}] Ambas Marcam: {jogos_com_ambas}/{jogos_analisados} jogos ({frequencia}%)")
+
+
+def calcular_padrao_marca_ambos_tempos(cur, time_id):
+    """NOVO (Onda 2 - Marca em Ambos os Tempos): frequência de o time
+    marcar no 1º tempo E no 2º tempo, no mesmo jogo - sem separar por
+    mandante/visitante (mercado sobre o jogo inteiro, escopo mais amplo
+    que os mercados por tempo isolado acima)."""
+    cur.execute(
+        """
+        SELECT placar_corinthians, placar_corinthians_intervalo
+        FROM jogos
+        WHERE nosso_time_id = %s
+          AND placar_corinthians IS NOT NULL
+          AND placar_corinthians_intervalo IS NOT NULL
+        ORDER BY data_jogo DESC
+        LIMIT %s
+        """,
+        (time_id, JANELA_MAXIMA_DE_JOGOS),
+    )
+    jogos = cur.fetchall()
+    total = len(jogos)
+    if total < JOGOS_MINIMOS_PARA_ANALISAR:
+        return None, total
+
+    marcou_nos_dois = 0
+    for placar_final, placar_intervalo in jogos:
+        gols_1t = placar_intervalo
+        gols_2t = placar_final - placar_intervalo
+        if gols_1t > 0 and gols_2t > 0:
+            marcou_nos_dois += 1
+
+    frequencia = round(100 * marcou_nos_dois / total, 2)
+    return (total, marcou_nos_dois, frequencia), total
+
+
+def salvar_padrao_marca_ambos_tempos(cur, resultado, time_id):
+    jogos_analisados, jogos_que_marcou_nos_dois, frequencia = resultado
+    cur.execute(
+        """
+        INSERT INTO padroes_marca_ambos_tempos (time_id, jogos_analisados, jogos_que_marcou_nos_dois, frequencia, atualizado_em)
+        VALUES (%s, %s, %s, %s, NOW())
+        ON CONFLICT (time_id) DO UPDATE SET
+            jogos_analisados = EXCLUDED.jogos_analisados,
+            jogos_que_marcou_nos_dois = EXCLUDED.jogos_que_marcou_nos_dois,
+            frequencia = EXCLUDED.frequencia,
+            atualizado_em = NOW()
+        """,
+        (time_id, jogos_analisados, jogos_que_marcou_nos_dois, frequencia),
+    )
+    print(f"  [marca ambos tempos] {jogos_que_marcou_nos_dois}/{jogos_analisados} jogos ({frequencia}%)")
+
+
 # NOVO (forma recente): quantos jogos definem "recente" - janela bem mais
 # curta que o padrão geral (últimos 50), propositalmente, já que o objetivo
 # aqui é capturar o momento ATUAL do time, não uma média de longo prazo.
@@ -2804,6 +2980,39 @@ def main():
                 conn.commit()
             else:
                 print("  Dados insuficientes ainda para resultado final.")
+
+            # NOVO (Onda 2 - Dupla Chance/Ambas Marcam por tempo, Marca em
+            # Ambos os Tempos): depende do placar de intervalo
+            # (placar_corinthians_intervalo/placar_adversario_intervalo) -
+            # jogos sem esse dado ainda (histórico antes do backfill, ou
+            # jogo que a própria API-Football não tinha o intervalo) ficam
+            # de fora da amostra automaticamente (ver WHERE das queries).
+            print("Calculando padrões de Dupla Chance por tempo...")
+            resultados_dupla_chance = calcular_padroes_dupla_chance_tempo(cur, time_id)
+            if resultados_dupla_chance:
+                salvar_padroes_dupla_chance_tempo(cur, resultados_dupla_chance, time_id)
+                conn.commit()
+            else:
+                print(f"  Dados insuficientes ainda para Dupla Chance por tempo "
+                      f"(mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos por lado, com placar de intervalo salvo).")
+
+            print("Calculando padrões de Ambas Marcam por tempo...")
+            resultados_ambas_tempo = calcular_padroes_ambas_marcam_tempo(cur, time_id)
+            if resultados_ambas_tempo:
+                salvar_padroes_ambas_marcam_tempo(cur, resultados_ambas_tempo, time_id)
+                conn.commit()
+            else:
+                print(f"  Dados insuficientes ainda para Ambas Marcam por tempo "
+                      f"(mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos por lado, com placar de intervalo salvo).")
+
+            print("Calculando padrão de Marca em Ambos os Tempos...")
+            resultado_marca_ambos, jogos_marca_ambos = calcular_padrao_marca_ambos_tempos(cur, time_id)
+            if not resultado_marca_ambos:
+                print(f"  Dados insuficientes ainda para Marca em Ambos os Tempos ({jogos_marca_ambos} jogos "
+                      f"analisados, mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+            else:
+                salvar_padrao_marca_ambos_tempos(cur, resultado_marca_ambos, time_id)
+                conn.commit()
 
             print(f"Calculando forma recente (últimos {JOGOS_FORMA_RECENTE} jogos)...")
             contagem_forma, jogos_analisados_forma = calcular_forma_recente(cur, time_id)
