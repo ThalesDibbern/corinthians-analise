@@ -133,6 +133,13 @@ PADROES_LINHA_TIME_SOMA_JOGADOR = {
 LINHAS_GOLS_TIME = [0.5, 1.5, 2.5]
 LINHAS_GOLS_TOTAL = [1.5, 2.5, 3.5, 4.5]
 
+# NOVO (Handicap Asiático - só linha de meio gol, ver decisão de
+# arquitetura de 17/08/2026): linhas candidatas testadas por time - lista
+# curta de propósito, cobre a faixa que realmente aparece precificada na
+# Superbet pro Brasileirão (handicaps grandes tipo -5.5 quase nunca são
+# oferecidos de verdade).
+LINHAS_HANDICAP = [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5]
+
 # padrões simples (sim/não teve pelo menos 1 no jogo)
 PADROES_FREQUENCIA_JOGADOR = {
     "impedimento": "impedimentos",
@@ -2588,6 +2595,67 @@ def salvar_padrao_marca_ambos_tempos(cur, resultado, time_id):
     print(f"  [marca ambos tempos] {jogos_que_marcou_nos_dois}/{jogos_analisados} jogos ({frequencia}%)")
 
 
+def calcular_padrao_handicap(cur, time_id):
+    """NOVO (Handicap Asiático - só linha de meio gol): frequência de
+    "cobrir" cada linha candidata (LINHAS_HANDICAP), separado por
+    mandante/visitante - precisa separar por lado porque a MESMA linha
+    bruta (ex: -0.5, que vem sempre relativa ao mandante, convenção da
+    OddsPapi) se aplica com sinal invertido dependendo de quem é o
+    mandante de verdade nesse jogo.
+
+    Cobrir a linha H com nosso time mandante: diferença de gols (nosso -
+    adversário) > -H. Cobrir a linha H com nosso time visitante: diferença
+    > H (sinal invertido) - mesma lógica documentada na conversa que
+    desenhou esse mercado (17/08/2026)."""
+    resultados = []
+    for lado_bool, lado_nome in [(True, "mandante"), (False, "visitante")]:
+        cur.execute(
+            """
+            SELECT placar_corinthians, placar_adversario
+            FROM jogos
+            WHERE nosso_time_id = %s AND mandante = %s
+              AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+            ORDER BY data_jogo DESC
+            LIMIT %s
+            """,
+            (time_id, lado_bool, JANELA_MAXIMA_DE_JOGOS),
+        )
+        jogos = cur.fetchall()
+        total = len(jogos)
+        if total < JOGOS_MINIMOS_PARA_ANALISAR:
+            continue
+
+        diferencas = [placar_nosso - placar_adv for placar_nosso, placar_adv in jogos]
+        media_diferenca = round(sum(diferencas) / total, 2)
+
+        for linha in LINHAS_HANDICAP:
+            limite = -linha if lado_bool else linha
+            jogos_cobriu = sum(1 for d in diferencas if d > limite)
+            frequencia = round(100 * jogos_cobriu / total, 2)
+            resultados.append((lado_nome, linha, total, jogos_cobriu, frequencia, media_diferenca))
+
+    return resultados
+
+
+def salvar_padrao_handicap(cur, resultados, time_id):
+    for lado, linha, jogos_analisados, jogos_cobriu, frequencia, media_diferenca in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_time_handicap
+                (time_id, lado, linha, jogos_analisados, jogos_cobriu, frequencia, media_diferenca, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, lado, linha) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                jogos_cobriu = EXCLUDED.jogos_cobriu,
+                frequencia = EXCLUDED.frequencia,
+                media_diferenca = EXCLUDED.media_diferenca,
+                atualizado_em = NOW()
+            """,
+            (time_id, lado, linha, jogos_analisados, jogos_cobriu, frequencia, media_diferenca),
+        )
+        print(f"  [{lado}] linha {linha:+.1f}: {jogos_cobriu}/{jogos_analisados} jogos cobriram ({frequencia}%)")
+
+
 # NOVO (forma recente): quantos jogos definem "recente" - janela bem mais
 # curta que o padrão geral (últimos 50), propositalmente, já que o objetivo
 # aqui é capturar o momento ATUAL do time, não uma média de longo prazo.
@@ -3013,6 +3081,15 @@ def main():
             else:
                 salvar_padrao_marca_ambos_tempos(cur, resultado_marca_ambos, time_id)
                 conn.commit()
+
+            print("Calculando padrão de Handicap Asiático (só linha de meio gol)...")
+            resultados_handicap = calcular_padrao_handicap(cur, time_id)
+            if resultados_handicap:
+                salvar_padrao_handicap(cur, resultados_handicap, time_id)
+                conn.commit()
+            else:
+                print(f"  Dados insuficientes ainda para Handicap Asiático "
+                      f"(mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos por lado).")
 
             print(f"Calculando forma recente (últimos {JOGOS_FORMA_RECENTE} jogos)...")
             contagem_forma, jogos_analisados_forma = calcular_forma_recente(cur, time_id)
