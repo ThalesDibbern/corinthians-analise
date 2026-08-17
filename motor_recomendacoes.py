@@ -177,6 +177,20 @@ def identificar_tipo_padrao(mercado):
     # exatamente como aconteceu com escanteio/escanteios.
     if "cart" in nome and "total do jogo" in nome:
         return "cartao_total"
+    # NOVO (Mais/Menos gols e Equipe Marca): nomes fixos, sem ambiguidade
+    # (ver MARKET_TYPES_GOLS_E_MARCA em atualizar_odds.py) - "gols total
+    # do jogo" precisa vir ANTES de "gols do time", mesma lógica do
+    # escanteio/cartão total checados antes do tipo por time.
+    if "gols total do jogo" in nome:
+        return "gols_total"
+    if "gols do time" in nome:
+        return "gols_time"
+    # "Equipe 1 Marca"/"Equipe 2 Marca" já vem com o "Equipe X" substituído
+    # pelo nome real do time (ver montar_descricao_mercado) - por isso a
+    # checagem é só " marca" (com espaço antes, pra não bater em nada que
+    # termine com essas letras por coincidência).
+    if " marca" in nome:
+        return "equipe_marca"
     # CORRIGIDO: era "cartão"/"cartao" (singular) - "cartões" (plural) tem
     # troca irregular (não é só "+s"), então nunca batia com mercados que
     # vêm no plural ("Cartões - Mais/Menos Equipe 1/2", "Cartões -
@@ -300,6 +314,41 @@ def buscar_frequencia_cartao_total(cur, linha, time_id):
     cur.execute(
         "SELECT frequencia FROM padroes_cartao_total WHERE linha = %s AND time_id = %s",
         (linha, time_id),
+    )
+    row = cur.fetchone()
+    return float(row[0]) if row else None
+
+
+def buscar_frequencia_gols_time(cur, linha, time_id):
+    """NOVO (Mais/Menos gols do time): lê de padroes_time_linha, tipo=
+    "gols" - mesma tabela já usada por falta/chute/cartão do time (ver
+    calcular_padrao_gols_time em motor_padroes.py)."""
+    cur.execute(
+        "SELECT frequencia FROM padroes_time_linha WHERE tipo = %s AND linha = %s AND time_id = %s",
+        ("gols", linha, time_id),
+    )
+    row = cur.fetchone()
+    return float(row[0]) if row else None
+
+
+def buscar_frequencia_gols_total(cur, linha, time_id):
+    """NOVO: frequência de gols do jogo INTEIRO (mandante + visitante
+    somados) passar de uma linha - mesmo padrão de
+    buscar_frequencia_escanteio_total/buscar_frequencia_cartao_total."""
+    cur.execute(
+        "SELECT frequencia FROM padroes_gols_total WHERE linha = %s AND time_id = %s",
+        (linha, time_id),
+    )
+    row = cur.fetchone()
+    return float(row[0]) if row else None
+
+
+def buscar_frequencia_equipe_marca(cur, time_id):
+    """NOVO (Equipe Marca - Sim/Não): frequência binária, um valor só por
+    time (sem linha/handicap)."""
+    cur.execute(
+        "SELECT frequencia FROM padroes_time_marca WHERE time_id = %s",
+        (time_id,),
     )
     row = cur.fetchone()
     return float(row[0]) if row else None
@@ -1004,6 +1053,54 @@ def calcular_recomendacoes(cur):
 
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
+
+        elif tipo == "gols_time" and not jogador_id \
+                and direcao_normalizada in ("mais", "menos") and linha is not None:
+            # NOVO (Mais/Menos gols do time): mesmo cuidado de identificação
+            # de time por variantes de nome que já existe pra escanteio_time
+            # (ver comentário grande logo acima) - reaproveita a mesma
+            # lógica e o mesmo `variantes_times` já calculado uma vez só no
+            # início da função.
+            mercado_lower = mercado.lower()
+            adversario_id_calc = None
+            if mandante_id is not None and visitante_id is not None:
+                adversario_id_calc = visitante_id if mandante_id == nosso_time_id else mandante_id
+
+            candidatos_nosso_time = variantes_times.get(nosso_time_id, set())
+            candidatos_adversario = variantes_times.get(adversario_id_calc, set()) | {(adversario or "").lower()}
+
+            bate_nosso_time = any(c and c in mercado_lower for c in candidatos_nosso_time)
+            bate_adversario = any(c and c in mercado_lower for c in candidatos_adversario)
+
+            if bate_nosso_time and not bate_adversario:
+                frequencia_bruta = buscar_frequencia_gols_time(cur, linha, nosso_time_id)
+                if frequencia_bruta is not None:
+                    frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
+
+        elif tipo == "gols_total" and not jogador_id \
+                and direcao_normalizada in ("mais", "menos") and linha is not None:
+            frequencia_bruta = buscar_frequencia_gols_total(cur, linha, nosso_time_id)
+            if frequencia_bruta is not None:
+                frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
+
+        elif tipo == "equipe_marca" and not jogador_id and direcao_normalizada in ("sim", "não", "nao"):
+            # NOVO (Equipe Marca): mesma identificação de time por variantes
+            # de nome usada em gols_time/escanteio_time.
+            mercado_lower = mercado.lower()
+            adversario_id_calc = None
+            if mandante_id is not None and visitante_id is not None:
+                adversario_id_calc = visitante_id if mandante_id == nosso_time_id else mandante_id
+
+            candidatos_nosso_time = variantes_times.get(nosso_time_id, set())
+            candidatos_adversario = variantes_times.get(adversario_id_calc, set()) | {(adversario or "").lower()}
+
+            bate_nosso_time = any(c and c in mercado_lower for c in candidatos_nosso_time)
+            bate_adversario = any(c and c in mercado_lower for c in candidatos_adversario)
+
+            if bate_nosso_time and not bate_adversario:
+                frequencia_bruta = buscar_frequencia_equipe_marca(cur, nosso_time_id)
+                if frequencia_bruta is not None:
+                    frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "resultado_final" and not jogador_id:
             resultado_cor = resultado_do_ponto_de_vista_corinthians(direcao, mandante)
