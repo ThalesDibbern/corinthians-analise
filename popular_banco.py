@@ -488,14 +488,16 @@ def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
 
     cur.execute(
         "SELECT id, arbitro, mandante_id, visitante_id, datahora_jogo, "
-        "placar_corinthians, placar_adversario, rodada, rodada_numero FROM jogos "
+        "placar_corinthians, placar_adversario, rodada, rodada_numero, "
+        "placar_corinthians_intervalo, placar_adversario_intervalo FROM jogos "
         "WHERE fixture_id_api = %s AND nosso_time_id = %s",
         (fixture_id, nosso_time_id),
     )
     row = cur.fetchone()
     if row:
         (jogo_id, arbitro_salvo, mandante_id_salvo, visitante_id_salvo, datahora_salva,
-         placar_cor_salvo, placar_adv_salvo, rodada_salva, rodada_numero_salva) = row
+         placar_cor_salvo, placar_adv_salvo, rodada_salva, rodada_numero_salva,
+         placar_cor_intervalo_salvo, placar_adv_intervalo_salvo) = row
         # backfill: jogo já existia (de antes dessa funcionalidade) mas
         # está sem árbitro salvo, e agora a API nos deu esse dado - atualiza.
         if arbitro_salvo is None and arbitro:
@@ -543,6 +545,24 @@ def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
                     "UPDATE jogos SET placar_corinthians = %s, placar_adversario = %s WHERE id = %s",
                     (novo_placar_cor, novo_placar_adv, jogo_id),
                 )
+
+        # NOVO (Onda 2 - Dupla Chance/Ambas Marcam por tempo, Marca em
+        # Ambos os Tempos): mesmo backfill do placar final acima, mas pro
+        # placar do INTERVALO (fixture["score"]["halftime"]) - campo que a
+        # API-Football já manda de graça na mesma resposta, só nunca tinha
+        # sido extraído. Sem esse dado não dá pra saber o resultado do 1º/
+        # 2º tempo isoladamente (só o placar final).
+        if placar_cor_intervalo_salvo is None or placar_adv_intervalo_salvo is None:
+            gol_home_intervalo = fixture.get("score", {}).get("halftime", {}).get("home")
+            gol_away_intervalo = fixture.get("score", {}).get("halftime", {}).get("away")
+            if gol_home_intervalo is not None and gol_away_intervalo is not None:
+                eh_mandante_backfill = mandante_api_id == nosso_time_api_id
+                novo_placar_cor_intervalo = gol_home_intervalo if eh_mandante_backfill else gol_away_intervalo
+                novo_placar_adv_intervalo = gol_away_intervalo if eh_mandante_backfill else gol_home_intervalo
+                cur.execute(
+                    "UPDATE jogos SET placar_corinthians_intervalo = %s, placar_adversario_intervalo = %s WHERE id = %s",
+                    (novo_placar_cor_intervalo, novo_placar_adv_intervalo, jogo_id),
+                )
         return jogo_id
 
     data_jogo = fixture["fixture"]["date"][:10]
@@ -554,6 +574,17 @@ def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
     )
     placar_adversario = (
         fixture["goals"]["away"] if eh_mandante else fixture["goals"]["home"]
+    )
+    # NOVO (Onda 2): placar do intervalo, mesma fonte (fixture["score"]
+    # ["halftime"]) e mesma tradução mandante/visitante -> nosso time/
+    # adversário que o placar final já usa acima.
+    gol_home_intervalo = fixture.get("score", {}).get("halftime", {}).get("home")
+    gol_away_intervalo = fixture.get("score", {}).get("halftime", {}).get("away")
+    placar_corinthians_intervalo = (
+        gol_home_intervalo if eh_mandante else gol_away_intervalo
+    )
+    placar_adversario_intervalo = (
+        gol_away_intervalo if eh_mandante else gol_home_intervalo
     )
 
     mandante_id = get_or_create_time(cur, mandante_api_id, mandante_nome)
@@ -569,14 +600,16 @@ def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
             INSERT INTO jogos (id, fixture_id_api, nosso_time_id, data_jogo, datahora_jogo,
                                 adversario, mandante, competicao,
                                 placar_corinthians, placar_adversario, arbitro,
-                                mandante_id, visitante_id, rodada, rodada_numero)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                mandante_id, visitante_id, rodada, rodada_numero,
+                                placar_corinthians_intervalo, placar_adversario_intervalo)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 fixture_id, fixture_id, nosso_time_id,
                 data_jogo, datahora_jogo, adversario, eh_mandante, "Brasileirão Série A",
                 placar_corinthians, placar_adversario, arbitro,
                 mandante_id, visitante_id, rodada, rodada_numero,
+                placar_corinthians_intervalo, placar_adversario_intervalo,
             ),
         )
         return fixture_id
@@ -587,14 +620,16 @@ def get_or_create_jogo(cur, fixture, nosso_time_id, nosso_time_api_id):
             INSERT INTO jogos (fixture_id_api, nosso_time_id, data_jogo, datahora_jogo,
                                 adversario, mandante, competicao,
                                 placar_corinthians, placar_adversario, arbitro,
-                                mandante_id, visitante_id, rodada, rodada_numero)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                                mandante_id, visitante_id, rodada, rodada_numero,
+                                placar_corinthians_intervalo, placar_adversario_intervalo)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
             """,
             (
                 fixture_id, nosso_time_id,
                 data_jogo, datahora_jogo, adversario, eh_mandante, "Brasileirão Série A",
                 placar_corinthians, placar_adversario, arbitro,
                 mandante_id, visitante_id, rodada, rodada_numero,
+                placar_corinthians_intervalo, placar_adversario_intervalo,
             ),
         )
         return cur.fetchone()[0]
