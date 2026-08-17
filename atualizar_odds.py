@@ -633,6 +633,15 @@ def montar_descricao_mercado(nome_mercado, linha, direcao, mandante, adversario,
     direcao_normalizada = (direcao or "").strip().lower()
     if linha is not None and direcao_normalizada in ("mais", "menos"):
         detalhe = f"{direcao} de {linha}"
+    elif linha is not None and direcao_normalizada in ("1", "2"):
+        # NOVO (Handicap Asiático): direção vem crua da OddsPapi como "1"/
+        # "2" (não "Equipe 1"/"Equipe 2") - resolve pro nome do time do
+        # mesmo jeito que o resto da descrição já faz, e inclui a linha
+        # (handicap) com sinal, que é a parte que realmente diferencia uma
+        # odd de handicap da outra.
+        nome_time_direcao = nome_time_por_posicao(mandante, adversario, direcao_normalizada, nosso_nome)
+        sinal = "+" if linha > 0 else ""
+        detalhe = f"{nome_time_direcao} {sinal}{linha}"
     else:
         detalhe = direcao
 
@@ -698,6 +707,23 @@ MARKET_TYPES_MARCA_AMBOS_TEMPOS = {
     "toscoreinbh-team1": "Equipe 1 Marca em Ambos os Tempos",
     "toscoreinbh-team2": "Equipe 2 Marca em Ambos os Tempos",
 }
+
+
+def eh_handicap_meia_linha(tipo_mercado, periodo, handicap):
+    """NOVO (Handicap Asiático - decisão de arquitetura de 17/08/2026): só
+    aceita handicap de MEIO gol (termina em .5, ex: -0.5, -1.5, 2.5) - com
+    placar de futebol sempre inteiro, meio gol nunca empata matematicamente,
+    então o resultado é sempre binário (ganhou/perdeu), sem "push" nem
+    aposta dividida - encaixa no mesmo modelo que todo o resto do projeto
+    já usa. Linha cheia (0, -1, -2...) pode empatar exatamente (vira
+    aposta anulada) e linha de quarto de gol (-0.25, -0.75...) SEMPRE
+    divide a aposta em duas metades com resultado parcial - os dois
+    ficam de fora de propósito: implementar "resultado parcial" de
+    verdade exigiria mudar banca/VE/múltiplas/histórico ao mesmo tempo,
+    risco bem maior que o ganho de cobrir essas linhas a mais."""
+    if tipo_mercado != "spreads" or periodo != "fulltime" or handicap is None:
+        return False
+    return round(float(handicap) % 1, 2) == 0.5
 
 
 def mercado_de_tempo_parcial(nome_mercado):
@@ -805,6 +831,7 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, a
                 or tipo_mercado in MARKET_TYPES_GOLS_E_MARCA
                 or tipo_mercado in MARKET_TYPES_MARCA_AMBOS_TEMPOS
                 or chave_periodo in MARKET_TYPES_POR_TEMPO
+                or eh_handicap_meia_linha(tipo_mercado, periodo_mercado, info_mercado.get("handicap"))
             )
             if not interessa_por_tipo and not mercado_interessa(info_mercado["nome"]):
                 continue
