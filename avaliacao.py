@@ -24,6 +24,10 @@ atualizar_odds.py/motor_recomendacoes.py ("Cartões" não batia com
 1/2" (por TIME, mercado de linha), que antes nem chegava a ser salvo.
 Até então "cartao" só existia no formato de JOGADOR (mercado binário
 Sim/Não, jogador_id sempre preenchido).
+
+NOVO: gols_total (jogo inteiro), gols_time (só nosso lado) e equipe_marca
+(Sim/Não) - os três usam direto jogos.placar_corinthians/placar_adversario,
+sem depender de estatisticas_jogo.
 """
 
 
@@ -172,6 +176,28 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, d
         cur.execute("SELECT COUNT(*) FROM cartoes WHERE jogo_id = %s", (jogo_id,))
         total_cartoes = cur.fetchone()[0]
         return avaliar_linha(float(total_cartoes), linha, d)
+
+    # NOVO (Mais/Menos gols e Equipe Marca): os três usam direto
+    # jogos.placar_corinthians/placar_adversario - não precisa de
+    # jogo_totalmente_processado aqui, porque o placar final vem pronto
+    # assim que o fixture fecha como "FT" (não depende do endpoint de
+    # estatísticas, que é o que sofre o lag que motivou aquela checagem em
+    # outros mercados - ver seção do bug de estatística coletada no meio
+    # do jogo).
+    if tipo_padrao in ("gols_total", "gols_time", "equipe_marca"):
+        cur.execute(
+            "SELECT placar_corinthians, placar_adversario FROM jogos WHERE id = %s",
+            (jogo_id,),
+        )
+        row = cur.fetchone()
+        if row is None or row[0] is None or row[1] is None:
+            return "pendente"
+        placar_nosso, placar_adversario = row
+        if tipo_padrao == "gols_total":
+            return avaliar_linha(float(placar_nosso + placar_adversario), linha, d)
+        if tipo_padrao == "gols_time":
+            return avaliar_linha(float(placar_nosso), linha, d)
+        return avaliar_binario(placar_nosso > 0, d)
 
     if tipo_padrao == "resultado_final":
         cur.execute(
