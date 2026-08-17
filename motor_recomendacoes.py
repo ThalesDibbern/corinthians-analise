@@ -193,6 +193,10 @@ def identificar_tipo_padrao(mercado):
         return "ambas_marcam_2t"
     if "marca em ambos os tempos" in nome:
         return "marca_ambos_tempos"
+    # NOVO (Handicap Asiático - só meia linha): nome único, sem risco de
+    # colidir com "Hándicap" (marketType diferente, fora de escopo).
+    if "handicap asiático" in nome:
+        return "handicap_asiatico"
     # NOVO (Mais/Menos gols e Equipe Marca): nomes fixos, sem ambiguidade
     # (ver MARKET_TYPES_GOLS_E_MARCA em atualizar_odds.py) - "gols total
     # do jogo" precisa vir ANTES de "gols do time", mesma lógica do
@@ -405,6 +409,18 @@ def buscar_frequencia_marca_ambos_tempos(cur, time_id):
     cur.execute(
         "SELECT frequencia FROM padroes_marca_ambos_tempos WHERE time_id = %s",
         (time_id,),
+    )
+    row = cur.fetchone()
+    return float(row[0]) if row else None
+
+
+def buscar_frequencia_handicap(cur, time_id, lado, linha):
+    """NOVO (Handicap Asiático - só meia linha): frequência de "cobrir"
+    essa linha específica, separada por lado (mandante/visitante) - ver
+    calcular_padrao_handicap em motor_padroes.py pro porquê da separação."""
+    cur.execute(
+        "SELECT frequencia FROM padroes_time_handicap WHERE time_id = %s AND lado = %s AND linha = %s",
+        (time_id, lado, linha),
     )
     row = cur.fetchone()
     return float(row[0]) if row else None
@@ -1204,6 +1220,29 @@ def calcular_recomendacoes(cur):
                 frequencia_bruta = buscar_frequencia_marca_ambos_tempos(cur, nosso_time_id)
                 if frequencia_bruta is not None:
                     frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
+
+        elif tipo == "handicap_asiatico" and not jogador_id \
+                and direcao_normalizada in ("1", "2") and linha is not None:
+            # NOVO (Handicap Asiático - só meia linha): mesma identificação
+            # de time por variantes de nome de gols_time/marca_ambos_tempos
+            # - só processa se a recomendação for pro NOSSO time (não pro
+            # adversário). `linha` já é o handicap bruto (convenção
+            # OddsPapi, relativo ao mandante) - mesmo valor usado na hora
+            # de calcular e salvar em padroes_time_handicap, sem precisar
+            # de nenhuma conversão aqui.
+            mercado_lower = mercado.lower()
+            adversario_id_calc = None
+            if mandante_id is not None and visitante_id is not None:
+                adversario_id_calc = visitante_id if mandante_id == nosso_time_id else mandante_id
+
+            candidatos_nosso_time = variantes_times.get(nosso_time_id, set())
+            candidatos_adversario = variantes_times.get(adversario_id_calc, set()) | {(adversario or "").lower()}
+
+            bate_nosso_time = any(c and c in mercado_lower for c in candidatos_nosso_time)
+            bate_adversario = any(c and c in mercado_lower for c in candidatos_adversario)
+
+            if bate_nosso_time and not bate_adversario:
+                frequencia = buscar_frequencia_handicap(cur, nosso_time_id, mandante_filtro_atual, linha)
 
         elif tipo == "resultado_final" and not jogador_id:
             resultado_cor = resultado_do_ponto_de_vista_corinthians(direcao, mandante)
