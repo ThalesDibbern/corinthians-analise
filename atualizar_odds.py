@@ -149,6 +149,12 @@ def buscar_catalogo_mercados():
             "nome": m["marketName"],
             "handicap": m.get("handicap"),
             "tipo": m.get("marketType"),
+            # NOVO (Onda 2 - Dupla Chance/Ambas Marcam por tempo): precisa
+            # saber o período (fulltime/p1/p2) pra distinguir entre as
+            # versões "jogo inteiro" (sem preço na Superbet, já
+            # confirmado) e "por tempo" (com preço) do MESMO marketType -
+            # o nome bruto sozinho não seria confiável o suficiente aqui.
+            "periodo": m.get("period"),
             "outcomes": {str(o["outcomeId"]): o["outcomeName"] for o in m.get("outcomes", [])},
         }
     return catalogo
@@ -669,6 +675,30 @@ MARKET_TYPES_GOLS_E_MARCA = {
     "toscore-team2": "Equipe 2 Marca",
 }
 
+# NOVO (Onda 2 - Dupla Chance/Ambas Marcam por tempo): diferente de todos
+# os outros mercados de cima, esses são identificados por (marketType,
+# período) - o MESMO marketType tem uma versão "jogo inteiro" (sem preço
+# confirmado na Superbet) e uma versão "por tempo" (com preço) - por isso
+# não dá pra usar só marketType como chave, como os dicts acima fazem.
+# São também os ÚNICOS mercados do projeto que passam por cima do filtro
+# de "sem parcial" (mercado_de_tempo_parcial) de propósito - só entram
+# nessa lista aqui.
+MARKET_TYPES_POR_TEMPO = {
+    ("doublechance", "p1"): "Dupla Chance Primeiro Tempo",
+    ("doublechance", "p2"): "Dupla Chance Segundo Tempo",
+    ("bothteamsscore", "p1"): "Ambas Marcam Primeiro Tempo",
+    ("bothteamsscore", "p2"): "Ambas Marcam Segundo Tempo",
+}
+
+# NOVO (Onda 2 - Marca em Ambos os Tempos): esse já vem com nome único e
+# sem "Primeiro/Segundo Tempo" no texto (é um mercado sobre o jogo inteiro,
+# olhando os dois tempos juntos) - só precisa do bypass do filtro de
+# palavra-chave, não do de tempo parcial.
+MARKET_TYPES_MARCA_AMBOS_TEMPOS = {
+    "toscoreinbh-team1": "Equipe 1 Marca em Ambos os Tempos",
+    "toscoreinbh-team2": "Equipe 2 Marca em Ambos os Tempos",
+}
+
 
 def mercado_de_tempo_parcial(nome_mercado):
     """NOVO: a OddsPapi também retorna versões de Primeiro Tempo/Segundo
@@ -763,21 +793,39 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, a
                 continue
 
             tipo_mercado = info_mercado.get("tipo")
+            periodo_mercado = info_mercado.get("periodo")
+            chave_periodo = (tipo_mercado, periodo_mercado)
 
-            # NOVO (Mais/Menos gols e Equipe Marca): esses passam mesmo sem
-            # bater nenhuma palavra-chave, porque são identificados só pelo
-            # marketType (ver docstring de MARKET_TYPES_GOLS_E_MARCA).
-            interessa_por_tipo = tipo_mercado in MARKET_TYPES_TOTAL_DO_JOGO or tipo_mercado in MARKET_TYPES_GOLS_E_MARCA
+            # NOVO (Mais/Menos gols, Equipe Marca, e Onda 2 - Dupla Chance/
+            # Ambas Marcam por tempo/Marca em Ambos os Tempos): passam
+            # mesmo sem bater nenhuma palavra-chave, porque são
+            # identificados só pelo marketType (ou marketType+período).
+            interessa_por_tipo = (
+                tipo_mercado in MARKET_TYPES_TOTAL_DO_JOGO
+                or tipo_mercado in MARKET_TYPES_GOLS_E_MARCA
+                or tipo_mercado in MARKET_TYPES_MARCA_AMBOS_TEMPOS
+                or chave_periodo in MARKET_TYPES_POR_TEMPO
+            )
             if not interessa_por_tipo and not mercado_interessa(info_mercado["nome"]):
                 continue
 
-            if mercado_de_tempo_parcial(info_mercado["nome"]):
+            # NOVO (Onda 2): mercados por tempo são EXCEÇÃO de propósito ao
+            # filtro de "sem parcial" - só passam se estiverem na lista
+            # explícita MARKET_TYPES_POR_TEMPO acima (nada mais passa por
+            # esse bypass, evita abrir brecha sem querer pra outro
+            # mercado por tempo qualquer).
+            eh_mercado_por_tempo_permitido = chave_periodo in MARKET_TYPES_POR_TEMPO
+            if not eh_mercado_por_tempo_permitido and mercado_de_tempo_parcial(info_mercado["nome"]):
                 continue
 
             if tipo_mercado in MARKET_TYPES_TOTAL_DO_JOGO:
                 nome_mercado = MARKET_TYPES_TOTAL_DO_JOGO[tipo_mercado]
             elif tipo_mercado in MARKET_TYPES_GOLS_E_MARCA:
                 nome_mercado = MARKET_TYPES_GOLS_E_MARCA[tipo_mercado]
+            elif tipo_mercado in MARKET_TYPES_MARCA_AMBOS_TEMPOS:
+                nome_mercado = MARKET_TYPES_MARCA_AMBOS_TEMPOS[tipo_mercado]
+            elif chave_periodo in MARKET_TYPES_POR_TEMPO:
+                nome_mercado = MARKET_TYPES_POR_TEMPO[chave_periodo]
             else:
                 nome_mercado = info_mercado["nome"]
 
