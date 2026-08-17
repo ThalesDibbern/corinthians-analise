@@ -83,8 +83,17 @@ def buscar_times_rastreados(cur):
 # "tempo completo" captura especificamente o mercado "Resultado Tempo Completo"
 # (confirmado manualmente na OddsPapi) - sem pegar por engano os mercados de
 # resultado do 1º/2º tempo, que têm nomes parecidos mas não têm "completo".
+# CORRIGIDO: "cart" (não "cartão"/"cartao" por extenso) - o plural em
+# português de "cartão" é "cartões" (troca irregular, não é só "+s"), então
+# "cartão"/"cartao" nunca batia com nomes de mercado que vêm no plural
+# ("Cartões - Mais/Menos Equipe 1", "Cartões - Handicap", "Cartões -
+# Ímpar/Par"...) - esses mercados eram descartados silenciosamente, mesmo
+# tendo preço real na Superbet. Confirmado comparando com o catálogo real
+# da OddsPapi: "cart" não aparece em nenhum nome de mercado que não seja
+# sobre cartão. Mesma lição já aplicada em identificar_tipo_padrao()
+# (motor_recomendacoes.py) pro "cartao_total".
 PALAVRAS_MERCADO_INTERESSE = [
-    "card", "cartão", "cartao", "corner", "escanteio",
+    "card", "cart", "corner", "escanteio",
     "falta", "desarme", "chute", "impediment", "tempo completo",
 ]
 
@@ -298,16 +307,6 @@ def normalizar_nome_oddspapi(nome):
     return nome
 
 
-_NOMES_CASADOS_JA_AVISADOS = set()
-# NOVO: guarda quais nomes da OddsPapi já geraram o aviso de "casado por
-# sobrenome+inicial" NESSA EXECUÇÃO do script - evita repetir o mesmo
-# aviso uma vez por odd (um jogador pode ter várias odds diferentes no
-# mesmo jogo - falta, chute, desarme...), o que deixava o log gigante
-# sem necessidade quando vários jogadores caíam nesse caso de uma vez.
-# Reseta sozinho a cada rodada do script, já que é uma variável de módulo
-# e o processo inteiro é reiniciado do zero em cada execução.
-
-
 def get_or_create_jogador(cur, nome):
     """NOVO: normaliza o nome (ver normalizar_nome_oddspapi) antes de
     procurar/criar - assim, o jogador criado aqui casa com o mesmo registro
@@ -327,48 +326,6 @@ def get_or_create_jogador(cur, nome):
         row = cur.fetchone()
         if row:
             return row[0]
-
-    # NOVO (correção de bug real - jogador duplicado por formato de
-    # primeiro nome): a API-Football às vezes guarda o jogador com o
-    # primeiro nome ABREVIADO (ex: "R. Garro"), enquanto a OddsPapi manda
-    # o nome completo, já normalizado acima pra "Nome Sobrenome" (ex:
-    # "Rodrigo Garro") - a comparação exata de cima nunca bate nesse caso,
-    # e cada nova odd criava um jogador fantasma sem api_football_id (foi
-    # o que aconteceu com Rodrigo Garro/R. Garro - descoberto comparando
-    # a probabilidade mostrada numa recomendação com a mostrada na página
-    # do jogador, os dois deveriam ser sempre o mesmo número).
-    # Tenta casar por SOBRENOME + inicial do primeiro nome, só entre
-    # jogadores que JÁ têm api_football_id confirmado (nunca casa com
-    # outro fantasma) - só aplica o casamento se encontrar EXATAMENTE UM
-    # candidato, pra não arriscar juntar duas pessoas diferentes.
-    partes_normalizado = nome_normalizado.split()
-    if len(partes_normalizado) >= 2:
-        primeiro_nome, sobrenome = partes_normalizado[0], partes_normalizado[-1]
-        cur.execute(
-            "SELECT id, nome FROM jogadores WHERE api_football_id IS NOT NULL AND nome ILIKE %s",
-            (f"% {sobrenome}",),
-        )
-        candidatos = []
-        for jogador_id_existente, nome_existente in cur.fetchall():
-            partes_existente = nome_existente.split()
-            if len(partes_existente) < 2:
-                continue
-            primeiro_nome_existente = partes_existente[0].rstrip(".")
-            bate_inicial = (
-                len(primeiro_nome_existente) <= 2
-                and primeiro_nome.lower().startswith(primeiro_nome_existente.lower())
-            )
-            bate_nome_completo = primeiro_nome_existente.lower() == primeiro_nome.lower()
-            if bate_inicial or bate_nome_completo:
-                candidatos.append((jogador_id_existente, nome_existente))
-
-        if len(candidatos) == 1:
-            jogador_id_casado, nome_existente = candidatos[0]
-            if nome not in _NOMES_CASADOS_JA_AVISADOS:
-                _NOMES_CASADOS_JA_AVISADOS.add(nome)
-                print(f"  (nome OddsPapi \"{nome}\" casado por sobrenome+inicial com "
-                      f"jogador já existente \"{nome_existente}\" - id {jogador_id_casado})")
-            return jogador_id_casado
 
     cur.execute("INSERT INTO jogadores (nome) VALUES (%s) RETURNING id", (nome_normalizado,))
     return cur.fetchone()[0]
@@ -693,6 +650,25 @@ MARKET_TYPES_TOTAL_DO_JOGO = {
     "totals-bookings": "Cartões Total do Jogo",
 }
 
+# NOVO (Mais/Menos gols e Equipe Marca): diferente de todos os mercados de
+# cima, esses são identificados só pelo marketType, NUNCA por palavra-chave
+# no nome (não entram em PALAVRAS_MERCADO_INTERESSE). O nome bruto da
+# OddsPapi pra esses ("Mais/Menos Tempo Completo", "Mais/Menos Equipe 1/2",
+# "Equipe 1 Marca") é genérico demais pra usar palavra-chave sem risco de
+# capturar mercado errado por engano - ex: a palavra "marca" também aparece
+# em "Marcador a Qualquer Momento" e "Primeiro Marcador" (mercados de
+# artilheiro, fora de escopo por enquanto). "totals" e "teamtotals-team1/2"
+# também são renomeados aqui (mesmo motivo do MARKET_TYPES_TOTAL_DO_JOGO
+# acima: deixar claro que é GOL, não escanteio/cartão, já que o nome bruto
+# não diz).
+MARKET_TYPES_GOLS_E_MARCA = {
+    "totals": "Gols Total do Jogo",
+    "teamtotals-team1": "Gols do Time - Equipe 1",
+    "teamtotals-team2": "Gols do Time - Equipe 2",
+    "toscore-team1": "Equipe 1 Marca",
+    "toscore-team2": "Equipe 2 Marca",
+}
+
 
 def mercado_de_tempo_parcial(nome_mercado):
     """NOVO: a OddsPapi também retorna versões de Primeiro Tempo/Segundo
@@ -783,15 +759,25 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, a
         markets = info_casa.get("markets", {})
         for market_id, market_info in markets.items():
             info_mercado = catalogo_mercados.get(market_id)
-            if not info_mercado or not mercado_interessa(info_mercado["nome"]):
+            if not info_mercado:
+                continue
+
+            tipo_mercado = info_mercado.get("tipo")
+
+            # NOVO (Mais/Menos gols e Equipe Marca): esses passam mesmo sem
+            # bater nenhuma palavra-chave, porque são identificados só pelo
+            # marketType (ver docstring de MARKET_TYPES_GOLS_E_MARCA).
+            interessa_por_tipo = tipo_mercado in MARKET_TYPES_TOTAL_DO_JOGO or tipo_mercado in MARKET_TYPES_GOLS_E_MARCA
+            if not interessa_por_tipo and not mercado_interessa(info_mercado["nome"]):
                 continue
 
             if mercado_de_tempo_parcial(info_mercado["nome"]):
                 continue
 
-            tipo_mercado = info_mercado.get("tipo")
             if tipo_mercado in MARKET_TYPES_TOTAL_DO_JOGO:
                 nome_mercado = MARKET_TYPES_TOTAL_DO_JOGO[tipo_mercado]
+            elif tipo_mercado in MARKET_TYPES_GOLS_E_MARCA:
+                nome_mercado = MARKET_TYPES_GOLS_E_MARCA[tipo_mercado]
             else:
                 nome_mercado = info_mercado["nome"]
 
