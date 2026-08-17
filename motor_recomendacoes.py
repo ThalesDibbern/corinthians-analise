@@ -142,6 +142,18 @@ TETO_COMBINADO_MAXIMO = 1.25
 # ficar tudo vazio na tela), porque aqui o número já influencia dinheiro.
 JOGOS_MINIMOS_FATOR_RECOMENDACAO = 5
 
+# NOVO (correção de amostra pequena - Zona da Tabela, investigação de
+# 17/08/2026): a condição de momento (apos_vitoria/apos_empate/
+# apos_derrota) divide a amostra do time em 3 fatias, então bate no piso
+# de 5 jogos com muito mais facilidade que o "geral" (que junta tudo).
+# Cruzando 209 recomendações reais contra o resultado de verdade, o
+# cenário "reforça uma aposta de Mais, baseado numa condição de momento"
+# teve taxa de acerto de só 20% (N=15) - claro sinal de overfitting em
+# amostra pequena. Piso mais alto só pra essa fatia (momento específico);
+# o "geral" continua com o piso normal, porque na prática já tem amostra
+# grande (raramente abaixo de 14 jogos, olhando o banco).
+JOGOS_MINIMOS_FATOR_ZONA_MOMENTO = 10
+
 
 
 # NOVO (disponibilidade de jogador): quantos jogos recentes olhar pra decidir
@@ -768,7 +780,12 @@ def buscar_fator_zona(cur, time_id, zona, condicao, tipo_padrao):
         return cur.fetchone()
 
     row = _buscar(condicao)
-    if (not row or row[1] < JOGOS_MINIMOS_FATOR_RECOMENDACAO) and condicao != "geral":
+    # NOVO (correção de amostra pequena): piso mais alto quando a condição
+    # é de momento específico (apos_vitoria/empate/derrota) - ver
+    # JOGOS_MINIMOS_FATOR_ZONA_MOMENTO. Pro "geral", o piso continua o
+    # padrão (JOGOS_MINIMOS_FATOR_RECOMENDACAO).
+    piso_condicao_atual = JOGOS_MINIMOS_FATOR_ZONA_MOMENTO if condicao != "geral" else JOGOS_MINIMOS_FATOR_RECOMENDACAO
+    if (not row or row[1] < piso_condicao_atual) and condicao != "geral":
         row = _buscar("geral")
     if not row or row[1] < JOGOS_MINIMOS_FATOR_RECOMENDACAO:
         return None
