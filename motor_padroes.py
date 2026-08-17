@@ -125,6 +125,14 @@ PADROES_LINHA_TIME_SOMA_JOGADOR = {
     "desarme": ("desarmes", LINHAS_DESARME_TIME),
 }
 
+# NOVO (Mais/Menos gols e Equipe Marca): gols vêm direto de jogos.placar_*
+# (não de estatisticas_jogo, e não sofrem do lag que motivou a janela de
+# espera de estatística - o placar final já vem certo assim que o fixture
+# fecha como "FT"). Linhas mais baixas que escanteio/cartão porque gol é
+# um evento bem mais raro por jogo.
+LINHAS_GOLS_TIME = [0.5, 1.5, 2.5]
+LINHAS_GOLS_TOTAL = [1.5, 2.5, 3.5, 4.5]
+
 # padrões simples (sim/não teve pelo menos 1 no jogo)
 PADROES_FREQUENCIA_JOGADOR = {
     "impedimento": "impedimentos",
@@ -487,7 +495,146 @@ def calcular_padrao_linha_time_soma_jogadores(cur, time_id, coluna, linhas_testa
     return resultados, jogos_analisados
 
 
-# NOVO (estilo de time - Fase 1, só visual/exibição): tipos de evento
+def calcular_padrao_gols_time(cur, time_id, linhas_testadas):
+    """NOVO (Mais/Menos gols do time): mesmo padrão de calcular_padroes_escanteio,
+    mas a fonte é jogos.placar_corinthians (não estatisticas_jogo) - o
+    placar final já vem pronto assim que o jogo termina, sem depender do
+    endpoint de estatísticas (e sem o lag que motivou a janela de espera -
+    ver seção do bug de estatística coletada no meio do jogo). Salvo na
+    MESMA tabela padroes_time_linha que já existe (tipo="gols"), não
+    precisa de tabela nova."""
+    cur.execute(
+        """
+        SELECT placar_corinthians
+        FROM jogos
+        WHERE nosso_time_id = %s
+          AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+        ORDER BY data_jogo DESC
+        LIMIT %s
+        """,
+        (time_id, JANELA_MAXIMA_DE_JOGOS),
+    )
+    valores = [row[0] for row in cur.fetchall()]
+
+    jogos_analisados = len(valores)
+    if jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR:
+        return None, jogos_analisados
+
+    media = round(sum(float(v) for v in valores) / jogos_analisados, 2)
+
+    resultados = []
+    for linha in linhas_testadas:
+        jogos_acima = sum(1 for v in valores if float(v) > linha)
+        frequencia = round(100 * jogos_acima / jogos_analisados, 2)
+        resultados.append((linha, jogos_analisados, jogos_acima, frequencia, media))
+
+    return resultados, jogos_analisados
+
+
+def calcular_padroes_gols_total(cur, time_id):
+    """NOVO (Mais/Menos gols TOTAL do jogo, mandante + visitante somados):
+    mesmo padrão de calcular_padroes_escanteio_total/calcular_padroes_cartao_total,
+    mas somando placar_corinthians + placar_adversario (o "total" aqui já é
+    o próprio placar do jogo, não precisa somar dois lados de
+    estatisticas_jogo)."""
+    cur.execute(
+        """
+        SELECT (placar_corinthians + placar_adversario)
+        FROM jogos
+        WHERE nosso_time_id = %s
+          AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+        ORDER BY data_jogo DESC
+        LIMIT %s
+        """,
+        (time_id, JANELA_MAXIMA_DE_JOGOS),
+    )
+    valores = [row[0] for row in cur.fetchall()]
+
+    jogos_analisados = len(valores)
+    if jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR:
+        return None, jogos_analisados
+
+    media = round(sum(float(v) for v in valores) / jogos_analisados, 2)
+
+    resultados = []
+    for linha in LINHAS_GOLS_TOTAL:
+        jogos_acima = sum(1 for v in valores if float(v) > linha)
+        frequencia = round(100 * jogos_acima / jogos_analisados, 2)
+        resultados.append((linha, jogos_analisados, jogos_acima, frequencia, media))
+
+    return resultados, jogos_analisados
+
+
+def salvar_padroes_gols_total(cur, resultados, time_id):
+    """NOVO: salva em padroes_gols_total (tabela nova, mesmo formato de
+    padroes_escanteio_total/padroes_cartao_total)."""
+    for linha, jogos_analisados, jogos_acima, frequencia, media in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_gols_total (time_id, linha, jogos_analisados, jogos_acima_da_linha, frequencia, media, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, linha) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                jogos_acima_da_linha = EXCLUDED.jogos_acima_da_linha,
+                frequencia = EXCLUDED.frequencia,
+                media = EXCLUDED.media,
+                atualizado_em = NOW()
+            """,
+            (time_id, linha, jogos_analisados, jogos_acima, frequencia, media),
+        )
+        print(f"  [gols total] Mais de {linha}: {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
+
+
+def calcular_padrao_equipe_marca(cur, time_id):
+    """NOVO (Equipe Marca - Sim/Não): frequência binária de jogos em que o
+    NOSSO time marcou pelo menos 1 gol (placar_corinthians > 0). Mesma
+    fonte de dado de calcular_padrao_gols_time, mas mercado binário (Sim/
+    Não), não de linha - por isso não usa linhas_testadas nem
+    padroes_time_linha, e sim uma tabela dedicada com uma frequência só
+    por time."""
+    cur.execute(
+        """
+        SELECT placar_corinthians
+        FROM jogos
+        WHERE nosso_time_id = %s
+          AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
+        ORDER BY data_jogo DESC
+        LIMIT %s
+        """,
+        (time_id, JANELA_MAXIMA_DE_JOGOS),
+    )
+    valores = [row[0] for row in cur.fetchall()]
+
+    jogos_analisados = len(valores)
+    if jogos_analisados < JOGOS_MINIMOS_PARA_ANALISAR:
+        return None, jogos_analisados
+
+    jogos_que_marcou = sum(1 for v in valores if v > 0)
+    frequencia = round(100 * jogos_que_marcou / jogos_analisados, 2)
+
+    return (jogos_analisados, jogos_que_marcou, frequencia), jogos_analisados
+
+
+def salvar_padrao_equipe_marca(cur, resultado, time_id):
+    """NOVO: salva em padroes_time_marca (tabela nova, um registro por time -
+    não tem linha/handicap, é só a frequência binária)."""
+    jogos_analisados, jogos_que_marcou, frequencia = resultado
+    cur.execute(
+        """
+        INSERT INTO padroes_time_marca (time_id, jogos_analisados, jogos_que_marcou, frequencia, atualizado_em)
+        VALUES (%s, %s, %s, %s, NOW())
+        ON CONFLICT (time_id) DO UPDATE SET
+            jogos_analisados = EXCLUDED.jogos_analisados,
+            jogos_que_marcou = EXCLUDED.jogos_que_marcou,
+            frequencia = EXCLUDED.frequencia,
+            atualizado_em = NOW()
+        """,
+        (time_id, jogos_analisados, jogos_que_marcou, frequencia),
+    )
+    print(f"  [equipe marca] {jogos_que_marcou}/{jogos_analisados} jogos ({frequencia}%)")
+
+
+
 # cobertos pra identificar "jeito de jogar" de cada time rastreado - só
 # impedimento e cartão por enquanto (escopo reduzido de propósito, pra
 # validar a ideia com pouco risco antes de expandir pra outros mercados).
@@ -2516,6 +2663,38 @@ def main():
                 conn.commit()
                 print(f"  Concluído! Padrões de cartão total calculados com base em "
                       f"{jogos_analisados_cartao_total} jogo(s).")
+
+            # NOVO (Mais/Menos gols e Equipe Marca): fonte é jogos.placar_*,
+            # não estatisticas_jogo - mesmo padrão de escanteio/cartão
+            # total, mas sem depender do endpoint de estatísticas.
+            print("Calculando padrões de gols do time (nosso lado)...")
+            resultados_gols_time, jogos_gols_time = calcular_padrao_gols_time(cur, time_id, LINHAS_GOLS_TIME)
+            if not resultados_gols_time:
+                print(f"  Dados insuficientes ainda para gols do time ({jogos_gols_time} jogos analisados, "
+                      f"mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+            else:
+                salvar_padrao_linha_time(cur, "gols", resultados_gols_time, time_id)
+                conn.commit()
+
+            print("Calculando padrões de gols TOTAL do jogo (mandante + visitante)...")
+            resultados_gols_total, jogos_analisados_gols_total = calcular_padroes_gols_total(cur, time_id)
+            if not resultados_gols_total:
+                print(f"  Dados insuficientes ainda para gols total ({jogos_analisados_gols_total} jogos "
+                      f"analisados, mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+            else:
+                salvar_padroes_gols_total(cur, resultados_gols_total, time_id)
+                conn.commit()
+                print(f"  Concluído! Padrões de gols total calculados com base em "
+                      f"{jogos_analisados_gols_total} jogo(s).")
+
+            print("Calculando padrão de Equipe Marca (Sim/Não)...")
+            resultado_marca, jogos_marca = calcular_padrao_equipe_marca(cur, time_id)
+            if not resultado_marca:
+                print(f"  Dados insuficientes ainda para Equipe Marca ({jogos_marca} jogos analisados, "
+                      f"mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
+            else:
+                salvar_padrao_equipe_marca(cur, resultado_marca, time_id)
+                conn.commit()
 
             # NOVO (estatísticas de time): faltas e chutes só do NOSSO lado
             # (não confundir com falta_total/chute_total, que somam os dois
