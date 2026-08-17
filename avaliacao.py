@@ -28,6 +28,10 @@ Sim/Não, jogador_id sempre preenchido).
 NOVO: gols_total (jogo inteiro), gols_time (só nosso lado) e equipe_marca
 (Sim/Não) - os três usam direto jogos.placar_corinthians/placar_adversario,
 sem depender de estatisticas_jogo.
+
+NOVO (Onda 2): dupla_chance_1t/2t, ambas_marcam_1t/2t e marca_ambos_tempos -
+usam também placar_corinthians_intervalo/placar_adversario_intervalo (o
+placar no intervalo), pra derivar o resultado de cada tempo isolado.
 """
 
 
@@ -198,6 +202,62 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, d
         if tipo_padrao == "gols_time":
             return avaliar_linha(float(placar_nosso), linha, d)
         return avaliar_binario(placar_nosso > 0, d)
+
+    # NOVO (Onda 2 - Dupla Chance/Ambas Marcam por tempo, Marca em Ambos os
+    # Tempos): os quatro usam jogos.mandante + o placar final E o placar de
+    # intervalo (pra derivar o placar de cada tempo isolado - 1º tempo é
+    # direto o intervalo, 2º tempo é final menos intervalo).
+    if tipo_padrao in ("dupla_chance_1t", "dupla_chance_2t", "ambas_marcam_1t",
+                       "ambas_marcam_2t", "marca_ambos_tempos"):
+        cur.execute(
+            """
+            SELECT mandante, placar_corinthians, placar_adversario,
+                   placar_corinthians_intervalo, placar_adversario_intervalo
+            FROM jogos WHERE id = %s
+            """,
+            (jogo_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return "pendente"
+        mandante, placar_nosso_final, placar_adv_final, placar_nosso_int, placar_adv_int = row
+        if (placar_nosso_final is None or placar_adv_final is None
+                or placar_nosso_int is None or placar_adv_int is None):
+            return "pendente"
+
+        if tipo_padrao == "marca_ambos_tempos":
+            gols_1t = placar_nosso_int
+            gols_2t = placar_nosso_final - placar_nosso_int
+            return avaliar_binario(gols_1t > 0 and gols_2t > 0, d)
+
+        if tipo_padrao in ("dupla_chance_1t", "ambas_marcam_1t"):
+            placar_nosso_periodo = placar_nosso_int
+            placar_adv_periodo = placar_adv_int
+        else:  # 2T
+            placar_nosso_periodo = placar_nosso_final - placar_nosso_int
+            placar_adv_periodo = placar_adv_final - placar_adv_int
+
+        if tipo_padrao in ("ambas_marcam_1t", "ambas_marcam_2t"):
+            ambas_marcaram = placar_nosso_periodo > 0 and placar_adv_periodo > 0
+            return avaliar_binario(ambas_marcaram, d)
+
+        # dupla_chance_1t/2t: resultado desse tempo, do ponto de vista de
+        # mandante/visitante (1X/12/2X) - mesma convenção "1"=mandante,
+        # "2"=visitante que resultado_final já usa.
+        if placar_nosso_periodo == placar_adv_periodo:
+            resultado_periodo = "empate"
+        elif placar_nosso_periodo > placar_adv_periodo:
+            resultado_periodo = "vitoria"
+        else:
+            resultado_periodo = "derrota"
+
+        if resultado_periodo == "empate":
+            acertou = d in ("1x", "2x")
+        elif resultado_periodo == "vitoria":
+            acertou = (d in ("1x", "12")) if mandante else (d in ("2x", "12"))
+        else:
+            acertou = (d in ("2x", "12")) if mandante else (d in ("1x", "12"))
+        return "acertou" if acertou else "errou"
 
     if tipo_padrao == "resultado_final":
         cur.execute(
