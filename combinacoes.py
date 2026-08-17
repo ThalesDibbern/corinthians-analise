@@ -20,7 +20,7 @@ import hashlib
 import json
 from itertools import combinations
 
-MERCADOS_JOGO_INTEIRO = {"escanteio_total", "cartao_total"}
+MERCADOS_JOGO_INTEIRO = {"escanteio_total", "cartao_total", "gols_total"}
 
 # NOVO (correção de bug real): mercados que pertencem a um JOGADOR
 # específico - cartão, falta, chute, chute no gol, desarme, impedimento.
