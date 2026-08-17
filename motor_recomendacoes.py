@@ -177,6 +177,22 @@ def identificar_tipo_padrao(mercado):
     # exatamente como aconteceu com escanteio/escanteios.
     if "cart" in nome and "total do jogo" in nome:
         return "cartao_total"
+    # NOVO (Onda 2 - Dupla Chance/Ambas Marcam por tempo, Marca em Ambos os
+    # Tempos): nomes fixos, sem ambiguidade (ver MARKET_TYPES_POR_TEMPO/
+    # MARKET_TYPES_MARCA_AMBOS_TEMPOS em atualizar_odds.py). Checados ANTES
+    # do " marca" genérico (equipe_marca) porque "Ambas Marcam..." e
+    # "...Marca em Ambos os Tempos" também contêm " marca" como substring -
+    # mesmo cuidado de ordem já usado em escanteio/cartão total.
+    if "dupla chance primeiro tempo" in nome:
+        return "dupla_chance_1t"
+    if "dupla chance segundo tempo" in nome:
+        return "dupla_chance_2t"
+    if "ambas marcam primeiro tempo" in nome:
+        return "ambas_marcam_1t"
+    if "ambas marcam segundo tempo" in nome:
+        return "ambas_marcam_2t"
+    if "marca em ambos os tempos" in nome:
+        return "marca_ambos_tempos"
     # NOVO (Mais/Menos gols e Equipe Marca): nomes fixos, sem ambiguidade
     # (ver MARKET_TYPES_GOLS_E_MARCA em atualizar_odds.py) - "gols total
     # do jogo" precisa vir ANTES de "gols do time", mesma lógica do
@@ -348,6 +364,46 @@ def buscar_frequencia_equipe_marca(cur, time_id):
     time (sem linha/handicap)."""
     cur.execute(
         "SELECT frequencia FROM padroes_time_marca WHERE time_id = %s",
+        (time_id,),
+    )
+    row = cur.fetchone()
+    return float(row[0]) if row else None
+
+
+def buscar_frequencia_dupla_chance_tempo(cur, time_id, periodo, lado, resultado):
+    """NOVO (Onda 2 - Dupla Chance por tempo): frequência de UM resultado
+    específico ('1X'/'12'/'2X') nesse período (1T/2T), separado por lado
+    (mandante/visitante), porque jogar em casa ou fora muda bastante a
+    chance de cada resultado."""
+    cur.execute(
+        """
+        SELECT frequencia FROM padroes_dupla_chance_tempo
+        WHERE time_id = %s AND periodo = %s AND lado = %s AND resultado = %s
+        """,
+        (time_id, periodo, lado, resultado),
+    )
+    row = cur.fetchone()
+    return float(row[0]) if row else None
+
+
+def buscar_frequencia_ambas_marcam_tempo(cur, time_id, periodo, lado):
+    """NOVO (Onda 2 - Ambas Marcam por tempo): frequência binária, separada
+    por período (1T/2T) e por lado (mandante/visitante)."""
+    cur.execute(
+        "SELECT frequencia FROM padroes_ambas_marcam_tempo WHERE time_id = %s AND periodo = %s AND lado = %s",
+        (time_id, periodo, lado),
+    )
+    row = cur.fetchone()
+    return float(row[0]) if row else None
+
+
+def buscar_frequencia_marca_ambos_tempos(cur, time_id):
+    """NOVO (Onda 2 - Marca em Ambos os Tempos): frequência binária, um
+    valor só por time (sem separação por lado - jogo inteiro, não faz
+    tanta diferença mandante/visitante quanto os mercados por tempo
+    isolado)."""
+    cur.execute(
+        "SELECT frequencia FROM padroes_marca_ambos_tempos WHERE time_id = %s",
         (time_id,),
     )
     row = cur.fetchone()
@@ -1099,6 +1155,53 @@ def calcular_recomendacoes(cur):
 
             if bate_nosso_time and not bate_adversario:
                 frequencia_bruta = buscar_frequencia_equipe_marca(cur, nosso_time_id)
+                if frequencia_bruta is not None:
+                    frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
+
+        elif tipo == "dupla_chance_1t" and not jogador_id and direcao_normalizada in ("1x", "12", "2x"):
+            # NOVO (Onda 2): Dupla Chance é mercado do JOGO (1X/12/2X são
+            # direção relativa a mandante/visitante, igual resultado_final)
+            # - não precisa de identificação de time por nome, cada
+            # direção já tem a própria frequência guardada (não é um par
+            # Mais/Menos complementar).
+            frequencia = buscar_frequencia_dupla_chance_tempo(
+                cur, nosso_time_id, "1T", mandante_filtro_atual, direcao_normalizada.upper()
+            )
+
+        elif tipo == "dupla_chance_2t" and not jogador_id and direcao_normalizada in ("1x", "12", "2x"):
+            frequencia = buscar_frequencia_dupla_chance_tempo(
+                cur, nosso_time_id, "2T", mandante_filtro_atual, direcao_normalizada.upper()
+            )
+
+        elif tipo == "ambas_marcam_1t" and not jogador_id and direcao_normalizada in ("sim", "não", "nao"):
+            # NOVO (Onda 2): Ambas Marcam também é mercado do JOGO (não
+            # depende de qual time está no texto) - mesma lógica.
+            frequencia_bruta = buscar_frequencia_ambas_marcam_tempo(cur, nosso_time_id, "1T", mandante_filtro_atual)
+            if frequencia_bruta is not None:
+                frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
+
+        elif tipo == "ambas_marcam_2t" and not jogador_id and direcao_normalizada in ("sim", "não", "nao"):
+            frequencia_bruta = buscar_frequencia_ambas_marcam_tempo(cur, nosso_time_id, "2T", mandante_filtro_atual)
+            if frequencia_bruta is not None:
+                frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
+
+        elif tipo == "marca_ambos_tempos" and not jogador_id and direcao_normalizada in ("sim", "não", "nao"):
+            # NOVO (Onda 2): esse já é por TIME de verdade (o texto tem
+            # "Equipe 1"/"Equipe 2" substituído pelo nome real) - mesma
+            # identificação por variantes de nome de gols_time/equipe_marca.
+            mercado_lower = mercado.lower()
+            adversario_id_calc = None
+            if mandante_id is not None and visitante_id is not None:
+                adversario_id_calc = visitante_id if mandante_id == nosso_time_id else mandante_id
+
+            candidatos_nosso_time = variantes_times.get(nosso_time_id, set())
+            candidatos_adversario = variantes_times.get(adversario_id_calc, set()) | {(adversario or "").lower()}
+
+            bate_nosso_time = any(c and c in mercado_lower for c in candidatos_nosso_time)
+            bate_adversario = any(c and c in mercado_lower for c in candidatos_adversario)
+
+            if bate_nosso_time and not bate_adversario:
+                frequencia_bruta = buscar_frequencia_marca_ambos_tempos(cur, nosso_time_id)
                 if frequencia_bruta is not None:
                     frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
