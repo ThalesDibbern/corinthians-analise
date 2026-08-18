@@ -991,9 +991,13 @@ PAGINA_HISTORICO = """
             </div>
             {% for item in calibracao.detalhamento %}
             <div class="modal-linha">
-                <span>{{ item.probabilidade }}%</span>
-                <span><b style="color:#f85149">{{ item.errou }}</b> erro(s) /
-                      <b style="color:#3fb950">{{ item.acertou }}</b> acerto(s)</span>
+                <span>{{ item.inicio }}% - {{ item.fim }}%</span>
+                <span>
+                    <b style="color:{{ '#3fb950' if item.taxa >= 50 else '#f85149' }}">{{ item.taxa }}% de acerto</b>
+                    <span style="color:#8b949e; font-size: 0.85em;">
+                        ({{ item.acertou }} acerto(s) / {{ item.errou }} erro(s))
+                    </span>
+                </span>
             </div>
             {% endfor %}
         </div>
@@ -1225,13 +1229,24 @@ def montar_resumo_historico(itens):
     return {"acertou": acertou, "errou": errou, "pendente": pendente, "taxa": taxa}
 
 
+# NOVO (17/08/2026): largura da faixa usada no card "Acertos e erros por
+# probabilidade histórica" - trocar pra 10 quando o histórico tiver volume
+# suficiente pra cada faixa continuar com amostra confiável (hoje, com
+# ~250 recomendações avaliadas, 20% dá uma média de ~50 por faixa; 10%
+# cairia pra ~25, mais instável nas pontas).
+FAIXA_CALIBRACAO_LARGURA = 20
+
+
 def buscar_calibracao(cur):
-    """NOVO: checagem de calibração - mostra, pra cada valor EXATO de
-    probabilidade histórica já visto, quantas vezes acertou e quantas errou
-    (detalhamento, mostrado no pop-up), e identifica qual FAIXA de 20% em
-    20% (0-20%, 20-40%, ...) teve a maior taxa de acerto (frase de
-    destaque). Com poucas apostas resolvidas ainda, isso é instável - fica
-    mais confiável conforme o histórico crescer."""
+    """ATUALIZADO (17/08/2026): antes mostrava, no detalhamento do pop-up,
+    cada valor EXATO de probabilidade histórica separado (ex: 90.23% e
+    90.22% apareciam como duas linhas diferentes, mesmo sendo
+    praticamente a mesma coisa) - agora agrupa em faixas de
+    FAIXA_CALIBRACAO_LARGURA% (0-20%, 20-40%, ...), mostrando a taxa de
+    acerto de cada faixa - mesmo agrupamento que já era usado só pra achar
+    a "melhor faixa" do card de destaque, agora reaproveitado pro
+    detalhamento inteiro também. Com poucas apostas resolvidas ainda, isso
+    é instável - fica mais confiável conforme o histórico crescer."""
     cur.execute(
         """
         SELECT probabilidade_historica, resultado, COUNT(*)
@@ -1247,31 +1262,39 @@ def buscar_calibracao(cur):
         por_valor.setdefault(prob_float, {"acertou": 0, "errou": 0})
         por_valor[prob_float][resultado] = contagem
 
-    detalhamento = [
-        {"probabilidade": prob, "acertou": dados["acertou"], "errou": dados["errou"]}
-        for prob, dados in sorted(por_valor.items(), reverse=True)
-    ]
-
-    # agrupa em faixas de 20% pra achar a de maior taxa de acerto
+    # agrupa em faixas de FAIXA_CALIBRACAO_LARGURA% - 100% cai na última
+    # faixa (senão viraria uma faixa "100-120" sozinha, sem sentido).
     faixas = {}
-    for item in detalhamento:
-        inicio_faixa = int(item["probabilidade"] // 20) * 20
+    for prob, dados in por_valor.items():
+        inicio_faixa = min(
+            int(prob // FAIXA_CALIBRACAO_LARGURA) * FAIXA_CALIBRACAO_LARGURA,
+            100 - FAIXA_CALIBRACAO_LARGURA,
+        )
         faixas.setdefault(inicio_faixa, {"acertou": 0, "errou": 0})
-        faixas[inicio_faixa]["acertou"] += item["acertou"]
-        faixas[inicio_faixa]["errou"] += item["errou"]
+        faixas[inicio_faixa]["acertou"] += dados["acertou"]
+        faixas[inicio_faixa]["errou"] += dados["errou"]
+
+    detalhamento = []
+    for inicio_faixa, dados in sorted(faixas.items(), reverse=True):
+        total = dados["acertou"] + dados["errou"]
+        taxa = round(100 * dados["acertou"] / total, 1) if total else 0.0
+        detalhamento.append({
+            "inicio": inicio_faixa,
+            "fim": inicio_faixa + FAIXA_CALIBRACAO_LARGURA,
+            "acertou": dados["acertou"],
+            "errou": dados["errou"],
+            "total": total,
+            "taxa": taxa,
+        })
 
     melhor_faixa = None
-    melhor_taxa = -1
-    for inicio_faixa, dados in faixas.items():
-        total = dados["acertou"] + dados["errou"]
-        if total == 0:
+    for item in detalhamento:
+        if item["total"] == 0:
             continue
-        taxa_faixa = dados["acertou"] / total
-        if taxa_faixa > melhor_taxa:
-            melhor_taxa = taxa_faixa
+        if melhor_faixa is None or item["taxa"] > melhor_faixa["taxa"]:
             melhor_faixa = {
-                "inicio": inicio_faixa, "fim": inicio_faixa + 20,
-                "taxa": round(taxa_faixa * 100, 1), "total": total,
+                "inicio": item["inicio"], "fim": item["fim"],
+                "taxa": item["taxa"], "total": item["total"],
             }
 
     return {"detalhamento": detalhamento, "melhor_faixa": melhor_faixa}
