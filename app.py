@@ -875,6 +875,22 @@ PAGINA_HISTORICO = """
             display: flex; justify-content: space-between; padding: 8px 0;
             border-bottom: 1px solid #21262d; font-size: 0.85rem;
         }
+        /* NOVO (17/08/2026): tabela expansível por faixa de probabilidade */
+        .calibracao-faixa { border-bottom: 1px solid #21262d; }
+        .calibracao-faixa .modal-linha { border-bottom: none; }
+        .modal-linha-clicavel { cursor: pointer; }
+        .modal-linha-clicavel:hover { background: #1c2128; }
+        .faixa-seta { display: inline-block; font-size: 0.7rem; color: #8b949e; transition: transform 0.15s; margin-left: 4px; }
+        .faixa-detalhe { padding: 4px 0 12px; }
+        .tabela-faixa-wrap { overflow-x: auto; max-width: 100%; }
+        .tabela-faixa { border-collapse: collapse; width: 100%; font-size: 0.74rem; white-space: nowrap; }
+        .tabela-faixa th {
+            text-align: left; color: #8b949e; font-weight: 600; padding: 6px 10px;
+            border-bottom: 1px solid #30363d; position: sticky; top: 0; background: #161b22;
+        }
+        .tabela-faixa td { padding: 6px 10px; border-bottom: 1px solid #21262d; color: #c9d1d9; }
+        .tabela-faixa tr.linha-acertou td:last-child { color: #3fb950; }
+        .tabela-faixa tr.linha-errou td:last-child { color: #f85149; }
         .cartao {
             background: #161b22; border: 1px solid #30363d; border-radius: 12px;
             padding: 16px 20px; margin-bottom: 12px;
@@ -990,14 +1006,19 @@ PAGINA_HISTORICO = """
                 <span class="modal-fechar" onclick="document.getElementById('modal-calibracao').style.display='none'">✕</span>
             </div>
             {% for item in calibracao.detalhamento %}
-            <div class="modal-linha">
-                <span>{{ item.inicio }}% - {{ item.fim }}%</span>
-                <span>
-                    <b style="color:{{ '#3fb950' if item.taxa >= 50 else '#f85149' }}">{{ item.taxa }}% de acerto</b>
-                    <span style="color:#8b949e; font-size: 0.85em;">
-                        ({{ item.acertou }} acerto(s) / {{ item.errou }} erro(s))
+            <div class="calibracao-faixa">
+                <div class="modal-linha modal-linha-clicavel" onclick="toggleFaixaCalibracao({{ item.inicio }})">
+                    <span>{{ item.inicio }}% - {{ item.fim }}%
+                        <span class="faixa-seta" id="seta-faixa-{{ item.inicio }}">▾</span>
                     </span>
-                </span>
+                    <span>
+                        <b style="color:{{ '#3fb950' if item.taxa >= 50 else '#f85149' }}">{{ item.taxa }}% de acerto</b>
+                        <span style="color:#8b949e; font-size: 0.85em;">
+                            ({{ item.acertou }} acerto(s) / {{ item.errou }} erro(s))
+                        </span>
+                    </span>
+                </div>
+                <div class="faixa-detalhe" id="detalhe-faixa-{{ item.inicio }}" style="display:none;"></div>
             </div>
             {% endfor %}
         </div>
@@ -1111,6 +1132,66 @@ PAGINA_HISTORICO = """
             const btnProximo = document.getElementById('proximo-' + listaId);
             if (btnAnterior) btnAnterior.disabled = (pagina === 0);
             if (btnProximo) btnProximo.disabled = (pagina >= total - 1);
+        }
+
+
+        // NOVO (17/08/2026): tabela expansivel por faixa de probabilidade,
+        // no card "Acertos e erros por probabilidade historica" - busca
+        // sob demanda (so no primeiro clique de cada faixa) e guarda em
+        // cache pra nao rebuscar se abrir/fechar de novo.
+        const CACHE_FAIXA_CALIBRACAO = {};
+
+        function toggleFaixaCalibracao(inicioFaixa) {
+            const detalheDiv = document.getElementById('detalhe-faixa-' + inicioFaixa);
+            const seta = document.getElementById('seta-faixa-' + inicioFaixa);
+            const abrindo = detalheDiv.style.display === 'none';
+            detalheDiv.style.display = abrindo ? 'block' : 'none';
+            seta.style.transform = abrindo ? 'rotate(180deg)' : 'rotate(0deg)';
+            if (!abrindo) return;
+
+            if (CACHE_FAIXA_CALIBRACAO[inicioFaixa]) {
+                renderizarTabelaFaixa(inicioFaixa, CACHE_FAIXA_CALIBRACAO[inicioFaixa]);
+                return;
+            }
+            detalheDiv.innerHTML = '<div class="vazio">Carregando...</div>';
+            fetch(`/api/calibracao/${inicioFaixa}`)
+                .then(r => r.json())
+                .then(itens => {
+                    CACHE_FAIXA_CALIBRACAO[inicioFaixa] = itens;
+                    renderizarTabelaFaixa(inicioFaixa, itens);
+                });
+        }
+
+        function renderizarTabelaFaixa(inicioFaixa, itens) {
+            const detalheDiv = document.getElementById('detalhe-faixa-' + inicioFaixa);
+            if (!itens.length) {
+                detalheDiv.innerHTML = '<div class="vazio">Nenhuma recomendacao avaliada nessa faixa ainda.</div>';
+                return;
+            }
+            const escapar = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+            const linhas = itens.map(i => `
+                <tr class="linha-${i.resultado}">
+                    <td>${i.data_jogo} \u00b7 ${escapar(i.nosso_time)} x ${escapar(i.adversario)}</td>
+                    <td>${escapar(i.descricao)}</td>
+                    <td>${escapar(i.casa_aposta)}</td>
+                    <td>${i.odd_oferecida}</td>
+                    <td>${i.probabilidade_historica}%</td>
+                    <td>${i.valor_esperado}</td>
+                    <td>${i.resultado}</td>
+                </tr>
+            `).join('');
+            detalheDiv.innerHTML = `
+                <div class="tabela-faixa-wrap">
+                    <table class="tabela-faixa">
+                        <thead>
+                            <tr><th>Jogo</th><th>Mercado</th><th>Casa</th><th>Odd</th><th>Prob.</th><th>VE</th><th>Resultado</th></tr>
+                        </thead>
+                        <tbody>${linhas}</tbody>
+                    </table>
+                </div>
+            `;
         }
 
         function mudarPagina(listaId, direcao) {
@@ -1298,6 +1379,36 @@ def buscar_calibracao(cur):
             }
 
     return {"detalhamento": detalhamento, "melhor_faixa": melhor_faixa}
+
+
+def buscar_detalhamento_faixa(cur, inicio_faixa):
+    """NOVO (17/08/2026): detalhamento completo (jogo, mercado, casa, odd,
+    probabilidade, VE, resultado) de todas as recomendações avaliadas
+    dentro de uma faixa de probabilidade específica - usado pelo endpoint
+    AJAX que abre a tabela ao clicar numa faixa do card "Acertos e erros
+    por probabilidade histórica". Mesma query "crua" (sem a deduplicação
+    de mercados do jogo inteiro que buscar_historico aplica) que
+    buscar_calibracao já usa pra contar - os números batem certinho com o
+    resumo que já aparece por faixa, sem essa tabela mostrar uma
+    quantidade diferente do que o card já prometeu."""
+    fim_faixa = inicio_faixa + FAIXA_CALIBRACAO_LARGURA
+    cur.execute(
+        """
+        SELECT h.data_jogo, t.nome, j.adversario, h.descricao, h.casa_aposta,
+               h.odd_oferecida, h.probabilidade_historica, h.valor_esperado, h.resultado
+        FROM historico_recomendacoes h
+        JOIN jogos j ON j.id = h.jogo_id
+        JOIN times t ON t.id = j.nosso_time_id
+        WHERE h.resultado IN ('acertou', 'errou')
+          AND h.probabilidade_historica >= %s
+          AND (h.probabilidade_historica < %s OR %s >= 100)
+        ORDER BY h.data_jogo DESC, h.id DESC
+        """,
+        (inicio_faixa, fim_faixa, fim_faixa),
+    )
+    colunas = ["data_jogo", "nosso_time", "adversario", "descricao", "casa_aposta",
+               "odd_oferecida", "probabilidade_historica", "valor_esperado", "resultado"]
+    return [dict(zip(colunas, row)) for row in cur.fetchall()]
 
 
 # NOVO: piso de probabilidade histórica pra uma múltipla aparecer na lista
@@ -2531,6 +2642,30 @@ def api_confronto_direto(time_id, adversario_id):
     finally:
         conn.close()
     return jsonify(jogos)
+
+
+@app.route("/api/calibracao/<int:inicio_faixa>")
+def api_calibracao_detalhamento(inicio_faixa):
+    """NOVO (17/08/2026): endpoint AJAX chamado ao clicar numa faixa do
+    card "Acertos e erros por probabilidade histórica" em /historico -
+    devolve o detalhamento completo (jogo, mercado, casa, odd,
+    probabilidade, VE, resultado) de todas as recomendações avaliadas
+    daquela faixa. Buscado sob demanda (só quando o usuário clica pra
+    abrir aquela faixa específica), não pré-carregado - evita pesar a
+    página conforme o histórico for crescendo com o tempo."""
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        itens = buscar_detalhamento_faixa(cur, inicio_faixa)
+        cur.close()
+    finally:
+        conn.close()
+    for item in itens:
+        item["data_jogo"] = str(item["data_jogo"])
+        item["odd_oferecida"] = float(item["odd_oferecida"])
+        item["probabilidade_historica"] = float(item["probabilidade_historica"])
+        item["valor_esperado"] = float(item["valor_esperado"])
+    return jsonify(itens)
 
 
 @app.route("/minhas-apostas")
