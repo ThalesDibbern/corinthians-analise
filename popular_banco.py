@@ -106,6 +106,19 @@ def _numero_rodada(rodada):
 # de tempo jogado fora, e crescia sem limite ao adicionar mais times.
 STATUS_JOGO_FINALIZADO = {"FT", "AET", "PEN"}
 
+# NOVO (correção estrutural do bug de estatística coletada no meio do jogo -
+# decisão de arquitetura de 17/08/2026, "Opção 1"): enquanto o jogo tiver
+# terminado há menos desse tanto de horas, a estatística NÃO é tratada como
+# definitiva - mesmo que já exista uma linha salva, o script busca de novo
+# a cada execução do cron. O /fixtures/statistics da API-Football pode
+# ficar atrasado em relação ao status do fixture (o jogo já aparece "FT"
+# antes desse endpoint terminar de agregar os números finais) - já
+# confirmado em 2 jogos reais (Bahia x Corinthians 26/07 e Athletico-PR x
+# Bragantino 15/08). O jogo mais longo dura ~2h30 (90min + intervalo +
+# acréscimos); 6h dá uma folga generosa pro backend da própria API-Football
+# terminar de fechar o dado do lado deles.
+JANELA_ESPERA_ESTATISTICA_HORAS = 6
+
 # NOVO (multi-time): os times rastreados vêm da própria tabela `times`
 # (marcados com `rastreado = TRUE`) - adicionar um time novo é: preencher
 # os IDs dele + marcar rastreado=TRUE, e esse script já passa a coletar o
@@ -213,6 +226,23 @@ def jogo_tem_estatisticas_jogador(cur, fixture_id):
     """Verifica se esse jogo já tem as estatísticas individuais por jogador salvas."""
     cur.execute("SELECT 1 FROM jogador_estatisticas_jogo WHERE jogo_id = %s LIMIT 1", (fixture_id,))
     return cur.fetchone() is not None
+
+
+def dentro_da_janela_de_espera_estatistica(cur, jogo_id):
+    """NOVO (correção estrutural do bug de estatística coletada no meio do
+    jogo): True se o jogo terminou há menos de JANELA_ESPERA_ESTATISTICA_HORAS -
+    nesse caso, `jogo_tem_estatisticas`/`jogo_tem_estatisticas_jogador`
+    retornando True NÃO é motivo suficiente pra pular a busca (ver uso no
+    loop principal). Usa COALESCE com `data_jogo` como fallback pro caso
+    raro de uma linha antiga sem `datahora_jogo` preenchido (campo
+    adicionado depois)."""
+    cur.execute(
+        "SELECT (NOW() - COALESCE(datahora_jogo, data_jogo::timestamp)) < INTERVAL '%s hours' "
+        "FROM jogos WHERE id = %s",
+        (JANELA_ESPERA_ESTATISTICA_HORAS, jogo_id),
+    )
+    row = cur.fetchone()
+    return bool(row[0]) if row else False
 
 
 def jogo_tem_escalacao(cur, fixture_id):
@@ -812,8 +842,14 @@ def main():
                         continue
 
                     falta_eventos = not jogo_ja_processado(cur, jogo_id)
-                    falta_estatisticas = not jogo_tem_estatisticas(cur, jogo_id)
-                    falta_estatisticas_jogador = not jogo_tem_estatisticas_jogador(cur, jogo_id)
+                    # NOVO (correção estrutural do bug de estatística coletada
+                    # no meio do jogo): dentro da janela de espera, força
+                    # `falta_estatisticas`/`falta_estatisticas_jogador` = True
+                    # mesmo que já exista linha salva - o dado só é tratado
+                    # como definitivo depois que a janela passar.
+                    dentro_da_janela = dentro_da_janela_de_espera_estatistica(cur, jogo_id)
+                    falta_estatisticas = not jogo_tem_estatisticas(cur, jogo_id) or dentro_da_janela
+                    falta_estatisticas_jogador = not jogo_tem_estatisticas_jogador(cur, jogo_id) or dentro_da_janela
                     falta_escalacao = not jogo_tem_escalacao(cur, jogo_id)
 
                     if not falta_eventos and not falta_estatisticas \
@@ -833,6 +869,13 @@ def main():
                         time.sleep(7)  # respeita o limite de ~10 requisições por minuto do plano grátis
 
                     if falta_estatisticas:
+                        if dentro_da_janela and jogo_tem_estatisticas(cur, jogo_id):
+                            # NOVO: já tinha estatística salva, mas ainda
+                            # está dentro da janela de espera - apaga a
+                            # linha antiga antes de regravar (senão duplica,
+                            # já que o INSERT abaixo não tem ON CONFLICT).
+                            cur.execute("DELETE FROM estatisticas_jogo WHERE jogo_id = %s", (jogo_id,))
+                            print("  (dentro da janela de espera - rebuscando estatística de time pra confirmar se já é definitiva)")
                         estatisticas = buscar_estatisticas(fixture_id)
                         salvos = salvar_estatisticas(cur, jogo_id, estatisticas, home_team_id)
                         print(f"  -> estatísticas de {salvos} lado(s) salvas.")
@@ -840,6 +883,9 @@ def main():
                         time.sleep(7)
 
                     if falta_estatisticas_jogador:
+                        if dentro_da_janela and jogo_tem_estatisticas_jogador(cur, jogo_id):
+                            cur.execute("DELETE FROM jogador_estatisticas_jogo WHERE jogo_id = %s", (jogo_id,))
+                            print("  (dentro da janela de espera - rebuscando estatística de jogador pra confirmar se já é definitiva)")
                         stats_jogadores = buscar_estatisticas_jogadores(fixture_id)
                         salvos = salvar_estatisticas_jogadores(cur, jogo_id, stats_jogadores, home_team_id)
                         print(f"  -> estatísticas individuais de {salvos} jogador(es) salvas.")
