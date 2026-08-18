@@ -363,6 +363,20 @@ def buscar_frequencia_gols_time(cur, linha, time_id):
     return float(row[0]) if row else None
 
 
+def buscar_frequencia_cartao_time(cur, linha, time_id):
+    """NOVO (Cartão por TIME - mercado de linha Mais/Menos, destravado pela
+    correção do bug de plural em atualizar_odds.py): lê de
+    padroes_time_linha, tipo="cartao" - essa tabela já é populada há tempo
+    por calcular_padrao_cartao_time (motor_padroes.py), só nunca tinha sido
+    lida aqui pra gerar recomendação de verdade."""
+    cur.execute(
+        "SELECT frequencia FROM padroes_time_linha WHERE tipo = %s AND linha = %s AND time_id = %s",
+        ("cartao", linha, time_id),
+    )
+    row = cur.fetchone()
+    return float(row[0]) if row else None
+
+
 def buscar_frequencia_gols_total(cur, linha, time_id):
     """NOVO: frequência de gols do jogo INTEIRO (mandante + visitante
     somados) passar de uma linha - mesmo padrão de
@@ -1010,6 +1024,36 @@ def calcular_recomendacoes(cur):
                     frequencia_bruta = min(round(frequencia_bruta * fator_grupo_a_aplicado, 2), 100.0)
 
                 frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
+
+        elif tipo == "cartao" and not jogador_id \
+                and direcao_normalizada in ("mais", "menos") and linha is not None:
+            # NOVO: cartão por TIME (mercado de linha Mais/Menos, "Cartões -
+            # Mais/Menos Equipe 1/2") - destravado pela correção do bug de
+            # plural em atualizar_odds.py ("Cartões" não batia com
+            # "cartão"/"cartao"). Mesma identificação de time por variantes
+            # de nome que escanteio_time/gols_time já usam. A tabela
+            # padroes_time_linha (tipo="cartao") já existe e já é populada
+            # há tempo por calcular_padrao_cartao_time - só faltava esse
+            # bloco pra ler e virar recomendação de verdade.
+            # SEM ajuste de Grupo A por enquanto: árbitro/estilo (usados no
+            # cartão de JOGADOR acima) foram desenhados nesse nível
+            # específico - extrapolar pra TIME fica como possível melhoria
+            # futura, não decidido ainda se faz sentido.
+            mercado_lower = mercado.lower()
+            adversario_id_calc = None
+            if mandante_id is not None and visitante_id is not None:
+                adversario_id_calc = visitante_id if mandante_id == nosso_time_id else mandante_id
+
+            candidatos_nosso_time = variantes_times.get(nosso_time_id, set())
+            candidatos_adversario = variantes_times.get(adversario_id_calc, set()) | {(adversario or "").lower()}
+
+            bate_nosso_time = any(c and c in mercado_lower for c in candidatos_nosso_time)
+            bate_adversario = any(c and c in mercado_lower for c in candidatos_adversario)
+
+            if bate_nosso_time and not bate_adversario:
+                frequencia_bruta = buscar_frequencia_cartao_time(cur, linha, nosso_time_id)
+                if frequencia_bruta is not None:
+                    frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "falta_cometida" and jogador_id \
                 and direcao_normalizada in ("mais", "menos") and linha is not None:
