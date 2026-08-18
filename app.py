@@ -4099,8 +4099,12 @@ PAGINA_TIMES = """
         <div class="titulo-coluna" style="margin-bottom: 8px;">🔗 Correlação entre estatísticas (times rastreados)</div>
         <p class="correlacao-aviso">
             Dentro do MESMO jogo, como uma estatística tende a se mover junto com outra - "acima/abaixo da média"
-            se refere ao total do jogo (mandante + visitante somados). <b>Informativo por enquanto, não afeta
-            nenhuma recomendação.</b>
+            se refere ao total do jogo (mandante + visitante somados). <b>Dois destes pares JÁ afetam as
+            recomendações</b> (chutes → escanteios entra no mercado de Escanteios Total do Jogo; faltas → cartões
+            entra no de Cartões Total do Jogo): o sistema estima quanto de chute/falta esse confronto tende a
+            produzir somando a média histórica dos dois times, e aplica o efeito correspondente. O par
+            desarmes → faltas continua só informativo, porque não existe mercado de "Faltas Total do Jogo" pra
+            apostar.
         </p>
         <div class="correlacao-grid">
             {% for c in correlacoes %}
