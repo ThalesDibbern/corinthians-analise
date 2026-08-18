@@ -1222,16 +1222,11 @@ PAGINA_HISTORICO = """
         pras 5 melhores de cada jogo, o de cima não é).</u>
     </p>
     {% endif %}
-    {% endif %}
-    {% for c in multiplas_destaque %}
-        <div class="cartao">
+
+    {% macro cartao_multipla(c) %}
+        <div class="cartao item-pagina">
             <div class="cartao-topo">
                 <span class="jogo">
-                    <!-- CORRIGIDO: mesmo problema/mesma correção do
-                         cartao_combo() da página principal (ver
-                         comentário lá) - cada jogo mostra a PRÓPRIA data,
-                         em vez de só a do primeiro jogo da combinação
-                         pra todos. -->
                     {% for j in c.jogos %}{{ j.data_jogo }} · {{ j.nosso_time }} x {{ j.adversario }}{% if not loop.last %} + {% endif %}{% endfor %}
                 </span>
                 <span class="badge badge-{{ c.resultado }}">{{ c.resultado }}</span>
@@ -1244,7 +1239,67 @@ PAGINA_HISTORICO = """
                 <span>Valor esperado: <b>{{ c.valor_esperado }}</b></span>
             </div>
         </div>
-        {% endfor %}
+    {% endmacro %}
+
+    <div class="colunas-resultado">
+        <div class="coluna">
+            <div class="coluna-cabecalho coluna-verde">✅ Acertou ({{ multiplas_acertou|length }})</div>
+            <div id="lista-multiplas-acertou">
+                {% if multiplas_acertou %}
+                    {% for c in multiplas_acertou %}{{ cartao_multipla(c) }}{% endfor %}
+                {% else %}
+                    <div class="vazio">Nenhum acerto ainda.</div>
+                {% endif %}
+            </div>
+            {% if multiplas_acertou|length > 10 %}
+            <div class="paginacao">
+                <button class="btn-pagina" id="anterior-lista-multiplas-acertou" onclick="mudarPagina('lista-multiplas-acertou', -1)">← Anterior</button>
+                <span id="label-lista-multiplas-acertou"></span>
+                <button class="btn-pagina" id="proximo-lista-multiplas-acertou" onclick="mudarPagina('lista-multiplas-acertou', 1)">Próxima →</button>
+            </div>
+            {% endif %}
+        </div>
+        <div class="coluna">
+            <div class="coluna-cabecalho coluna-vermelha">❌ Errou ({{ multiplas_errou|length }})</div>
+            <div id="lista-multiplas-errou">
+                {% if multiplas_errou %}
+                    {% for c in multiplas_errou %}{{ cartao_multipla(c) }}{% endfor %}
+                {% else %}
+                    <div class="vazio">Nenhum erro ainda.</div>
+                {% endif %}
+            </div>
+            {% if multiplas_errou|length > 10 %}
+            <div class="paginacao">
+                <button class="btn-pagina" id="anterior-lista-multiplas-errou" onclick="mudarPagina('lista-multiplas-errou', -1)">← Anterior</button>
+                <span id="label-lista-multiplas-errou"></span>
+                <button class="btn-pagina" id="proximo-lista-multiplas-errou" onclick="mudarPagina('lista-multiplas-errou', 1)">Próxima →</button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="secao-pendentes">
+        <div class="coluna-cabecalho coluna-cinza">⏳ Pendente ({{ multiplas_pendente|length }})</div>
+        <div id="lista-multiplas-pendente">
+            {% if multiplas_pendente %}
+                {% for c in multiplas_pendente %}{{ cartao_multipla(c) }}{% endfor %}
+            {% else %}
+                <div class="vazio">Nenhuma múltipla pendente no momento.</div>
+            {% endif %}
+        </div>
+        {% if multiplas_pendente|length > 10 %}
+        <div class="paginacao">
+            <button class="btn-pagina" id="anterior-lista-multiplas-pendente" onclick="mudarPagina('lista-multiplas-pendente', -1)">← Anterior</button>
+            <span id="label-lista-multiplas-pendente"></span>
+            <button class="btn-pagina" id="proximo-lista-multiplas-pendente" onclick="mudarPagina('lista-multiplas-pendente', 1)">Próxima →</button>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        ['lista-multiplas-acertou', 'lista-multiplas-errou', 'lista-multiplas-pendente'].forEach(renderizarPagina);
+    </script>
+    {% endif %}
 </body>
 </html>
 """
@@ -1484,6 +1539,9 @@ def historico():
         calibracao = buscar_calibracao(cur)
         multiplas_destaque = buscar_multiplas_destaque(cur)
         resumo_multiplas = montar_resumo_multiplas(cur)
+        multiplas_acertou = [c for c in multiplas_destaque if c["resultado"] == "acertou"]
+        multiplas_errou = [c for c in multiplas_destaque if c["resultado"] == "errou"]
+        multiplas_pendente = [c for c in multiplas_destaque if c["resultado"] == "pendente"]
         banca_atual = buscar_banca(cur, session["usuario_id"])
         cur.close()
     finally:
@@ -1506,6 +1564,8 @@ def historico():
         PAGINA_HISTORICO, acertos=acertos, erros=erros, pendentes=pendentes,
         resumo=resumo, calibracao=calibracao,
         multiplas_destaque=multiplas_destaque, resumo_multiplas=resumo_multiplas,
+        multiplas_acertou=multiplas_acertou, multiplas_errou=multiplas_errou,
+        multiplas_pendente=multiplas_pendente,
         nav_html=barra_navegacao("historico", round(banca_atual, 2)),
     )
 
