@@ -4319,7 +4319,8 @@ PAGINA_TIME = """
                 <p class="estilo-aviso">
                     Ofensivo = o quanto o próprio {{ nome_time }} gera esse evento. Defensivo = o quanto jogar
                     CONTRA o {{ nome_time }} faz o adversário gerar mais ou menos esse evento. Comparado só entre
-                    os times rastreados hoje - <b>informativo por enquanto, não afeta nenhuma recomendação</b>.
+                    os times rastreados hoje - <b>já usado como ajuste na fórmula de recomendação (cartão e
+                    impedimento de jogador), além de aparecer aqui pra consulta.</b>
                 </p>
                 {% for tipo, papeis in estilo_time.items() %}
                 {% set titulo_tipo = papeis.ofensivo.titulo if papeis.ofensivo is defined else papeis.defensivo.titulo %}
@@ -4384,7 +4385,8 @@ PAGINA_TIME = """
                     Como o {{ nome_time }} se sai dependendo de onde estava na tabela ANTES de cada jogo (G4/meio/
                     Z4/rebaixamento) - "depois de vitória" vs "depois de derrota" mostra se ele tende a embalar ou
                     afundar dentro da mesma zona. Zonas simplificadas (não distingue Libertadores/Sul-Americana
-                    ainda). <b>Informativo por enquanto, não afeta nenhuma recomendação.</b>
+                    ainda). <b>Já usado como ajuste na fórmula de recomendação (resultado final e escanteio de
+                    time), além de aparecer aqui pra consulta.</b>
                 </p>
                 {% for zona_key, z in padroes_zona.items() %}
                 <div style="margin-top: 16px;">
