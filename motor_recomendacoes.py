@@ -131,6 +131,13 @@ FATOR_RODADA_MAXIMO = 1.15
 FATOR_ESTILO_MINIMO = 0.85
 FATOR_ESTILO_MAXIMO = 1.15
 
+# NOVO (Correlação entre Estatísticas na fórmula - 18/08/2026): mesma faixa
+# individual dos outros fatores do Grupo A. Esse é o PRIMEIRO fator do
+# Grupo A a atuar em mercado de JOGO INTEIRO (escanteio_total/cartao_total);
+# todos os outros (Zona/Rodada/Estilo) são por time ou por jogador.
+FATOR_CORRELACAO_MINIMO = 0.85
+FATOR_CORRELACAO_MAXIMO = 1.15
+
 # NOVO (Grupo A): teto combinado - depois de multiplicar TODOS os fatores
 # que atuam no mesmo mercado ao mesmo tempo, o produto final nunca passa
 # desse intervalo, não importa quantos fatores concordaram entre si.
@@ -849,6 +856,166 @@ def buscar_fator_estilo(cur, time_id, tipo, papel):
     fator = float(row[0])
     return max(FATOR_ESTILO_MINIMO, min(FATOR_ESTILO_MAXIMO, fator))
 
+
+# ========= NOVO (Correlação entre Estatísticas na fórmula) =========
+#
+# Diferente de Zona/Rodada/Estilo, que descrevem uma característica do time
+# JÁ CONHECIDA antes do jogo (ele está no G4, ele é ofensivo, é a rodada
+# 15), a correlação mede a relação entre DUAS estatísticas que só existem
+# depois do apito inicial, dentro do MESMO jogo (chutes e escanteios da
+# mesma partida). Isso significa que ela NÃO pode ser aplicada direto: no
+# momento de gerar a recomendação, "chutes vai ficar acima da média?" é
+# uma incógnita tão grande quanto a própria estatística que a gente quer
+# prever.
+#
+# Solução (2 etapas):
+#   1) ESTIMAR A pra esse confronto usando a média histórica de cada um dos
+#      dois times naquela estatística, somadas (mandante + visitante). Isso
+#      já é dado conhecido ANTES do jogo.
+#   2) Comparar essa estimativa com a média da liga (media_a, já salva) pra
+#      decidir se esse jogo é "de A alto" ou "de A baixo", e então aplicar
+#      o efeito correspondente sobre B (valor_b_acima ou valor_b_abaixo).
+#
+# Não precisou de tabela/coluna/migração nova: a média geral de B (o
+# denominador que transforma o valor bruto em FATOR) é derivável do que já
+# está salvo, porque os grupos "acima" e "abaixo" particionam TODOS os
+# jogos sem sobra - a média ponderada dos dois é exatamente a média geral.
+
+# Pares que viram ajuste de verdade. Só entram aqui pares cujo lado B tem
+# mercado apostável real implementado no projeto (princípio do projeto:
+# confirmar mercado no nível certo antes de integrar estatística na
+# fórmula). O terceiro par calculado por motor_padroes.py
+# (desarmes -> faltas) continua existindo e aparecendo na tela, mas fica
+# de fora daqui: não existe mercado "Faltas Total do Jogo" implementado, e
+# não está confirmado se a Superbet sequer oferece esse mercado.
+#
+# Formato: tipo_de_mercado -> (par_no_banco, coluna_de_A_em_estatisticas_jogo)
+CORRELACAO_POR_MERCADO = {
+    "escanteio_total": ("chutes_escanteios", "finalizacoes"),
+    "cartao_total": ("faltas_cartoes", "faltas"),
+}
+
+
+def buscar_media_estatistica_time(cur, time_id, coluna):
+    """Média histórica de UM time numa estatística do próprio lado dele
+    (não o total do jogo) - usada pra estimar quanto de A esse confronto
+    tende a produzir, ANTES do jogo acontecer.
+
+    Funciona inclusive pra time NÃO rastreado: quando ele enfrenta um time
+    nosso, `estatisticas_jogo` guarda a linha dos DOIS lados, então o dado
+    dele existe (amostra menor, só os jogos contra times nossos, mas real).
+
+    Dedup por `fixture_id_api` é obrigatório: quando os dois times de um
+    jogo são rastreados, esse mesmo jogo real aparece 2x em `jogos` (uma
+    visão pra cada time) - sem o DISTINCT, o jogo pesaria dobrado na média.
+    """
+    if time_id is None or coluna not in ("finalizacoes", "faltas"):
+        return None
+
+    cur.execute(
+        f"""
+        SELECT AVG(valor), COUNT(*)
+        FROM (
+            SELECT DISTINCT ON (j.fixture_id_api) eg.{coluna} AS valor
+            FROM jogos j
+            JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
+            WHERE j.data_jogo < CURRENT_DATE
+              AND j.fixture_id_api IS NOT NULL
+              AND eg.{coluna} IS NOT NULL
+              AND (
+                    (j.mandante_id = %s AND eg.lado = 'mandante')
+                 OR (j.visitante_id = %s AND eg.lado = 'visitante')
+              )
+            ORDER BY j.fixture_id_api, j.id
+        ) unicos
+        """,
+        (time_id, time_id),
+    )
+    row = cur.fetchone()
+    if not row or row[0] is None or row[1] < JOGOS_MINIMOS_FATOR_RECOMENDACAO:
+        return None
+    return float(row[0])
+
+
+def buscar_correlacao_liga(cur, par):
+    """Lê a correlação geral da liga já calculada por motor_padroes.py.
+
+    Devolve (media_a, valor_b_acima, valor_b_abaixo, media_b) ou None.
+
+    `media_b` NÃO está salva no banco - é derivada aqui. Como os grupos
+    "A acima da média" e "A abaixo da média" cobrem todos os jogos sem
+    sobra nem sobreposição, a média ponderada dos dois grupos é exatamente
+    a média geral de B. Por isso essa integração não precisou de migração.
+
+    Exige amostra mínima nos DOIS lados: um lado raso significa que o
+    "efeito" medido é ruído de poucos jogos, não sinal - mesmo cuidado que
+    motivou o piso mais alto do fator de Zona da Tabela.
+    """
+    cur.execute(
+        """
+        SELECT media_a, valor_b_acima, valor_b_abaixo, jogos_acima, jogos_abaixo, jogos_total
+        FROM padroes_correlacao_estatisticas
+        WHERE par = %s
+        """,
+        (par,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+
+    media_a, valor_b_acima, valor_b_abaixo, jogos_acima, jogos_abaixo, jogos_total = row
+    if jogos_acima < JOGOS_MINIMOS_FATOR_RECOMENDACAO or jogos_abaixo < JOGOS_MINIMOS_FATOR_RECOMENDACAO:
+        return None
+    if not jogos_total:
+        return None
+
+    media_b = (
+        float(valor_b_acima) * jogos_acima + float(valor_b_abaixo) * jogos_abaixo
+    ) / float(jogos_total)
+    if media_b == 0:
+        return None
+
+    return float(media_a), float(valor_b_acima), float(valor_b_abaixo), media_b
+
+
+def buscar_fator_correlacao(cur, tipo_padrao, mandante_id, visitante_id):
+    """Fator de correlação pra um mercado de JOGO INTEIRO.
+
+    Retorna None (fator simplesmente ignorado por combinar_fatores) em
+    qualquer situação de dúvida: par não mapeado, correlação sem amostra,
+    ou um dos dois times sem média própria suficiente. Nunca "chuta" -
+    preferir ficar sem ajuste é sempre mais seguro que aplicar um ajuste
+    baseado em amostra rasa.
+    """
+    config = CORRELACAO_POR_MERCADO.get(tipo_padrao)
+    if not config or mandante_id is None or visitante_id is None:
+        return None
+
+    par, coluna_a = config
+
+    dados = buscar_correlacao_liga(cur, par)
+    if dados is None:
+        return None
+    media_a, valor_b_acima, valor_b_abaixo, media_b = dados
+
+    media_mandante = buscar_media_estatistica_time(cur, mandante_id, coluna_a)
+    media_visitante = buscar_media_estatistica_time(cur, visitante_id, coluna_a)
+    if media_mandante is None or media_visitante is None:
+        return None
+
+    # Etapa 1: estimativa de A pra ESSE confronto (soma dos dois lados,
+    # porque media_a da liga também é do TOTAL do jogo - as duas coisas
+    # precisam estar na mesma unidade pra comparação fazer sentido).
+    a_estimado = media_mandante + media_visitante
+
+    # Etapa 2: escolhe o lado do efeito, mesma regra de corte usada no
+    # cálculo original (> média = grupo "acima"; <= média = grupo "abaixo").
+    valor_b = valor_b_acima if a_estimado > media_a else valor_b_abaixo
+
+    # Etapa 3: vira fator dividindo pela média geral de B.
+    fator = valor_b / media_b
+    return max(FATOR_CORRELACAO_MINIMO, min(FATOR_CORRELACAO_MAXIMO, fator))
+
 # ================== fim das funções novas do Grupo A ==================
 
 
@@ -1157,6 +1324,25 @@ def calcular_recomendacoes(cur):
                 veio_de_confronto_direto = True
             else:
                 frequencia_bruta = buscar_frequencia_escanteio_total(cur, linha, nosso_time_id)
+
+            # NOVO (Grupo A - Correlação entre Estatísticas): primeiro fator
+            # do Grupo A a atuar num mercado de JOGO INTEIRO. Par usado:
+            # chutes -> escanteios (jogo com muito chute tende a ter mais
+            # escanteio - o time que ataca mais gera as duas coisas juntas).
+            # Aplicado DEPOIS da frequência ser resolvida, exatamente como
+            # em escanteio_time - inclusive quando ela veio de confronto
+            # direto (o ajuste é sobre o contexto do jogo, não sobre a fonte
+            # de onde a frequência saiu).
+            if frequencia_bruta is not None:
+                fator_correlacao = buscar_fator_correlacao(
+                    cur, "escanteio_total", mandante_id, visitante_id
+                )
+                fator_grupo_a_aplicado, descricoes_grupo_a = combinar_fatores([
+                    (fator_correlacao, "correlação chutes/escanteios"),
+                ])
+                if fator_grupo_a_aplicado is not None:
+                    frequencia_bruta = min(round(frequencia_bruta * fator_grupo_a_aplicado, 2), 100.0)
+
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
@@ -1183,6 +1369,22 @@ def calcular_recomendacoes(cur):
             # régua da suspensão" (card em /clube/<id>, em app.py) é
             # informativo/separado e continua funcionando normalmente,
             # sem relação com essa fórmula.
+
+            # NOVO (Grupo A - Correlação entre Estatísticas): par
+            # faltas -> cartões (jogo faltoso tende a ter mais cartão).
+            # Mesma mecânica do escanteio_total logo acima. Note que isso
+            # NÃO é o ajuste de suspensão desativado no comentário acima -
+            # são coisas totalmente diferentes: aquele olhava quem estava na
+            # régua da suspensão, esse olha o perfil de faltas do confronto.
+            if frequencia_bruta is not None:
+                fator_correlacao = buscar_fator_correlacao(
+                    cur, "cartao_total", mandante_id, visitante_id
+                )
+                fator_grupo_a_aplicado, descricoes_grupo_a = combinar_fatores([
+                    (fator_correlacao, "correlação faltas/cartões"),
+                ])
+                if fator_grupo_a_aplicado is not None:
+                    frequencia_bruta = min(round(frequencia_bruta * fator_grupo_a_aplicado, 2), 100.0)
 
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
