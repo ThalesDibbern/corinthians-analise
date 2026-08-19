@@ -1,4 +1,4 @@
-""
+"""
 Motor de recomendações - cruza os padrões já calculados (motor_padroes.py)
 com as odds reais coletadas (atualizar_odds.py) para encontrar apostas
 com "valor esperado" positivo: onde a probabilidade histórica do padrão
