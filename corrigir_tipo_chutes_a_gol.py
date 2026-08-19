@@ -86,9 +86,10 @@ def buscar_linhas_afetadas(cur):
     cur.execute(
         """
         SELECT h.id, h.jogo_id, h.jogador_id, h.descricao, h.linha, h.direcao,
-               h.resultado, j.nosso_time, j.adversario, j.data_jogo
+               h.resultado, t.nome, j.adversario, j.data_jogo
         FROM historico_recomendacoes h
         LEFT JOIN jogos j ON j.id = h.jogo_id
+        LEFT JOIN times t ON t.id = j.nosso_time_id
         WHERE h.tipo_padrao = %s
           AND h.descricao ILIKE %s
         ORDER BY h.id
