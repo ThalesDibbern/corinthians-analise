@@ -136,6 +136,50 @@ def identidade_jogo(p):
     return p["fixture_id_api"] or (p["nosso_time"], p["adversario"], p["data_jogo"])
 
 
+def chave_mercado_da_perna(p):
+    """CORRIGIDO (20/08/2026): identidade de "mesmo mercado" pra fins de
+    repetição dentro de uma múltipla.
+
+    ANTES usava `p["jogo_id"]`, e isso tinha um furo: um confronto entre
+    DOIS times rastreados tem 2 `jogo_id` (uma linha por perspectiva, ver
+    arquitetura multi-time). Duas pernas do MESMO mercado do MESMO jogo
+    real, capturadas em perspectivas diferentes, caíam em chaves
+    diferentes - então toda a checagem de repetição/faixa abaixo
+    simplesmente não via que elas eram do mesmo jogo, e as duas entravam
+    juntas na múltipla sendo multiplicadas como se fossem independentes.
+
+    DOIS PROBLEMAS REAIS QUE ISSO CAUSAVA:
+
+    1) HANDICAP ASIÁTICO (= Dupla Chance / Resultado Final na Superbet):
+       "Cruzeiro ou Empate" (perspectiva do Cruzeiro) + "Flamengo ou
+       Empate" (perspectiva do Flamengo) entravam na mesma múltipla.
+       Multiplicando: 82% x 60% = 49%. Na realidade as duas só acontecem
+       juntas SE DER EMPATE - algo perto de 25%. Superestimava feio, que
+       é a direção perigosa do erro.
+
+    2) MERCADOS DE JOGO INTEIRO (escanteio/cartão/gols total): a mesma
+       aposta vista pelas 2 perspectivas podia entrar 2x. A deduplicação
+       de recomendações já tenta impedir isso por (fixture, descrição,
+       casa), mas a descrição pode divergir entre as perspectivas quando
+       os fatores do Grupo A entram (ex: "fator combinado 0.91x" numa e
+       "1.09x" na outra), e aí as duas passavam.
+
+    Usando `identidade_jogo` (que é o `fixture_id_api`, idêntico nas duas
+    perspectivas), as duas pernas voltam a cair na MESMA chave - e daí a
+    lógica que já existia resolve sozinha:
+      - direções iguais, ou não formando par mais/menos -> combinação
+        rejeitada (é o caso do handicap, cujas direções são "1"/"2")
+      - par mais/menos coerente -> vira FAIXA, com a fórmula certa
+        P(faixa) = P(mais) + P(menos) - 1, sem multiplicação
+      - 3 ou mais pernas do mesmo mercado -> rejeitada
+
+    É a mesma classe de bug da faixa de escanteios ("Menos de 11.5" +
+    "Mais de 10.5", que exigia exatamente 11 escanteios cravados) - só
+    que ali as duas pernas vinham do mesmo `jogo_id` e a proteção pegava.
+    """
+    return (identidade_jogo(p), p["tipo_padrao"], p["jogador_id"])
+
+
 def combo_tem_conflito_de_time_mesma_data(combo):
     """Impede uma múltipla de combinar pernas de dois jogos DIFERENTES DE
     VERDADE (fixture_id_api diferente - não é só a mesma partida vista
@@ -202,7 +246,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
         faixa_permitida_por_mercado = {}
         pernas_por_mercado = {}
         for p in pernas:
-            chave_mercado = (p["jogo_id"], p["tipo_padrao"], p["jogador_id"])
+            chave_mercado = chave_mercado_da_perna(p)
             pernas_por_mercado.setdefault(chave_mercado, []).append(p)
 
         for chave_mercado, legs in pernas_por_mercado.items():
@@ -257,7 +301,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                 # maior) - 1.
                 contagem_mercado = {}
                 for p in combo:
-                    chave_mercado = (p["jogo_id"], p["tipo_padrao"], p["jogador_id"])
+                    chave_mercado = chave_mercado_da_perna(p)
                     contagem_mercado.setdefault(chave_mercado, []).append(p)
 
                 valido = True
@@ -310,7 +354,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                 faixa_ja_contabilizada = False
                 for p in combo:
                     odd_combinada *= p["odd"]
-                    chave_mercado = (p["jogo_id"], p["tipo_padrao"], p["jogador_id"])
+                    chave_mercado = chave_mercado_da_perna(p)
                     if faixa_chave is not None and chave_mercado == faixa_chave:
                         if not faixa_ja_contabilizada:
                             prob_combinada *= faixa_probabilidade
