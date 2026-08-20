@@ -730,9 +730,15 @@ def montar_descricao_handicap(nome_time, mandante, linha):
        empata" são a mesma aposta - e por isso as odds batem exatamente
        (1.59 e 1.59 no jogo Cruzeiro x Flamengo de 22/08/2026).
 
-    As linhas de 1.5 pra cima não têm mercado simples equivalente, então
-    continuam sendo chamadas de Handicap Asiático - mas já com o sinal
-    corrigido pro lado do time.
+    3) NOME "ASIÁTICO" TAMBÉM ESTAVA ERRADO PRAS LINHAS DE 1.5 PRA CIMA
+       (confirmado por print real da Superbet em 20/08/2026). A casa
+       separa em DOIS blocos distintos na tela: "Handicap Asiático" (só
+       quarto de gol e meia/cheia baixa, -1.25 a +0.75 no exemplo
+       observado) e "Handicap" puro (as linhas maiores: ±1.5, ±2.5,
+       ±3.5...). O projeto só captura meia linha, então tudo que sobra
+       depois de tratar os casos de ±0.5 cai automaticamente no bloco
+       "Handicap" (sem "Asiático") - nunca no bloco Asiático de verdade,
+       porque esse é só quarto de gol/linha baixa e está fora de escopo.
     """
     # ponto de vista do time: pro mandante a linha vale como veio; pro
     # visitante o sinal inverte (mesma regra do cálculo do padrão).
@@ -742,7 +748,7 @@ def montar_descricao_handicap(nome_time, mandante, linha):
         return f"Dupla Chance - {nome_time} ou Empate"
     if linha_time == -0.5:
         return f"Resultado Final - Vitória do {nome_time}"
-    return f"Handicap Asiático - {nome_time} {linha_time:+.1f}"
+    return f"Handicap - {nome_time} {linha_time:+.1f}"
 
 
 def combinar_fatores(fatores):
