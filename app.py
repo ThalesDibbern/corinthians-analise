@@ -865,7 +865,7 @@ PAGINA_HISTORICO = """
         }
         .modal-caixa {
             background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 20px 24px; max-width: 420px; width: 90%; max-height: 70vh; overflow-y: auto;
+            padding: 20px 24px; max-width: 1100px; width: 92%; max-height: 80vh; overflow-y: auto;
         }
         .modal-topo { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
         .modal-titulo { font-weight: 700; font-size: 0.95rem; }
