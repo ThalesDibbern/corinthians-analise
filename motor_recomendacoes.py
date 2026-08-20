@@ -701,6 +701,50 @@ def resultado_do_ponto_de_vista_corinthians(direcao, mandante):
 
 # ==================== NOVO (Grupo A de integração) ====================
 
+def montar_descricao_handicap(nome_time, mandante, linha):
+    """NOVO (20/08/2026): traduz a linha de handicap asiático pro nome com
+    que a aposta REALMENTE aparece na tela da Superbet, e corrige o sinal
+    pro time visitante.
+
+    DOIS PROBLEMAS QUE ISSO RESOLVE:
+
+    1) SINAL INVERTIDO PRO VISITANTE. A `linha` que a OddsPapi manda é
+       SEMPRE relativa ao MANDANTE (convenção da fonte). Colar o nome do
+       time do lado desse número faz a descrição do visitante sair com o
+       sinal trocado: aparecia "Flamengo -0.5" quando a aposta real era
+       "Flamengo não perde" (ou seja, +0.5 do ponto de vista dele). O
+       CÁLCULO nunca esteve errado - calcular_padrao_handicap já inverte
+       o sinal pro visitante (`limite = -linha if mandante else linha`) -
+       era só o texto.
+
+    2) NOME QUE NÃO EXISTE NA CASA. A OddsPapi entrega tudo num mercado
+       só (`spreads`), mas a Superbet distribui as MESMAS apostas em
+       blocos com nomes diferentes: as linhas -0.5 ela vende como
+       "Resultado Final", as +0.5 como "Dupla Chance", e só as de quarto
+       de gol/linha cheia ficam no bloco "Handicap Asiático". Por isso
+       procurar "Handicap Asiático - Cruzeiro +0.5" na Superbet não acha
+       nada: lá isso se chama "Dupla Chance - 1 ou Empate".
+
+       Não é equivalência aproximada, é identidade matemática: com meio
+       gol de vantagem o empate vira vitória, então "+0.5" e "vence ou
+       empata" são a mesma aposta - e por isso as odds batem exatamente
+       (1.59 e 1.59 no jogo Cruzeiro x Flamengo de 22/08/2026).
+
+    As linhas de 1.5 pra cima não têm mercado simples equivalente, então
+    continuam sendo chamadas de Handicap Asiático - mas já com o sinal
+    corrigido pro lado do time.
+    """
+    # ponto de vista do time: pro mandante a linha vale como veio; pro
+    # visitante o sinal inverte (mesma regra do cálculo do padrão).
+    linha_time = float(linha) if mandante else -float(linha)
+
+    if linha_time == 0.5:
+        return f"Dupla Chance - {nome_time} ou Empate"
+    if linha_time == -0.5:
+        return f"Resultado Final - Vitória do {nome_time}"
+    return f"Handicap Asiático - {nome_time} {linha_time:+.1f}"
+
+
 def combinar_fatores(fatores):
     """Recebe uma lista de (fator_ou_None, descricao_curta). Ignora os
     None (fator não pôde ser calculado ou amostra insuficiente), multiplica
@@ -1568,6 +1612,18 @@ def calcular_recomendacoes(cur):
                 "derrota": f"Derrota do {nome_nosso_time}",
             }
             descricao_final = f"Resultado Final - {nomes[resultado_cor]}"
+
+        elif tipo == "handicap_asiatico" and linha is not None:
+            # NOVO (20/08/2026): usa o nome real da aposta na Superbet e
+            # corrige o sinal pro visitante - ver montar_descricao_handicap.
+            # Só entra aqui quando a recomendação é pro NOSSO time (o bloco
+            # de cálculo lá em cima já garante isso), então `nosso_time_id`
+            # é sempre o dono da aposta.
+            descricao_final = montar_descricao_handicap(
+                nomes_times.get(nosso_time_id, "nosso time"),
+                mandante,
+                linha,
+            )
 
         if fator_arbitro_aplicado is not None:
             descricao_final += f" (ajustado pelo árbitro, fator {fator_arbitro_aplicado:.2f}x)"
