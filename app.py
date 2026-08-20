@@ -1550,11 +1550,13 @@ def buscar_detalhamento_faixa(cur, inicio_faixa):
     resumo que já aparece por faixa, sem essa tabela mostrar uma
     quantidade diferente do que o card já prometeu.
 
-    ATUALIZADO (20/08/2026): ordenação trocada de data (mais recente
-    primeiro) pra odd oferecida decrescente. Essa tabela existe pra ver
-    as odds gerais e a taxa de acerto dentro da faixa de probabilidade,
-    não pra acompanhar cronologia - só nessa tela específica; o resto do
-    /historico continua ordenado por data."""
+    ATUALIZADO (20/08/2026, corrigido no mesmo dia): ordenação trocada de
+    data (mais recente primeiro) pra probabilidade histórica decrescente.
+    Primeira tentativa tinha ordenado por ODD por engano - o pedido real
+    era ordenar pela força da probabilidade histórica dentro da faixa,
+    não pelo valor da odd. Essa tabela existe pra ver as recomendações
+    ordenadas pela probabilidade, não pra acompanhar cronologia - só
+    nessa tela específica; o resto do /historico continua por data."""
     fim_faixa = inicio_faixa + FAIXA_CALIBRACAO_LARGURA
     cur.execute(
         """
@@ -1566,7 +1568,7 @@ def buscar_detalhamento_faixa(cur, inicio_faixa):
         WHERE h.resultado IN ('acertou', 'errou')
           AND h.probabilidade_historica >= %s
           AND (h.probabilidade_historica < %s OR %s >= 100)
-        ORDER BY h.odd_oferecida DESC, h.id DESC
+        ORDER BY h.probabilidade_historica DESC, h.id DESC
         """,
         (inicio_faixa, fim_faixa, fim_faixa),
     )
