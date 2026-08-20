@@ -1548,7 +1548,13 @@ def buscar_detalhamento_faixa(cur, inicio_faixa):
     de mercados do jogo inteiro que buscar_historico aplica) que
     buscar_calibracao já usa pra contar - os números batem certinho com o
     resumo que já aparece por faixa, sem essa tabela mostrar uma
-    quantidade diferente do que o card já prometeu."""
+    quantidade diferente do que o card já prometeu.
+
+    ATUALIZADO (20/08/2026): ordenação trocada de data (mais recente
+    primeiro) pra odd oferecida decrescente. Essa tabela existe pra ver
+    as odds gerais e a taxa de acerto dentro da faixa de probabilidade,
+    não pra acompanhar cronologia - só nessa tela específica; o resto do
+    /historico continua ordenado por data."""
     fim_faixa = inicio_faixa + FAIXA_CALIBRACAO_LARGURA
     cur.execute(
         """
@@ -1560,7 +1566,7 @@ def buscar_detalhamento_faixa(cur, inicio_faixa):
         WHERE h.resultado IN ('acertou', 'errou')
           AND h.probabilidade_historica >= %s
           AND (h.probabilidade_historica < %s OR %s >= 100)
-        ORDER BY h.data_jogo DESC, h.id DESC
+        ORDER BY h.odd_oferecida DESC, h.id DESC
         """,
         (inicio_faixa, fim_faixa, fim_faixa),
     )
