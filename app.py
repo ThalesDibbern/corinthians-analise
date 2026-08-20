@@ -439,6 +439,35 @@ PAGINA = """
         }
         .coluna-azul { background: #1f6feb33; color: #58a6ff; border: 1px solid #58a6ff55; }
         .coluna-roxa { background: #a371f722; color: #a371f7; border: 1px solid #a371f755; }
+        .coluna-verde-jogos { background: #23863633; color: #3fb950; border: 1px solid #3fb95055; }
+
+        /* NOVO: seção "Jogos disponíveis" - um card por confronto que
+           expande mostrando as odds daquele jogo. */
+        .secao-jogos { margin-top: 26px; }
+        .jogo-bloco {
+            background: #0d1117; border: 1px solid #30363d; border-radius: 12px;
+            margin-bottom: 10px; overflow: hidden;
+        }
+        .jogo-cabecalho {
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            padding: 14px 18px; cursor: pointer; user-select: none;
+            background: #161b22; transition: background 0.15s;
+        }
+        .jogo-cabecalho:hover { background: #1c2230; }
+        .jogo-titulo { font-weight: 600; font-size: 1rem; color: #e6edf3; }
+        .jogo-data { font-size: 0.82rem; color: #8b949e; margin-top: 2px; }
+        .jogo-contagem {
+            background: #1f6feb33; color: #58a6ff; border: 1px solid #58a6ff55;
+            border-radius: 999px; padding: 3px 12px; font-size: 0.8rem; white-space: nowrap;
+        }
+        .jogo-seta { color: #8b949e; font-size: 0.9rem; transition: transform 0.2s; }
+        .jogo-bloco.aberto .jogo-seta { transform: rotate(180deg); }
+        .jogo-corpo { display: none; padding: 12px 14px 14px; }
+        .jogo-bloco.aberto .jogo-corpo { display: block; }
+        .jogo-aviso-ocultas {
+            font-size: 0.8rem; color: #d29922; text-align: center;
+            padding: 8px; border-top: 1px solid #30363d; margin-top: 6px;
+        }
         .paginacao {
             display: flex; align-items: center; justify-content: center; gap: 14px;
             margin-top: 4px; font-size: 0.82rem; color: #8b949e;
@@ -717,6 +746,34 @@ PAGINA = """
             </div>
         </div>
 
+        {% if jogos_disponiveis %}
+        <div class="secao-jogos">
+            <div class="coluna-cabecalho coluna-verde-jogos">⚽ Jogos disponíveis ({{ jogos_disponiveis|length }})</div>
+            {% for jd in jogos_disponiveis %}
+            <div class="jogo-bloco" id="jogo-bloco-{{ loop.index }}">
+                <div class="jogo-cabecalho" onclick="alternarJogo({{ loop.index }})">
+                    <div>
+                        <div class="jogo-titulo">{{ jd.rotulo }}</div>
+                        <div class="jogo-data">{{ jd.data_jogo }}</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <span class="jogo-contagem">{{ jd.total_odds }} odd{{ 's' if jd.total_odds != 1 else '' }}</span>
+                        <span class="jogo-seta">▼</span>
+                    </div>
+                </div>
+                <div class="jogo-corpo">
+                    {% for c in jd.odds %}{{ cartao_combo(c) }}{% endfor %}
+                    {% if jd.ocultas %}
+                    <div class="jogo-aviso-ocultas">
+                        + {{ jd.ocultas }} odd(s) não exibida(s) - mostrando as {{ jd.odds|length }} de maior valor esperado
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
         <script>
             const TAMANHO_PAGINA = 10;
             const paginaAtual = {};
@@ -765,6 +822,33 @@ PAGINA = """
             }
 
             ['lista-individuais', 'lista-multiplas'].forEach(renderizarPagina);
+
+            // NOVO: abre/fecha o card de um jogo na seção "Jogos
+            // disponíveis". Vários podem ficar abertos ao mesmo tempo,
+            // de propósito - facilita comparar dois jogos lado a lado.
+            // O estado fica no localStorage pra sobreviver ao reload.
+            function alternarJogo(indice) {
+                const bloco = document.getElementById('jogo-bloco-' + indice);
+                if (!bloco) return;
+                bloco.classList.toggle('aberto');
+                try {
+                    const chave = 'jogo-aberto:' + window.location.pathname + ':' + indice;
+                    if (bloco.classList.contains('aberto')) {
+                        localStorage.setItem(chave, '1');
+                    } else {
+                        localStorage.removeItem(chave);
+                    }
+                } catch (e) {}
+            }
+
+            document.querySelectorAll('.jogo-bloco').forEach(function(bloco) {
+                const indice = bloco.id.replace('jogo-bloco-', '');
+                try {
+                    if (localStorage.getItem('jogo-aberto:' + window.location.pathname + ':' + indice) === '1') {
+                        bloco.classList.add('aberto');
+                    }
+                } catch (e) {}
+            });
         </script>
         {% else %}
             <div class="vazio">
@@ -6510,6 +6594,48 @@ def index():
     individuais = [c for c in combinacoes if len(c["pernas"]) == 1]
     multiplas = [c for c in combinacoes if len(c["pernas"]) > 1]
 
+    # NOVO: agrupa as odds individuais POR JOGO, pra seção "Jogos
+    # disponíveis" no fim da página (um card por confronto, que expande
+    # mostrando as odds daquele jogo).
+    #
+    # CUIDADO ESTRUTURAL: quando os DOIS times de um confronto são
+    # rastreados, o mesmo jogo real existe 2x em `jogos` (uma linha por
+    # perspectiva) - então as odds chegam aqui rotuladas ora como
+    # "Cruzeiro x Flamengo", ora como "Flamengo x Cruzeiro". Agrupar pelo
+    # texto criaria DOIS cards pro mesmo confronto. Por isso a chave usa o
+    # par de times ORDENADO + a data: as duas perspectivas caem no mesmo
+    # balde, e o rótulo exibido é sempre o mesmo (ordem alfabética, já que
+    # a lista de recomendação não carrega quem é mandante).
+    LIMITE_ODDS_POR_JOGO = 100
+    jogos_agrupados = {}
+    for c in individuais:
+        if not c.get("jogos"):
+            continue
+        j = c["jogos"][0]
+        dupla = tuple(sorted([j["nosso_time"], j["adversario"]]))
+        chave = (j["data_jogo"], dupla)
+        if chave not in jogos_agrupados:
+            jogos_agrupados[chave] = {
+                "data_jogo": j["data_jogo"],
+                "datahora_jogo": j.get("datahora_jogo"),
+                "rotulo": f"{dupla[0]} x {dupla[1]}",
+                "odds": [],
+            }
+        jogos_agrupados[chave]["odds"].append(c)
+
+    jogos_disponiveis = []
+    for dados in jogos_agrupados.values():
+        # dentro do jogo, melhor valor esperado primeiro
+        dados["odds"].sort(key=lambda x: x["valor_esperado"], reverse=True)
+        dados["total_odds"] = len(dados["odds"])
+        # teto de segurança: mostra as melhores e AVISA quantas ficaram de
+        # fora, em vez de esconder silenciosamente.
+        dados["ocultas"] = max(0, dados["total_odds"] - LIMITE_ODDS_POR_JOGO)
+        dados["odds"] = dados["odds"][:LIMITE_ODDS_POR_JOGO]
+        jogos_disponiveis.append(dados)
+
+    jogos_disponiveis.sort(key=lambda d: (d["datahora_jogo"] or d["data_jogo"], d["rotulo"]))
+
     # NOVO: gera o token dessa renderização (o que vai pro form e pro link
     # "Atualizar recomendações" nessa página) só agora, no fim - assim o
     # token que sobra pendente na sessão é sempre o da ÚLTIMA página
@@ -6520,6 +6646,7 @@ def index():
     return render_template_string(
         PAGINA, odd_min=odd_min, odd_max=odd_max, buscou=buscou,
         individuais=individuais, multiplas=multiplas, motivo=motivo, banca_atual=round(banca_atual, 2),
+        jogos_disponiveis=jogos_disponiveis,
         ultima_atualizacao_odds=ultima_atualizacao_odds, token_busca=token_busca,
         nav_html=barra_navegacao("index", round(banca_atual, 2)),
     )
