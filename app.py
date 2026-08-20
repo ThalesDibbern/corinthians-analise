@@ -762,10 +762,19 @@ PAGINA = """
                     </div>
                 </div>
                 <div class="jogo-corpo">
-                    {% for c in jd.odds %}{{ cartao_combo(c) }}{% endfor %}
+                    <div id="lista-jogo-{{ loop.index }}">
+                        {% for c in jd.odds %}{{ cartao_combo(c) }}{% endfor %}
+                    </div>
+                    {% if jd.odds|length > 10 %}
+                    <div class="paginacao">
+                        <button class="btn-pagina" id="anterior-lista-jogo-{{ loop.index }}" onclick="mudarPagina('lista-jogo-{{ loop.index }}', -1)">← Anterior</button>
+                        <span id="label-lista-jogo-{{ loop.index }}"></span>
+                        <button class="btn-pagina" id="proximo-lista-jogo-{{ loop.index }}" onclick="mudarPagina('lista-jogo-{{ loop.index }}', 1)">Próxima →</button>
+                    </div>
+                    {% endif %}
                     {% if jd.ocultas %}
                     <div class="jogo-aviso-ocultas">
-                        + {{ jd.ocultas }} odd(s) não exibida(s) - mostrando as {{ jd.odds|length }} de maior valor esperado
+                        + {{ jd.ocultas }} odd(s) não exibida(s) - mostrando as {{ jd.odds|length }} de maior probabilidade
                     </div>
                     {% endif %}
                 </div>
@@ -822,6 +831,16 @@ PAGINA = """
             }
 
             ['lista-individuais', 'lista-multiplas'].forEach(renderizarPagina);
+
+            // NOVO: cada jogo da seção "Jogos disponíveis" tem a PRÓPRIA
+            // lista paginada (lista-jogo-1, lista-jogo-2, ...), usando a
+            // mesma infraestrutura de paginação das colunas de cima -
+            // nenhuma função nova, só registrar os ids que existem na
+            // página. A quantidade de jogos varia por rodada, então a
+            // lista de ids é montada do próprio DOM.
+            document.querySelectorAll('[id^="lista-jogo-"]').forEach(function(lista) {
+                renderizarPagina(lista.id);
+            });
 
             // NOVO: abre/fecha o card de um jogo na seção "Jogos
             // disponíveis". Vários podem ficar abertos ao mesmo tempo,
@@ -6625,15 +6644,16 @@ def index():
 
     jogos_disponiveis = []
     for dados in jogos_agrupados.values():
-        # dentro do jogo, melhor valor esperado primeiro
-        dados["odds"].sort(key=lambda x: x["valor_esperado"], reverse=True)
+        # mesma ordenação da aba principal de odds/múltiplas: maior
+        # probabilidade histórica primeiro (ver ordenação final em
+        # combinacoes.montar_combinacoes).
+        dados["odds"].sort(key=lambda x: x["probabilidade_combinada"], reverse=True)
         dados["total_odds"] = len(dados["odds"])
         # teto de segurança: mostra as melhores e AVISA quantas ficaram de
         # fora, em vez de esconder silenciosamente.
         dados["ocultas"] = max(0, dados["total_odds"] - LIMITE_ODDS_POR_JOGO)
         dados["odds"] = dados["odds"][:LIMITE_ODDS_POR_JOGO]
         jogos_disponiveis.append(dados)
-
     jogos_disponiveis.sort(key=lambda d: (d["datahora_jogo"] or d["data_jogo"], d["rotulo"]))
 
     # NOVO: gera o token dessa renderização (o que vai pro form e pro link
