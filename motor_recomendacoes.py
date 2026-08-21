@@ -296,176 +296,257 @@ def buscar_odds_futuras(cur):
     return cur.fetchall()
 
 
-def buscar_frequencia_cartao(cur, jogador_id):
+# NOVO (21/08/2026 - suavização pra time de histórico curto): um time com
+# poucos jogos no banco produz frequências extremas por puro acaso de
+# amostra pequena. O caso real que motivou isso: Chapecoense e Remo, que
+# subiram em 2026 e tinham ~22 jogos cada quando os 20 times foram
+# ativados. Como os padrões são separados por LADO (mandante/visitante),
+# 22 jogos viram ~11 por padrão - e um mercado que aconteceu em 11 de 11
+# virava frequência 100%, tratada como CERTEZA.
+#
+# O estrago aparecia nas múltiplas: perna de 100% multiplica por 1.0, ou
+# seja, não reduz nada. Uma múltipla de 3 pernas com duas delas em 100%
+# virava, na prática, uma aposta de 1 perna com odd de 3 - probabilidade
+# combinada de 94% que era pura ilusão. Direção perigosa (superestima).
+#
+# Piso de amostra por contagem de jogo NÃO resolve esses dois times: o
+# Brasileirão tem 38 rodadas, então eles terminam a temporada com 38
+# jogos (~19 por lado) e nunca chegariam num piso alto o bastante pra
+# tornar o 100% raro. Qualquer piso alcançável ou é inútil ou os exclui
+# do campeonato inteiro.
+#
+# Solução: suavização de Laplace, ESCOPADA só nos times de histórico
+# curto. Em vez de acertos/total, usa (acertos + 1) / (total + 2). Com
+# 11 jogos: 11/11 vira 92.3% (não 100%), 10/11 vira 84.6% (não 90.91%).
+# O extremo é puxado pro centro na proporção do tamanho da amostra.
+#
+# Por que escopado e não geral: aplicar em todos os 20 times mudaria a
+# escala de TODA probabilidade do sistema, criando duas escalas
+# convivendo no histórico (antigas sem suavizar, novas suavizadas) e
+# inutilizando a tabela de calibração da seção 9 por meses. Escopado nos
+# times de histórico curto, os 18 times estabelecidos ficam intocados e
+# a calibração continua válida pro grosso do volume.
+JOGOS_MINIMOS_HISTORICO_COMPLETO = 60
+
+
+def carregar_total_jogos_por_time(cur):
+    """NOVO (suavização): conta quantos jogos JÁ CONCLUÍDOS cada time tem,
+    pra decidir quais entram na suavização. Usa o MESMO critério de "jogo
+    concluído" que motor_padroes.py usa pra montar os padrões - se os dois
+    divergissem, um time poderia ser suavizado com base num número que o
+    cálculo do padrão nem enxergou.
+
+    Carregado UMA vez por execução e passado adiante como dict, em vez de
+    consultar por odd - são ~20 linhas, não vale uma query por iteração."""
     cur.execute(
-        "SELECT frequencia FROM padroes_jogador_cartao WHERE jogador_id = %s",
+        """
+        SELECT nosso_time_id, COUNT(*)
+        FROM jogos
+        WHERE nosso_time_id IS NOT NULL
+          AND ((datahora_jogo IS NOT NULL AND datahora_jogo < NOW())
+            OR (datahora_jogo IS NULL AND data_jogo < CURRENT_DATE))
+        GROUP BY nosso_time_id
+        """
+    )
+    return {time_id: total for time_id, total in cur.fetchall()}
+
+
+def time_tem_historico_curto(total_jogos_por_time, time_id):
+    """NOVO (suavização): True quando esse time ainda não tem histórico
+    suficiente pra que uma frequência extrema signifique alguma coisa.
+    Time desconhecido (sem linha em `jogos`) conta como histórico curto -
+    é o lado conservador: suavizar de menos deixa passar probabilidade
+    falsa, suavizar de mais só torna a estimativa mais modesta."""
+    if time_id is None:
+        return True
+    return total_jogos_por_time.get(time_id, 0) < JOGOS_MINIMOS_HISTORICO_COMPLETO
+
+
+def _frequencia_do_row(row, suavizar):
+    """NOVO (suavização): converte a linha lida de uma tabela de padrão na
+    frequência final, aplicando Laplace quando `suavizar` está ligado.
+
+    Espera row = (frequencia, jogos_analisados). Aceita row com só a
+    frequência (tabelas que não passaram a trazer a amostra) - nesse caso
+    devolve o valor cru, sem suavizar, porque sem saber o tamanho da
+    amostra não dá pra suavizar honestamente.
+
+    Trabalha direto sobre a frequência em vez de recuperar a contagem de
+    acertos: como frequencia = acertos/total*100, a conta
+    (freq/100*n + 1)/(n + 2) é matematicamente idêntica a
+    (acertos + 1)/(total + 2), sem depender de arredondamento pra
+    reconstruir o numerador inteiro."""
+    if not row or row[0] is None:
+        return None
+
+    frequencia = float(row[0])
+    if not suavizar:
+        return frequencia
+
+    jogos = row[1] if len(row) > 1 else None
+    if not jogos:
+        return frequencia
+
+    jogos = int(jogos)
+    acertos = frequencia / 100 * jogos
+    return round(100 * (acertos + 1) / (jogos + 2), 2)
+
+
+def buscar_frequencia_cartao(cur, jogador_id, suavizar=False):
+    cur.execute(
+        "SELECT frequencia, jogos_analisados FROM padroes_jogador_cartao WHERE jogador_id = %s",
         (jogador_id,),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha):
+def buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha, suavizar=False):
     cur.execute(
-        "SELECT frequencia FROM padroes_jogador_linha WHERE jogador_id = %s AND tipo = %s AND linha = %s",
+        "SELECT frequencia, jogos_analisados FROM padroes_jogador_linha WHERE jogador_id = %s AND tipo = %s AND linha = %s",
         (jogador_id, tipo, linha),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_simples_jogador(cur, jogador_id, tipo):
+def buscar_frequencia_simples_jogador(cur, jogador_id, tipo, suavizar=False):
     cur.execute(
-        "SELECT frequencia FROM padroes_jogador_frequencia WHERE jogador_id = %s AND tipo = %s",
+        "SELECT frequencia, jogos_analisados FROM padroes_jogador_frequencia WHERE jogador_id = %s AND tipo = %s",
         (jogador_id, tipo),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_escanteio_time(cur, linha, time_id):
+def buscar_frequencia_escanteio_time(cur, linha, time_id, suavizar=False):
     cur.execute(
-        "SELECT frequencia FROM padroes_time_escanteio WHERE linha = %s AND time_id = %s",
+        "SELECT frequencia, jogos_analisados FROM padroes_time_escanteio WHERE linha = %s AND time_id = %s",
         (linha, time_id),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_escanteio_total(cur, linha, time_id):
+def buscar_frequencia_escanteio_total(cur, linha, time_id, suavizar=False):
     """NOVO: frequência de escanteios do jogo INTEIRO (mandante + visitante
     somados) passar de uma linha - diferente de buscar_frequencia_escanteio_time,
     que olha só o lado do Corinthians. Filtra por time_id, já que essa
     tabela pode ter frequências diferentes calculadas pra times diferentes
     quando outros clubes forem adicionados."""
     cur.execute(
-        "SELECT frequencia FROM padroes_escanteio_total WHERE linha = %s AND time_id = %s",
+        "SELECT frequencia, jogos_analisados FROM padroes_escanteio_total WHERE linha = %s AND time_id = %s",
         (linha, time_id),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_cartao_total(cur, linha, time_id):
+def buscar_frequencia_cartao_total(cur, linha, time_id, suavizar=False):
     """NOVO: frequência de cartões do jogo INTEIRO (mandante + visitante
     somados) passar de uma linha. Filtra por time_id (ver docstring de
     buscar_frequencia_escanteio_total)."""
     cur.execute(
-        "SELECT frequencia FROM padroes_cartao_total WHERE linha = %s AND time_id = %s",
+        "SELECT frequencia, jogos_analisados FROM padroes_cartao_total WHERE linha = %s AND time_id = %s",
         (linha, time_id),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_gols_time(cur, linha, time_id):
+def buscar_frequencia_gols_time(cur, linha, time_id, suavizar=False):
     """NOVO (Mais/Menos gols do time): lê de padroes_time_linha, tipo=
     "gols" - mesma tabela já usada por falta/chute/cartão do time (ver
     calcular_padrao_gols_time em motor_padroes.py)."""
     cur.execute(
-        "SELECT frequencia FROM padroes_time_linha WHERE tipo = %s AND linha = %s AND time_id = %s",
+        "SELECT frequencia, jogos_analisados FROM padroes_time_linha WHERE tipo = %s AND linha = %s AND time_id = %s",
         ("gols", linha, time_id),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_cartao_time(cur, linha, time_id):
+def buscar_frequencia_cartao_time(cur, linha, time_id, suavizar=False):
     """NOVO (Cartão por TIME - mercado de linha Mais/Menos, destravado pela
     correção do bug de plural em atualizar_odds.py): lê de
     padroes_time_linha, tipo="cartao" - essa tabela já é populada há tempo
     por calcular_padrao_cartao_time (motor_padroes.py), só nunca tinha sido
     lida aqui pra gerar recomendação de verdade."""
     cur.execute(
-        "SELECT frequencia FROM padroes_time_linha WHERE tipo = %s AND linha = %s AND time_id = %s",
+        "SELECT frequencia, jogos_analisados FROM padroes_time_linha WHERE tipo = %s AND linha = %s AND time_id = %s",
         ("cartao", linha, time_id),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_gols_total(cur, linha, time_id):
+def buscar_frequencia_gols_total(cur, linha, time_id, suavizar=False):
     """NOVO: frequência de gols do jogo INTEIRO (mandante + visitante
     somados) passar de uma linha - mesmo padrão de
     buscar_frequencia_escanteio_total/buscar_frequencia_cartao_total."""
     cur.execute(
-        "SELECT frequencia FROM padroes_gols_total WHERE linha = %s AND time_id = %s",
+        "SELECT frequencia, jogos_analisados FROM padroes_gols_total WHERE linha = %s AND time_id = %s",
         (linha, time_id),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_equipe_marca(cur, time_id):
+def buscar_frequencia_equipe_marca(cur, time_id, suavizar=False):
     """NOVO (Equipe Marca - Sim/Não): frequência binária, um valor só por
     time (sem linha/handicap)."""
     cur.execute(
-        "SELECT frequencia FROM padroes_time_marca WHERE time_id = %s",
+        "SELECT frequencia, jogos_analisados FROM padroes_time_marca WHERE time_id = %s",
         (time_id,),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_dupla_chance_tempo(cur, time_id, periodo, lado, resultado):
+def buscar_frequencia_dupla_chance_tempo(cur, time_id, periodo, lado, resultado, suavizar=False):
     """NOVO (Onda 2 - Dupla Chance por tempo): frequência de UM resultado
     específico ('1X'/'12'/'2X') nesse período (1T/2T), separado por lado
     (mandante/visitante), porque jogar em casa ou fora muda bastante a
     chance de cada resultado."""
     cur.execute(
         """
-        SELECT frequencia FROM padroes_dupla_chance_tempo
+        SELECT frequencia, jogos_analisados FROM padroes_dupla_chance_tempo
         WHERE time_id = %s AND periodo = %s AND lado = %s AND resultado = %s
         """,
         (time_id, periodo, lado, resultado),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_ambas_marcam_tempo(cur, time_id, periodo, lado):
+def buscar_frequencia_ambas_marcam_tempo(cur, time_id, periodo, lado, suavizar=False):
     """NOVO (Onda 2 - Ambas Marcam por tempo): frequência binária, separada
     por período (1T/2T) e por lado (mandante/visitante)."""
     cur.execute(
-        "SELECT frequencia FROM padroes_ambas_marcam_tempo WHERE time_id = %s AND periodo = %s AND lado = %s",
+        "SELECT frequencia, jogos_analisados FROM padroes_ambas_marcam_tempo WHERE time_id = %s AND periodo = %s AND lado = %s",
         (time_id, periodo, lado),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_marca_ambos_tempos(cur, time_id):
+def buscar_frequencia_marca_ambos_tempos(cur, time_id, suavizar=False):
     """NOVO (Onda 2 - Marca em Ambos os Tempos): frequência binária, um
     valor só por time (sem separação por lado - jogo inteiro, não faz
     tanta diferença mandante/visitante quanto os mercados por tempo
     isolado)."""
     cur.execute(
-        "SELECT frequencia FROM padroes_marca_ambos_tempos WHERE time_id = %s",
+        "SELECT frequencia, jogos_analisados FROM padroes_marca_ambos_tempos WHERE time_id = %s",
         (time_id,),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_handicap(cur, time_id, lado, linha):
+def buscar_frequencia_handicap(cur, time_id, lado, linha, suavizar=False):
     """NOVO (Handicap Asiático - só meia linha): frequência de "cobrir"
     essa linha específica, separada por lado (mandante/visitante) - ver
     calcular_padrao_handicap em motor_padroes.py pro porquê da separação."""
     cur.execute(
-        "SELECT frequencia FROM padroes_time_handicap WHERE time_id = %s AND lado = %s AND linha = %s",
+        "SELECT frequencia, jogos_analisados FROM padroes_time_handicap WHERE time_id = %s AND lado = %s AND linha = %s",
         (time_id, lado, linha),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_resultado(cur, lado, resultado, time_id):
+def buscar_frequencia_resultado(cur, lado, resultado, time_id, suavizar=False):
     cur.execute(
-        "SELECT frequencia FROM padroes_time_resultado WHERE lado = %s AND resultado = %s AND time_id = %s",
+        "SELECT frequencia, jogos_analisados FROM padroes_time_resultado WHERE lado = %s AND resultado = %s AND time_id = %s",
         (lado, resultado, time_id),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
 def buscar_id_corinthians(cur):
@@ -477,7 +558,7 @@ def buscar_id_corinthians(cur):
     return row[0] if row else None
 
 
-def buscar_frequencia_confronto(cur, nosso_time_id, adversario_id, mandante_filtro, tipo_padrao, linha=0, resultado=""):
+def buscar_frequencia_confronto(cur, nosso_time_id, adversario_id, mandante_filtro, tipo_padrao, linha=0, resultado="", suavizar=False):
     """NOVO (confronto direto): busca a frequência específica contra esse
     adversário (ex: "cartões totais contra o Palmeiras, jogando em casa"),
     se já tiver sido calculada com uma amostra que não seja pequena demais.
@@ -489,24 +570,22 @@ def buscar_frequencia_confronto(cur, nosso_time_id, adversario_id, mandante_filt
     if adversario_id is None:
         return None
     cur.execute(
-        """SELECT frequencia FROM padroes_confronto_direto
+        """SELECT frequencia, jogos_analisados FROM padroes_confronto_direto
            WHERE nosso_time_id = %s AND adversario_id = %s AND mandante_filtro = %s AND tipo_padrao = %s
              AND linha = %s AND resultado = %s AND amostra_pequena = FALSE""",
         (nosso_time_id, adversario_id, mandante_filtro, tipo_padrao, linha, resultado),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_forma_recente(cur, resultado, time_id):
+def buscar_frequencia_forma_recente(cur, resultado, time_id, suavizar=False):
     """NOVO (forma recente): frequência de vitória/empate/derrota nos
     últimos jogos do time (qualquer adversário/mando de campo)."""
     cur.execute(
         "SELECT frequencia FROM padroes_forma_recente WHERE resultado = %s AND time_id = %s ORDER BY janela DESC LIMIT 1",
         (resultado, time_id),
     )
-    row = cur.fetchone()
-    return float(row[0]) if row else None
+    return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
 def calcular_fator_forma_recente(cur, resultado_cor, time_id):
@@ -1167,6 +1246,11 @@ def calcular_recomendacoes(cur):
         variantes_times[time_id_row] = {nome_row.lower()} | {a.lower() for a in (apelidos_row or [])}
         api_ids_times[time_id_row] = api_id_row
 
+    # NOVO (suavização): quantos jogos concluídos cada time tem, pra
+    # decidir quais entram na suavização de Laplace. Carregado uma vez
+    # aqui, fora do loop - ver carregar_total_jogos_por_time.
+    total_jogos_por_time = carregar_total_jogos_por_time(cur)
+
     for (odd_id, jogo_id, jogador_id, casa, mercado, valor_odd,
          linha, direcao, data_jogo, adversario, mandante, arbitro,
          mandante_id, visitante_id, nosso_time_id, rodada_numero, temporada) in odds:
@@ -1174,6 +1258,13 @@ def calcular_recomendacoes(cur):
         tipo = identificar_tipo_padrao(mercado)
         if tipo is None:
             continue
+
+        # NOVO (suavização): esse time tem histórico curto o bastante pra
+        # que uma frequência extrema seja provavelmente ruído de amostra?
+        # Se sim, toda frequência-base dessa odd sai suavizada. Vale tanto
+        # pro mercado de time quanto pro de jogador - um jogador de time
+        # recém-promovido tem exatamente a mesma amostra magra.
+        suavizar = time_tem_historico_curto(total_jogos_por_time, nosso_time_id)
 
         # NOVO: pula qualquer mercado de jogador específico se ele
         # provavelmente não vai jogar (ver docstring de jogador_disponivel).
@@ -1219,7 +1310,7 @@ def calcular_recomendacoes(cur):
         direcao_normalizada = (direcao or "").strip().lower()
 
         if tipo == "cartao" and jogador_id and direcao_normalizada in ("sim", "não", "nao"):
-            frequencia_bruta = buscar_frequencia_cartao(cur, jogador_id)
+            frequencia_bruta = buscar_frequencia_cartao(cur, jogador_id, suavizar=suavizar)
             if frequencia_bruta is not None:
                 # NOVO (Grupo A): árbitro (já existia) + Estilo de Jogo -
                 # ofensivo do NOSSO time (nosso time tende a levar mais/
@@ -1268,7 +1359,7 @@ def calcular_recomendacoes(cur):
             bate_adversario = any(c and c in mercado_lower for c in candidatos_adversario)
 
             if bate_nosso_time and not bate_adversario:
-                frequencia_bruta = buscar_frequencia_cartao_time(cur, linha, nosso_time_id)
+                frequencia_bruta = buscar_frequencia_cartao_time(cur, linha, nosso_time_id, suavizar=suavizar)
                 if frequencia_bruta is not None:
                     frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
@@ -1278,7 +1369,7 @@ def calcular_recomendacoes(cur):
             # separado do bloco genérico de linha (desarme/chute), porque só
             # falta tem relação com o perfil do árbitro (árbitro rigoroso
             # apita mais falta, não faz o jogador chutar mais no gol).
-            frequencia_bruta = buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha)
+            frequencia_bruta = buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha, suavizar=suavizar)
             if frequencia_bruta is not None:
                 fator = calcular_fator_arbitro(cur, arbitro, media_geral_faltas, "falta")
                 if fator is not None:
@@ -1289,12 +1380,12 @@ def calcular_recomendacoes(cur):
 
         elif tipo in ("desarme", "chute_no_gol", "chute_total") and jogador_id \
                 and direcao_normalizada in ("mais", "menos") and linha is not None:
-            frequencia_bruta = buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha)
+            frequencia_bruta = buscar_frequencia_linha_jogador(cur, jogador_id, tipo, linha, suavizar=suavizar)
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "impedimento" and jogador_id and direcao_normalizada in ("sim", "não", "nao"):
-            frequencia_bruta = buscar_frequencia_simples_jogador(cur, jogador_id, "impedimento")
+            frequencia_bruta = buscar_frequencia_simples_jogador(cur, jogador_id, "impedimento", suavizar=suavizar)
             if frequencia_bruta is not None:
                 # NOVO (Grupo A): mesma ideia do cartão de jogador, sem o
                 # árbitro (não faz sentido árbitro afetar impedimento).
@@ -1339,7 +1430,7 @@ def calcular_recomendacoes(cur):
             # não arrisca aplicar errado - fica sem recomendação por
             # segurança, em vez de aplicar a frequência do time errado.
             if bate_nosso_time and not bate_adversario:
-                frequencia_bruta = buscar_frequencia_escanteio_time(cur, linha, nosso_time_id)
+                frequencia_bruta = buscar_frequencia_escanteio_time(cur, linha, nosso_time_id, suavizar=suavizar)
 
                 # NOVO (Grupo A): Zona da Tabela + Padrão por Rodada, os
                 # dois calculados em cima da própria média geral do time
@@ -1368,12 +1459,13 @@ def calcular_recomendacoes(cur):
             # Palmeiras, jogando em casa"); só cai pro padrão geral do time
             # se não houver confronto direto com amostra suficiente ainda.
             frequencia_bruta = buscar_frequencia_confronto(
-                cur, nosso_time_id, adversario_id, mandante_filtro_atual, "escanteio_total", linha=linha
+                cur, nosso_time_id, adversario_id, mandante_filtro_atual, "escanteio_total", linha=linha,
+                suavizar=suavizar
             )
             if frequencia_bruta is not None:
                 veio_de_confronto_direto = True
             else:
-                frequencia_bruta = buscar_frequencia_escanteio_total(cur, linha, nosso_time_id)
+                frequencia_bruta = buscar_frequencia_escanteio_total(cur, linha, nosso_time_id, suavizar=suavizar)
 
             # NOVO (Grupo A - Correlação entre Estatísticas): primeiro fator
             # do Grupo A a atuar num mercado de JOGO INTEIRO. Par usado:
@@ -1401,12 +1493,13 @@ def calcular_recomendacoes(cur):
             # NOVO (confronto direto): mesma lógica de prioridade do escanteio
             # total acima.
             frequencia_bruta = buscar_frequencia_confronto(
-                cur, nosso_time_id, adversario_id, mandante_filtro_atual, "cartao_total", linha=linha
+                cur, nosso_time_id, adversario_id, mandante_filtro_atual, "cartao_total", linha=linha,
+                suavizar=suavizar
             )
             if frequencia_bruta is not None:
                 veio_de_confronto_direto = True
             else:
-                frequencia_bruta = buscar_frequencia_cartao_total(cur, linha, nosso_time_id)
+                frequencia_bruta = buscar_frequencia_cartao_total(cur, linha, nosso_time_id, suavizar=suavizar)
 
             # DESATIVADO (11/08/2026): o ajuste de suspensão (belisca a
             # frequência de cartão total pra baixo quando tem muita gente
@@ -1458,13 +1551,13 @@ def calcular_recomendacoes(cur):
             bate_adversario = any(c and c in mercado_lower for c in candidatos_adversario)
 
             if bate_nosso_time and not bate_adversario:
-                frequencia_bruta = buscar_frequencia_gols_time(cur, linha, nosso_time_id)
+                frequencia_bruta = buscar_frequencia_gols_time(cur, linha, nosso_time_id, suavizar=suavizar)
                 if frequencia_bruta is not None:
                     frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "gols_total" and not jogador_id \
                 and direcao_normalizada in ("mais", "menos") and linha is not None:
-            frequencia_bruta = buscar_frequencia_gols_total(cur, linha, nosso_time_id)
+            frequencia_bruta = buscar_frequencia_gols_total(cur, linha, nosso_time_id, suavizar=suavizar)
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
@@ -1483,7 +1576,7 @@ def calcular_recomendacoes(cur):
             bate_adversario = any(c and c in mercado_lower for c in candidatos_adversario)
 
             if bate_nosso_time and not bate_adversario:
-                frequencia_bruta = buscar_frequencia_equipe_marca(cur, nosso_time_id)
+                frequencia_bruta = buscar_frequencia_equipe_marca(cur, nosso_time_id, suavizar=suavizar)
                 if frequencia_bruta is not None:
                     frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
@@ -1494,23 +1587,25 @@ def calcular_recomendacoes(cur):
             # direção já tem a própria frequência guardada (não é um par
             # Mais/Menos complementar).
             frequencia = buscar_frequencia_dupla_chance_tempo(
-                cur, nosso_time_id, "1T", mandante_filtro_atual, direcao_normalizada.upper()
+                cur, nosso_time_id, "1T", mandante_filtro_atual, direcao_normalizada.upper(),
+                suavizar=suavizar
             )
 
         elif tipo == "dupla_chance_2t" and not jogador_id and direcao_normalizada in ("1x", "12", "2x"):
             frequencia = buscar_frequencia_dupla_chance_tempo(
-                cur, nosso_time_id, "2T", mandante_filtro_atual, direcao_normalizada.upper()
+                cur, nosso_time_id, "2T", mandante_filtro_atual, direcao_normalizada.upper(),
+                suavizar=suavizar
             )
 
         elif tipo == "ambas_marcam_1t" and not jogador_id and direcao_normalizada in ("sim", "não", "nao"):
             # NOVO (Onda 2): Ambas Marcam também é mercado do JOGO (não
             # depende de qual time está no texto) - mesma lógica.
-            frequencia_bruta = buscar_frequencia_ambas_marcam_tempo(cur, nosso_time_id, "1T", mandante_filtro_atual)
+            frequencia_bruta = buscar_frequencia_ambas_marcam_tempo(cur, nosso_time_id, "1T", mandante_filtro_atual, suavizar=suavizar)
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "ambas_marcam_2t" and not jogador_id and direcao_normalizada in ("sim", "não", "nao"):
-            frequencia_bruta = buscar_frequencia_ambas_marcam_tempo(cur, nosso_time_id, "2T", mandante_filtro_atual)
+            frequencia_bruta = buscar_frequencia_ambas_marcam_tempo(cur, nosso_time_id, "2T", mandante_filtro_atual, suavizar=suavizar)
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
@@ -1530,7 +1625,7 @@ def calcular_recomendacoes(cur):
             bate_adversario = any(c and c in mercado_lower for c in candidatos_adversario)
 
             if bate_nosso_time and not bate_adversario:
-                frequencia_bruta = buscar_frequencia_marca_ambos_tempos(cur, nosso_time_id)
+                frequencia_bruta = buscar_frequencia_marca_ambos_tempos(cur, nosso_time_id, suavizar=suavizar)
                 if frequencia_bruta is not None:
                     frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
@@ -1555,7 +1650,7 @@ def calcular_recomendacoes(cur):
             bate_adversario = any(c and c in mercado_lower for c in candidatos_adversario)
 
             if bate_nosso_time and not bate_adversario:
-                frequencia = buscar_frequencia_handicap(cur, nosso_time_id, mandante_filtro_atual, linha)
+                frequencia = buscar_frequencia_handicap(cur, nosso_time_id, mandante_filtro_atual, linha, suavizar=suavizar)
 
         elif tipo == "resultado_final" and not jogador_id:
             resultado_cor = resultado_do_ponto_de_vista_corinthians(direcao, mandante)
@@ -1566,13 +1661,14 @@ def calcular_recomendacoes(cur):
                 # mandante/visitante se não houver confronto direto com
                 # amostra suficiente ainda.
                 frequencia = buscar_frequencia_confronto(
-                    cur, nosso_time_id, adversario_id, mandante_filtro_atual, "resultado_final", resultado=resultado_cor
+                    cur, nosso_time_id, adversario_id, mandante_filtro_atual, "resultado_final", resultado=resultado_cor,
+                    suavizar=suavizar
                 )
                 if frequencia is not None:
                     veio_de_confronto_direto = True
                 else:
                     lado = "mandante" if mandante else "visitante"
-                    frequencia = buscar_frequencia_resultado(cur, lado, resultado_cor, nosso_time_id)
+                    frequencia = buscar_frequencia_resultado(cur, lado, resultado_cor, nosso_time_id, suavizar=suavizar)
 
                 # NOVO (forma recente, já existia) + Grupo A (Zona da
                 # Tabela + Padrão por Rodada). IMPORTANTE: Zona/Rodada só
