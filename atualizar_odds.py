@@ -614,6 +614,44 @@ def nome_time_por_posicao(mandante, adversario, posicao, nosso_nome):
     return adversario if nosso_time_eh_equipe_1 else nosso_nome
 
 
+def nome_real_handicap_meia_linha(linha, direcao):
+    """NOVO (20/08/2026): decide o nome comercial REAL da Superbet pro
+    mercado de handicap de meia linha, baseado no valor da linha do ponto
+    de vista do time descrito nessa direção - em vez de aceitar direto o
+    "Handicap Asiático" que a OddsPapi devolve pra TODO o tipo de mercado
+    "spreads" (marketName genérico da API, sem diferenciar linha nenhuma).
+
+    Mesma regra de valor que motor_recomendacoes.montar_descricao_handicap
+    já usa pra descrição final da recomendação - só que aplicada aqui, na
+    hora de gravar a odd crua, pra tabela `odds` não guardar o nome errado
+    nem internamente. As duas funções não compartilham código (arquivos
+    diferentes, sem import cruzado) mas implementam a MESMA regra de
+    negócio - se essa regra mudar de novo (ex: confirmação de mais um
+    caso via print real), atualizar as duas juntas.
+
+    Convenção da OddsPapi: a `linha` do catálogo é sempre relativa à
+    Equipe 1 (mandante). Pra Equipe 2 (visitante, direção "2"), o sinal
+    inverte - mesma convenção que nome_time_por_posicao já usa.
+
+    Preparado pro futuro: se um dia a linha de quarto de gol for
+    implementada (item 14/C da documentação, hoje fora de escopo), o
+    valor cai automaticamente no "else" e volta a ser rotulado
+    "Handicap Asiático" de verdade - sem precisar tocar nessa função de
+    novo, porque a decisão é por valor, não por lista fixa."""
+    try:
+        linha_time = float(linha) if str(direcao) == "1" else -float(linha)
+    except (TypeError, ValueError):
+        return "Handicap"
+
+    if linha_time == 0.5:
+        return "Dupla Chance"
+    if linha_time == -0.5:
+        return "Resultado Final"
+    if round(linha_time % 1, 2) == 0.5:
+        return "Handicap"
+    return "Handicap Asiático"  # quarto de gol/linha cheia - fora de escopo hoje, mas nome certo se um dia entrar
+
+
 def montar_descricao_mercado(nome_mercado, linha, direcao, mandante, adversario, nosso_nome, player_name=None):
     """NOVO: monta uma descrição legível e ESPECÍFICA da odd, resolvendo
     "Equipe 1"/"Equipe 2" pro nome real do time e incluindo a linha
@@ -857,11 +895,23 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, a
                 nome_mercado = info_mercado["nome"]
 
             linha = info_mercado["handicap"]
+            eh_handicap_meia_linha_mercado = eh_handicap_meia_linha(
+                tipo_mercado, periodo_mercado, info_mercado.get("handicap")
+            )
 
             outcomes = market_info.get("outcomes", {})
             for outcome_id, outcome_info in outcomes.items():
                 direcao = info_mercado["outcomes"].get(outcome_id)
                 players = outcome_info.get("players", {})
+
+                # NOVO (20/08/2026): pro mercado de handicap de meia linha,
+                # o nome muda por outcome (depende da direção/sinal do
+                # time descrito) - substitui o nome_mercado genérico
+                # ("Handicap Asiático", vindo cru da OddsPapi) pelo nome
+                # real. Ver nome_real_handicap_meia_linha().
+                nome_mercado_efetivo = nome_mercado
+                if eh_handicap_meia_linha_mercado and direcao in ("1", "2"):
+                    nome_mercado_efetivo = nome_real_handicap_meia_linha(linha, direcao)
 
                 for player_key, dados in players.items():
                     if not dados.get("active", True):
@@ -877,7 +927,7 @@ def salvar_odds_do_jogo(cur, jogo_id, dados_odds, catalogo_mercados, mandante, a
                         jogador_id = get_or_create_jogador(cur, player_name)
 
                     descricao_mercado = montar_descricao_mercado(
-                        nome_mercado, linha, direcao, mandante, adversario, nosso_nome, player_name
+                        nome_mercado_efetivo, linha, direcao, mandante, adversario, nosso_nome, player_name
                     )
 
                     if jogador_id is not None and ja_existe_odd_jogador(
