@@ -241,12 +241,135 @@ def registrar_atualizacao_odds(cur, usuario_id, forcado):
 # lock manual - is_set()/set()/clear() são atômicos.
 _atualizacao_em_andamento = threading.Event()
 
+# NOVO (acompanhamento em tempo real): quanto tempo uma execução pode
+# ficar marcada como 'rodando' antes de ser considerada MORTA. Existe pro
+# caso do container reiniciar no meio (deploy, queda, restart do Railway):
+# sem isso, a linha ficaria 'rodando' pra sempre, o app acharia que tem
+# atualização em andamento eternamente, e todo clique futuro seria
+# bloqueado com um timer infinito na tela - trocando o problema atual por
+# um pior. 15 minutos dá ~3x de folga sobre a execução mais longa já
+# medida (4m37s) sem deixar o usuário travado muito tempo num caso raro.
+LIMITE_EXECUCAO_ABANDONADA_MINUTOS = 15
+
+# NOVO: quantas execuções concluídas entram na média que estima a duração
+# da próxima (alimenta a barra de progresso). Poucas o bastante pra
+# acompanhar mudança real de tempo (mais times, mais jogos na rodada),
+# muitas o bastante pra uma execução atípica não dominar a estimativa.
+EXECUCOES_PARA_ESTIMATIVA = 5
+
+# NOVO: chute inicial, usado só enquanto não existe nenhuma execução
+# concluída registrada pra calcular a média de verdade.
+ESTIMATIVA_PADRAO_SEGUNDOS = 300
+
+
+def marcar_execucoes_abandonadas(cur):
+    """NOVO: fecha execuções que ficaram 'rodando' além do limite - quase
+    sempre porque o processo morreu junto com o container. Chamada antes
+    de qualquer leitura de estado, pra que uma execução fantasma nunca
+    seja confundida com uma de verdade."""
+    cur.execute(
+        """
+        UPDATE execucoes_atualizacao
+        SET status = 'abandonada',
+            finalizada_em = NOW(),
+            detalhe = 'Execução não finalizou dentro do limite - provavelmente o processo foi interrompido.'
+        WHERE status = 'rodando'
+          AND iniciada_em < NOW() - (%s * INTERVAL '1 minute')
+        """,
+        (LIMITE_EXECUCAO_ABANDONADA_MINUTOS,),
+    )
+    return cur.rowcount
+
+
+def buscar_execucao_em_andamento(cur):
+    """NOVO: devolve (id, iniciada_em) da execução viva, ou None. Fonte
+    ÚNICA da verdade sobre "tem atualização rodando?" - o threading.Event
+    antigo continua existindo só como trava rápida dentro do mesmo
+    processo, mas quem responde pra interface é sempre o banco (funciona
+    com qualquer número de workers do Gunicorn)."""
+    marcar_execucoes_abandonadas(cur)
+    cur.execute(
+        """
+        SELECT id, iniciada_em
+        FROM execucoes_atualizacao
+        WHERE status = 'rodando'
+        ORDER BY iniciada_em DESC
+        LIMIT 1
+        """
+    )
+    return cur.fetchone()
+
+
+def estimar_duracao_atualizacao(cur):
+    """NOVO: média de duração das últimas execuções concluídas, em
+    segundos - base da barra de progresso. A estimativa melhora sozinha
+    conforme o histórico cresce; enquanto não houver nenhuma execução
+    concluída, usa ESTIMATIVA_PADRAO_SEGUNDOS."""
+    cur.execute(
+        """
+        SELECT AVG(EXTRACT(EPOCH FROM (finalizada_em - iniciada_em)))
+        FROM (
+            SELECT iniciada_em, finalizada_em
+            FROM execucoes_atualizacao
+            WHERE status = 'concluida' AND finalizada_em IS NOT NULL
+            ORDER BY finalizada_em DESC
+            LIMIT %s
+        ) AS ultimas
+        """,
+        (EXECUCOES_PARA_ESTIMATIVA,),
+    )
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return ESTIMATIVA_PADRAO_SEGUNDOS
+    return max(1, int(round(float(row[0]))))
+
+
+def abrir_execucao_atualizacao(cur, usuario_id, forcada):
+    """NOVO: registra o início de uma execução e devolve o id, usado
+    depois pra fechá-la."""
+    cur.execute(
+        """
+        INSERT INTO execucoes_atualizacao (status, iniciada_em, usuario_id, forcada)
+        VALUES ('rodando', NOW(), %s, %s)
+        RETURNING id
+        """,
+        (usuario_id, bool(forcada)),
+    )
+    return cur.fetchone()[0]
+
+
+def fechar_execucao_atualizacao(execucao_id, status, detalhe=None):
+    """NOVO: fecha a execução. Abre conexão PRÓPRIA de propósito - roda na
+    thread de segundo plano, e a conexão da requisição que disparou já
+    morreu há muito tempo quando os scripts terminam (a requisição
+    responde em milissegundos; os scripts levam minutos)."""
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE execucoes_atualizacao
+                SET status = %s, finalizada_em = NOW(), detalhe = %s
+                WHERE id = %s AND status = 'rodando'
+                """,
+                (status, detalhe, execucao_id),
+            )
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+    except Exception as e:
+        # Não deixa um erro ao FECHAR o registro derrubar a thread - o
+        # varredor de abandonadas resolve o caso mais tarde.
+        print(f"[atualizacao_odds] Falha ao fechar a execução {execucao_id}: {e}")
+
 
 def atualizacao_em_andamento():
     return _atualizacao_em_andamento.is_set()
 
 
-def disparar_atualizacao_odds_railway():
+def disparar_atualizacao_odds_railway(usuario_id=None, forcada=False):
     """NOVO (troca de abordagem): antes isso chamava a API do Railway pra
     pedir pra rodar o serviço `refreshing-freedom` remotamente
     (serviceInstanceRedeploy) - só que, na prática, testamos várias vezes
@@ -278,6 +401,10 @@ def disparar_atualizacao_odds_railway():
     def rodar_em_segundo_plano():
         pasta = os.path.dirname(os.path.abspath(__file__))
         _atualizacao_em_andamento.set()
+        # NOVO: status final da execução, gravado no banco pra que a
+        # interface saiba quando parar de mostrar o progresso.
+        status_final = "concluida"
+        detalhe_final = None
         try:
             print("[atualizacao_odds] Rodando atualizar_odds.py...")
             subprocess.run(
@@ -292,18 +419,48 @@ def disparar_atualizacao_odds_railway():
             print("[atualizacao_odds] motor_recomendacoes.py concluído - atualização completa.")
         except subprocess.CalledProcessError as e:
             print(f"[atualizacao_odds] Um dos scripts terminou com erro (código {e.returncode}).")
+            status_final = "erro"
+            detalhe_final = f"Script terminou com código {e.returncode}."
         except subprocess.TimeoutExpired:
             print("[atualizacao_odds] Um dos scripts passou de 10 minutos rodando - abortado.")
+            status_final = "erro"
+            detalhe_final = "Um dos scripts passou de 10 minutos rodando e foi abortado."
         except Exception as e:
             print(f"[atualizacao_odds] Falha inesperada ao rodar em segundo plano: {e}")
+            status_final = "erro"
+            detalhe_final = f"Falha inesperada: {e}"
         finally:
             _atualizacao_em_andamento.clear()
+            # NOVO: fecha o registro SEMPRE, inclusive em erro - se ficasse
+            # aberto, a interface mostraria progresso pra sempre até o
+            # varredor de abandonadas agir 15 minutos depois.
+            if execucao_id is not None:
+                fechar_execucao_atualizacao(execucao_id, status_final, detalhe_final)
+
+    # NOVO: registra o início ANTES de subir a thread. Se o INSERT falhar,
+    # nada é disparado - melhor não rodar do que rodar sem a interface
+    # conseguir acompanhar (o usuário ficaria de novo sem saber se o botão
+    # fez alguma coisa, que é exatamente o problema que isso resolve).
+    execucao_id = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        try:
+            cur = conn.cursor()
+            execucao_id = abrir_execucao_atualizacao(cur, usuario_id, forcada)
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[atualizacao_odds] Falha ao registrar o início da execução: {e}")
+        return False
 
     try:
         threading.Thread(target=rodar_em_segundo_plano, daemon=True).start()
         return True
     except Exception as e:
         print(f"[atualizacao_odds] Falha ao iniciar a thread de atualização: {e}")
+        fechar_execucao_atualizacao(execucao_id, "erro", f"Não foi possível iniciar a thread: {e}")
         return False
 
 
@@ -321,7 +478,7 @@ def processar_atualizacao_odds(cur, usuario_id, forcar):
 
     disparou_agora = False
     if forcar or ja_passou_1h:
-        if disparar_atualizacao_odds_railway():
+        if disparar_atualizacao_odds_railway(usuario_id, forcar):
             registrar_atualizacao_odds(cur, usuario_id, forcar)
             ultima = datetime.now(timezone.utc)
             disparou_agora = True
@@ -426,6 +583,41 @@ PAGINA = """
         }
         .jogo { font-weight: 600; font-size: 0.92rem; }
         """ + NAV_CSS + """
+        /* NOVO (acompanhamento em tempo real): painel que substitui as
+           listas de odds enquanto a atualização está rodando. */
+        .painel-progresso {
+            background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+            padding: 28px 24px; margin-bottom: 22px; text-align: center;
+        }
+        .painel-progresso h3 { margin: 0 0 6px 0; font-size: 1.05rem; color: #e6edf3; }
+        .painel-progresso .sub { margin: 0 0 20px 0; font-size: 0.85rem; color: #8b949e; }
+        .barra-progresso-fundo {
+            width: 100%; max-width: 520px; height: 10px; background: #0d1117;
+            border: 1px solid #30363d; border-radius: 999px;
+            margin: 0 auto 12px auto; overflow: hidden;
+        }
+        .barra-progresso-preenchida {
+            height: 100%; width: 0%; border-radius: 999px;
+            background: linear-gradient(90deg, #1f6feb, #388bfd);
+            transition: width 0.6s ease;
+        }
+        /* Passou da estimativa: para de crescer e vira listrada animada -
+           sinaliza "ainda rodando, só demorando mais que o previsto" sem
+           mentir que está quase acabando nem travar em 100%. */
+        .barra-progresso-preenchida.estourou {
+            background: repeating-linear-gradient(45deg, #1f6feb, #1f6feb 10px, #388bfd 10px, #388bfd 20px);
+            background-size: 28px 28px;
+            animation: desliza-listras 1s linear infinite;
+        }
+        @keyframes desliza-listras {
+            from { background-position: 0 0; }
+            to { background-position: 28px 0; }
+        }
+        .progresso-tempos {
+            display: flex; justify-content: center; gap: 18px; flex-wrap: wrap;
+            font-size: 0.85rem; color: #8b949e;
+        }
+        .progresso-tempos b { color: #e6edf3; }
         .colunas-resultado {
             display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start;
             margin-bottom: 28px;
@@ -708,6 +900,31 @@ PAGINA = """
                 localStorage.setItem('ultima_busca_odd_max', '{{ odd_max }}');
             } catch (e) {}
         </script>
+
+        <!-- NOVO (acompanhamento em tempo real): enquanto a atualização
+             roda, as listas antigas ficam ESCONDIDAS e esse painel aparece
+             no lugar. Antes, a página mostrava o resultado velho como se
+             fosse o novo, e a pessoa precisava clicar de novo depois de
+             alguns minutos pra ver o de verdade.
+
+             Aparece tanto logo após o clique quanto num F5 no meio do
+             processo (o estado vem do banco, não de quem clicou). -->
+        {% if atualizacao_rodando %}
+        <div class="painel-progresso" id="painel-progresso">
+            <h3>🔄 Atualizando odds e recalculando recomendações...</h3>
+            <p class="sub">Buscando as odds mais recentes na casa e recalculando tudo.
+                A página se atualiza sozinha quando terminar - não precisa clicar de novo.</p>
+            <div class="barra-progresso-fundo">
+                <div class="barra-progresso-preenchida" id="barra-progresso"></div>
+            </div>
+            <div class="progresso-tempos">
+                <span>Tempo decorrido: <b id="tempo-decorrido">--</b></span>
+                <span>Estimativa: <b id="tempo-estimado">--</b></span>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if not atualizacao_rodando %}
         {% if individuais or multiplas %}
         <div class="colunas-resultado">
             <div class="coluna">
@@ -875,6 +1092,90 @@ PAGINA = """
                 {{ motivo }}
             </div>
         {% endif %}
+        {% endif %}{# fim de "not atualizacao_rodando" #}
+    {% endif %}
+
+    {% if atualizacao_rodando %}
+    <script>
+        // NOVO (acompanhamento em tempo real): pergunta ao servidor, a
+        // cada 5 segundos, se a atualização já terminou. Quando terminar,
+        // recarrega a página sozinha - é isso que elimina o "espera 5
+        // minutos e clica de novo" que existia antes.
+        //
+        // O reload vai pra URL SEM token_busca de propósito: sem token, o
+        // servidor não trata como clique real, então NÃO dispara uma nova
+        // rodada de atualização. Só exibe o resultado que acabou de ficar
+        // pronto. (Ver gerar_e_guardar_token_busca no app.)
+        (function () {
+            const INTERVALO_MS = 5000;
+            const barra = document.getElementById('barra-progresso');
+            const elDecorrido = document.getElementById('tempo-decorrido');
+            const elEstimado = document.getElementById('tempo-estimado');
+
+            // Contador local, pra barra andar de segundo em segundo mesmo
+            // entre uma consulta e outra (senão ela pularia de 5 em 5s).
+            let decorridos = {{ progresso_decorridos }};
+            let estimativa = {{ progresso_estimativa }};
+
+            function formatar(segundos) {
+                segundos = Math.max(0, Math.round(segundos));
+                const m = Math.floor(segundos / 60);
+                const s = segundos % 60;
+                return m + ':' + String(s).padStart(2, '0');
+            }
+
+            function desenhar() {
+                if (elDecorrido) elDecorrido.textContent = formatar(decorridos);
+                if (elEstimado) elEstimado.textContent = '~' + formatar(estimativa);
+                if (!barra) return;
+                if (estimativa > 0 && decorridos < estimativa) {
+                    // Trava em 97% mesmo perto do fim: chegar a 100% e
+                    // continuar rodando passa a impressão de travamento.
+                    const pct = Math.min(97, (decorridos / estimativa) * 100);
+                    barra.style.width = pct + '%';
+                    barra.classList.remove('estourou');
+                } else {
+                    // Passou da estimativa - barra cheia e listrada, pra
+                    // dizer "ainda rodando" sem fingir progresso.
+                    barra.style.width = '100%';
+                    barra.classList.add('estourou');
+                }
+            }
+
+            desenhar();
+            setInterval(function () { decorridos += 1; desenhar(); }, 1000);
+
+            function recarregarComResultado() {
+                const params = new URLSearchParams(window.location.search);
+                params.delete('token_busca');   // não dispara nova atualização
+                params.delete('forcar');        // idem
+                params.set('auto', '1');
+                window.location.replace(window.location.pathname + '?' + params.toString());
+            }
+
+            function consultarStatus() {
+                fetch('/api/status-atualizacao', { cache: 'no-store' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (dados) {
+                        if (!dados.em_andamento) {
+                            recarregarComResultado();
+                            return;
+                        }
+                        // Resincroniza com o servidor - o contador local
+                        // pode ter derivado (aba em segundo plano etc).
+                        decorridos = dados.segundos_decorridos;
+                        if (dados.estimativa_segundos) estimativa = dados.estimativa_segundos;
+                        desenhar();
+                    })
+                    .catch(function () {
+                        // Falha de rede não interrompe o acompanhamento -
+                        // a próxima consulta tenta de novo.
+                    });
+            }
+
+            setInterval(consultarStatus, INTERVALO_MS);
+        })();
+    </script>
     {% endif %}
 </body>
 </html>
@@ -2813,6 +3114,47 @@ def api_confronto_direto(time_id, adversario_id):
     finally:
         conn.close()
     return jsonify(jogos)
+
+
+@app.route("/api/status-atualizacao")
+def api_status_atualizacao():
+    """NOVO (acompanhamento em tempo real): responde se existe atualização
+    de odds/recomendações rodando agora, há quanto tempo, e quanto ela
+    deve demorar no total.
+
+    Consultado pelo polling da página inicial a cada 5 segundos. Lê o
+    estado do BANCO (não do threading.Event em memória), então funciona
+    igual com qualquer número de workers do Gunicorn - o navegador pode
+    cair num worker diferente do que está rodando a thread e ainda assim
+    receber a resposta certa.
+
+    Só leitura do ponto de vista do usuário. O único write possível é o
+    varredor de execuções abandonadas, que é justamente uma limpeza de
+    estado inconsistente (ver marcar_execucoes_abandonadas)."""
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        execucao = buscar_execucao_em_andamento(cur)
+        estimativa = estimar_duracao_atualizacao(cur)
+        conn.commit()  # o varredor de abandonadas pode ter escrito
+        cur.close()
+    finally:
+        conn.close()
+
+    if not execucao:
+        return jsonify({
+            "em_andamento": False,
+            "segundos_decorridos": 0,
+            "estimativa_segundos": estimativa,
+        })
+
+    _, iniciada_em = execucao
+    decorridos = int((datetime.now(timezone.utc) - iniciada_em).total_seconds())
+    return jsonify({
+        "em_andamento": True,
+        "segundos_decorridos": max(0, decorridos),
+        "estimativa_segundos": estimativa,
+    })
 
 
 @app.route("/api/calibracao/<int:inicio_faixa>")
@@ -6552,6 +6894,10 @@ def index():
     motivo = ""
     ultima_atualizacao_odds = None
     disparou_agora = False
+    # NOVO (acompanhamento em tempo real): estado da barra de progresso.
+    atualizacao_rodando = False
+    progresso_decorridos = 0
+    progresso_estimativa = ESTIMATIVA_PADRAO_SEGUNDOS
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
@@ -6573,6 +6919,23 @@ def index():
             ultima = buscar_ultima_atualizacao_odds(cur)
             if ultima:
                 ultima_atualizacao_odds = ultima.astimezone(FUSO_BRASIL).strftime("%H:%M")
+
+        # NOVO (acompanhamento em tempo real): lê do BANCO se existe
+        # atualização rodando. Fica DEPOIS do bloco de disparo de
+        # propósito, pra já enxergar a execução que acabou de ser criada
+        # neste mesmo clique.
+        #
+        # Vale pros dois caminhos: o clique que disparou agora, e um F5 no
+        # meio de uma execução iniciada antes (aí o painel reaparece
+        # sozinho, sem depender de quem clicou).
+        execucao_atual = buscar_execucao_em_andamento(cur)
+        progresso_estimativa = estimar_duracao_atualizacao(cur)
+        conn.commit()  # o varredor de abandonadas pode ter escrito
+        if execucao_atual:
+            atualizacao_rodando = True
+            progresso_decorridos = max(
+                0, int((datetime.now(timezone.utc) - execucao_atual[1]).total_seconds())
+            )
 
         if buscou:
             recomendacoes = buscar_recomendacoes(cur)
@@ -6599,15 +6962,19 @@ def index():
                 # minutos pra terminar. Sem isso, a pessoa clica, não vê
                 # nada, e acha que o botão não fez nada - quando na
                 # verdade só ainda não deu tempo.
+                # NOVO: quando a atualização está rodando, quem explica a
+                # situação é o painel de progresso (que substitui as
+                # listas), não uma mensagem de "clica de novo" - o clique
+                # manual deixou de ser necessário. As mensagens antigas
+                # ficam só como reserva, pro caso raro de o painel não
+                # aparecer (ex: execução que fechou entre o disparo e essa
+                # consulta).
                 if disparou_agora:
-                    motivo = ("🔄 A atualização de odds foi disparada agora mesmo - o pedido em si é rápido, "
-                               "mas o processo real (baixar odds + recalcular recomendações) costuma levar "
-                               "de 1 a 2 minutos pra terminar. Espera um pouco e clica em "
-                               "\"Gerar recomendações da rodada\" de novo.")
-                elif atualizacao_em_andamento():
-                    motivo = ("⏳ Já tem uma atualização rodando agora (iniciada por outro clique há pouco) - "
-                               "só uma roda por vez, pra não duplicar chamada na OddsPapi. Espera terminar "
-                               "(1-2 minutos) e clica em \"Gerar recomendações da rodada\" de novo.")
+                    motivo = ("🔄 A atualização de odds foi disparada agora mesmo e está rodando em segundo "
+                               "plano. A página se atualiza sozinha quando terminar.")
+                elif atualizacao_rodando:
+                    motivo = ("⏳ Já tem uma atualização rodando agora - só uma roda por vez, pra não "
+                               "duplicar chamada na OddsPapi. A página se atualiza sozinha quando terminar.")
                 else:
                     motivo = descobrir_motivo(cur)
         cur.close()
@@ -6676,6 +7043,9 @@ def index():
         individuais=individuais, multiplas=multiplas, motivo=motivo, banca_atual=round(banca_atual, 2),
         jogos_disponiveis=jogos_disponiveis,
         ultima_atualizacao_odds=ultima_atualizacao_odds, token_busca=token_busca,
+        atualizacao_rodando=atualizacao_rodando,
+        progresso_decorridos=progresso_decorridos,
+        progresso_estimativa=progresso_estimativa,
         nav_html=barra_navegacao("index", round(banca_atual, 2)),
     )
 
