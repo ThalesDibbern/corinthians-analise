@@ -566,7 +566,26 @@ def buscar_frequencia_confronto(cur, nosso_time_id, adversario_id, mandante_filt
     essa função deve cair de volta pro padrão geral (não filtrado por
     adversário). Filtra por nosso_time_id (o time do qual estamos vendo o
     confronto - hoje sempre Corinthians), pra não colidir com o confronto
-    do mesmo adversário visto de outro time no futuro."""
+    do mesmo adversário visto de outro time no futuro.
+
+    NOVO (21/08/2026 - suavização SEMPRE ativa aqui): o parâmetro
+    `suavizar` recebido é IGNORADO de propósito - confronto direto é
+    sempre suavizado, independente do tamanho do histórico do time.
+
+    Motivo: a suavização de Laplace decide pelo total de jogos do TIME
+    (ver JOGOS_MINIMOS_HISTORICO_COMPLETO), mas isso é o número errado
+    aqui. O Corinthians tem 173 jogos e conta como "histórico completo" -
+    só que o confronto ESPECÍFICO contra o Palmeiras tem 5 ou 6, não 173.
+
+    E essa amostra nunca vai crescer: dois times se enfrentam 2 a 3 vezes
+    por temporada, então mesmo com anos de histórico o confronto
+    dificilmente passa de 8-10 jogos. É pequena por natureza, não por
+    imaturidade - exatamente o caso que a suavização existe pra atender.
+
+    Sem isso, um confronto de 5 em 5 jogos viraria frequência 100% (tratada
+    como certeza) num time grande, reabrindo pela porta do confronto direto
+    o mesmo problema que a suavização fechou pros times de histórico curto:
+    perna de 100% multiplica por 1.0 e não reduz nada na múltipla."""
     if adversario_id is None:
         return None
     cur.execute(
@@ -575,7 +594,7 @@ def buscar_frequencia_confronto(cur, nosso_time_id, adversario_id, mandante_filt
              AND linha = %s AND resultado = %s AND amostra_pequena = FALSE""",
         (nosso_time_id, adversario_id, mandante_filtro, tipo_padrao, linha, resultado),
     )
-    return _frequencia_do_row(cur.fetchone(), suavizar)
+    return _frequencia_do_row(cur.fetchone(), True)
 
 
 def buscar_frequencia_forma_recente(cur, resultado, time_id, suavizar=False):
@@ -1148,6 +1167,57 @@ def buscar_fator_correlacao(cur, tipo_padrao, mandante_id, visitante_id):
 # ================== fim das funções novas do Grupo A ==================
 
 
+def buscar_fator_correlacao_time(cur, par, adversario_id):
+    """NOVO (21/08/2026): fator de correlação pra mercado de UM TIME, não
+    do jogo inteiro. Usado no cartão por time (par faltas -> cartões).
+
+    POR QUE NÃO DÁ PRA REUSAR buscar_fator_correlacao AQUI
+    ------------------------------------------------------
+    Aquela função estima A somando os DOIS times (`media_mandante +
+    media_visitante`), o que é correto pra mercado de jogo inteiro. Pro
+    mercado de um time só, isso conta a mesma informação DUAS VEZES: a
+    frequência-base já é o histórico de cartões DAQUELE time, que por
+    definição já embute o quanto ele falta. Somar a falta dele de novo no
+    `a_estimado` é redundância, não informação nova.
+
+    O que a base NÃO sabe é contra QUEM ele vai jogar dessa vez. Por isso
+    aqui A é estimado usando SÓ a média de faltas do ADVERSÁRIO - é o
+    único lado que traz informação que a base ainda não tem.
+
+    UNIDADES
+    --------
+    `media_a` salva no banco é a média de faltas do JOGO INTEIRO (dois
+    times somados). Como aqui comparamos a média de UM time só, o corte
+    tem que ser `media_a / 2` - a média por time da liga. Sem essa
+    divisão, a comparação misturaria escalas e quase todo adversário
+    cairia no grupo "abaixo".
+
+    O fator em si (`valor_b / media_b`) é uma RAZÃO adimensional ("jogos
+    faltosos têm X% mais cartão que a média"), então aplicá-lo sobre uma
+    frequência de nível de time é legítimo - a proporção vale igual.
+    """
+    if adversario_id is None:
+        return None
+
+    dados = buscar_correlacao_liga(cur, par)
+    if dados is None:
+        return None
+    media_a, valor_b_acima, valor_b_abaixo, media_b = dados
+    if not media_b:
+        return None
+
+    media_adversario = buscar_media_estatistica_time(cur, adversario_id, "faltas")
+    if media_adversario is None:
+        return None
+
+    # Corte na média POR TIME da liga (metade da média do jogo inteiro).
+    media_a_por_time = float(media_a) / 2.0
+
+    valor_b = valor_b_acima if media_adversario > media_a_por_time else valor_b_abaixo
+    fator = float(valor_b) / float(media_b)
+    return max(FATOR_CORRELACAO_MINIMO, min(FATOR_CORRELACAO_MAXIMO, fator))
+
+
 def jogador_disponivel(cur, jogador_id, jogo_id):
     """Evita recomendar aposta em jogador que provavelmente não vai jogar
     (suspenso, lesionado, cortado do time).
@@ -1339,14 +1409,21 @@ def calcular_recomendacoes(cur):
             # Mais/Menos Equipe 1/2") - destravado pela correção do bug de
             # plural em atualizar_odds.py ("Cartões" não batia com
             # "cartão"/"cartao"). Mesma identificação de time por variantes
-            # de nome que escanteio_time/gols_time já usam. A tabela
-            # padroes_time_linha (tipo="cartao") já existe e já é populada
-            # há tempo por calcular_padrao_cartao_time - só faltava esse
-            # bloco pra ler e virar recomendação de verdade.
-            # SEM ajuste de Grupo A por enquanto: árbitro/estilo (usados no
-            # cartão de JOGADOR acima) foram desenhados nesse nível
-            # específico - extrapolar pra TIME fica como possível melhoria
-            # futura, não decidido ainda se faz sentido.
+            # de nome que escanteio_time/gols_time já usam.
+            #
+            # NOVO (21/08/2026): esse mercado nasceu SEM nenhum ajuste, de
+            # propósito (medir antes de decidir). Agora recebe os três:
+            # confronto direto, árbitro e correlação.
+            #
+            # O que motivou: sem confronto direto, esse mercado ia na média
+            # BRUTA do time contra qualquer adversário, enquanto o
+            # cartao_total já enxergava a rivalidade. Num clássico isso
+            # gerava recomendações contraditórias do MESMO jogo - ex:
+            # "Menos de 3.5 pro Corinthians" + "Menos de 2.5 pro Palmeiras"
+            # (soma 6) convivendo com "Mais de 8.5 no total". E, como são
+            # tipos de mercado diferentes, chave_mercado_da_perna não
+            # impedia as três de caírem na MESMA múltipla, multiplicadas
+            # como independentes quando são quase mutuamente exclusivas.
             mercado_lower = mercado.lower()
             adversario_id_calc = None
             if mandante_id is not None and visitante_id is not None:
@@ -1359,8 +1436,33 @@ def calcular_recomendacoes(cur):
             bate_adversario = any(c and c in mercado_lower for c in candidatos_adversario)
 
             if bate_nosso_time and not bate_adversario:
-                frequencia_bruta = buscar_frequencia_cartao_time(cur, linha, nosso_time_id, suavizar=suavizar)
+                # Confronto direto tem prioridade sobre o padrão geral -
+                # mesma regra dos outros mercados que já usam confronto.
+                frequencia_bruta = buscar_frequencia_confronto(
+                    cur, nosso_time_id, adversario_id, mandante_filtro_atual, "cartao_time", linha=linha,
+                    suavizar=suavizar
+                )
                 if frequencia_bruta is not None:
+                    veio_de_confronto_direto = True
+                else:
+                    frequencia_bruta = buscar_frequencia_cartao_time(cur, linha, nosso_time_id, suavizar=suavizar)
+
+                if frequencia_bruta is not None:
+                    # Correlação faltas -> cartões no nível de TIME: usa só
+                    # a média do ADVERSÁRIO, nunca a soma dos dois (ver
+                    # buscar_fator_correlacao_time - somar a falta do
+                    # próprio time contaria de novo algo que a base já tem).
+                    fator_correlacao = buscar_fator_correlacao_time(
+                        cur, "faltas_cartoes", adversario_id_calc
+                    )
+                    fator_arbitro_cartao = calcular_fator_arbitro(cur, arbitro, media_geral_cartoes, "cartao")
+                    fator_grupo_a_aplicado, descricoes_grupo_a = combinar_fatores([
+                        (fator_correlacao, "correlação faltas/cartões"),
+                        (fator_arbitro_cartao, "árbitro"),
+                    ])
+                    if fator_grupo_a_aplicado is not None:
+                        frequencia_bruta = min(round(frequencia_bruta * fator_grupo_a_aplicado, 2), 100.0)
+
                     frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "falta_cometida" and jogador_id \
@@ -1523,8 +1625,24 @@ def calcular_recomendacoes(cur):
                 fator_correlacao = buscar_fator_correlacao(
                     cur, "cartao_total", mandante_id, visitante_id
                 )
+                # NOVO (21/08/2026): árbitro entra também no cartão TOTAL.
+                # Antes ele só existia no cartão de JOGADOR.
+                #
+                # Não é contagem dupla com a correlação, apesar da
+                # suspeita inicial (árbitro rigoroso apita mais falta ->
+                # mais cartão). Olhando como cada fator é CONSTRUÍDO:
+                # a frequência-base é o histórico do time em TODOS os
+                # jogos dele, então já contém a média de todos os árbitros
+                # que ele pegou - corrigir esse valor pelo desvio DESTE
+                # árbitro é exatamente a correção certa. E a média do
+                # árbitro é calculada sobre TODOS os times que ele apitou,
+                # então o efeito de time já está diluído nela. Cada fator
+                # tem no input a média do que o outro mede: são quase
+                # ortogonais.
+                fator_arbitro_cartao = calcular_fator_arbitro(cur, arbitro, media_geral_cartoes, "cartao")
                 fator_grupo_a_aplicado, descricoes_grupo_a = combinar_fatores([
                     (fator_correlacao, "correlação faltas/cartões"),
+                    (fator_arbitro_cartao, "árbitro"),
                 ])
                 if fator_grupo_a_aplicado is not None:
                     frequencia_bruta = min(round(frequencia_bruta * fator_grupo_a_aplicado, 2), 100.0)
