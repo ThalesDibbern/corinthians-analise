@@ -2043,6 +2043,54 @@ def buscar_totais_cartao_confronto(cur, corinthians_id, adversario_id, mandante_
     return [row[0] for row in cur.fetchall()]
 
 
+def buscar_totais_cartao_time_confronto(cur, corinthians_id, adversario_id, mandante_filtro):
+    """NOVO (confronto direto pra cartão de TIME): cartões recebidos pelo
+    NOSSO time nos jogos contra um adversário específico - diferente de
+    buscar_totais_cartao_confronto, que soma os cartões dos DOIS times.
+
+    Por que existe: sem isso, o mercado "Cartões - Mais/Menos [Time]"
+    usava sempre a média geral do time contra qualquer adversário,
+    enquanto "Cartões Total do Jogo" já tinha confronto direto. Num
+    clássico (ex: Corinthians x Palmeiras), o total enxergava a rivalidade
+    e subia a linha, mas o mercado por time não - gerando recomendações
+    contraditórias do MESMO jogo (ex: "Menos de 3.5 pro Corinthians" +
+    "Menos de 2.5 pro Palmeiras" convivendo com "Mais de 8.5 no total",
+    que somam 6 contra 8.5). Pior: como são tipos de mercado diferentes,
+    a trava de mercado repetido em combinacoes.py não impedia as três de
+    caírem na MESMA múltipla, sendo multiplicadas como independentes
+    quando na prática são quase mutuamente exclusivas.
+
+    Detalhe importante do schema: em `cartoes`, o campo `lado` é gravado
+    relativo ao NOSSO time (ver popular_banco.py/salvar_eventos), NÃO ao
+    mandante/visitante real - por isso `c.lado = 'mandante'` aqui
+    significa "cartão do nosso time", igual em calcular_padrao_cartao_time.
+    Como condicao_confronto já exige j.nosso_time_id = corinthians_id, a
+    perspectiva é sempre a do time que estamos analisando.
+
+    Conta numa subconsulta separada de propósito: JOIN direto com
+    `cartoes` depois de `estatisticas_jogo` (que tem 2 linhas por jogo)
+    duplicaria cada cartão - mesmo bug já corrigido nas funções vizinhas."""
+    condicao = condicao_confronto(mandante_filtro)
+    cur.execute(
+        f"""
+        SELECT contagem.total_cartoes
+        FROM (
+            SELECT j.id AS jogo_id,
+                   (SELECT COUNT(*) FROM cartoes c
+                     WHERE c.jogo_id = j.id AND c.lado = 'mandante') AS total_cartoes,
+                   COUNT(DISTINCT eg.lado) AS lados
+            FROM jogos j
+            JOIN estatisticas_jogo eg ON eg.jogo_id = j.id
+            WHERE {condicao} AND j.data_jogo < CURRENT_DATE
+            GROUP BY j.id
+        ) contagem
+        WHERE contagem.lados = 2
+        """,
+        {"corinthians_id": corinthians_id, "adversario_id": adversario_id},
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
 def buscar_totais_falta_confronto(cur, corinthians_id, adversario_id, mandante_filtro):
     condicao = condicao_confronto(mandante_filtro)
     cur.execute(
@@ -2196,6 +2244,17 @@ def calcular_padroes_confronto_direto(cur, time_id):
             if len(valores) >= JOGOS_MINIMOS_CONFRONTO:
                 resultados = calcular_frequencias_linha(valores, LINHAS_CARTAO_TOTAL)
                 salvar_padrao_confronto_linha(cur, corinthians_id, adversario_id, mandante_filtro, "cartao_total", len(valores), resultados)
+                total_calculado += 1
+
+            # NOVO (confronto direto pra cartão de TIME): mesma ideia do
+            # cartao_total logo acima, mas contando só os cartões do NOSSO
+            # time. Usa LINHAS_CARTAO_TIME (0.5 a 3.5), não
+            # LINHAS_CARTAO_TOTAL (2.5 a 5.5) - as linhas do mercado por
+            # time são naturalmente mais baixas, já que é metade do jogo.
+            valores = buscar_totais_cartao_time_confronto(cur, corinthians_id, adversario_id, mandante_filtro)
+            if len(valores) >= JOGOS_MINIMOS_CONFRONTO:
+                resultados = calcular_frequencias_linha(valores, LINHAS_CARTAO_TIME)
+                salvar_padrao_confronto_linha(cur, corinthians_id, adversario_id, mandante_filtro, "cartao_time", len(valores), resultados)
                 total_calculado += 1
 
             valores = buscar_totais_falta_confronto(cur, corinthians_id, adversario_id, mandante_filtro)
