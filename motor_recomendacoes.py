@@ -585,16 +585,56 @@ def buscar_frequencia_confronto(cur, nosso_time_id, adversario_id, mandante_filt
     Sem isso, um confronto de 5 em 5 jogos viraria frequência 100% (tratada
     como certeza) num time grande, reabrindo pela porta do confronto direto
     o mesmo problema que a suavização fechou pros times de histórico curto:
-    perna de 100% multiplica por 1.0 e não reduz nada na múltipla."""
+    perna de 100% multiplica por 1.0 e não reduz nada na múltipla.
+
+    NOVO (21/08/2026 - ESCADA DE FALLBACK mando -> geral)
+    -----------------------------------------------------
+    O confronto direto é gravado em TRÊS recortes: 'mandante', 'visitante'
+    e 'geral' (os dois juntos). Até aqui, a recomendação pedia sempre o
+    recorte específico do mando do jogo - e nunca o 'geral'.
+
+    O problema: dois times se enfrentam ~2x por temporada, e dividir isso
+    em dois lados faz cada recorte ficar com METADE de uma amostra que já
+    era pequena. Caso real (Bahia x Vitória, 23/08/2026): 5 jogos no banco,
+    mas 3 como mandante e 2 como visitante - nenhum dos dois passava no
+    piso de 5, então o confronto era descartado e a odd caía na média geral
+    do time contra QUALQUER adversário. O recorte 'geral', com os 5 jogos,
+    estava calculado no banco e nunca era consultado.
+
+    O efeito era grande: no Ba-Vi, o confronto dava "Mais de 3.5 cartões do
+    Bahia" em 20% (1 de 5), contra ~14% da média geral do time - ou seja, o
+    sistema estava jogando fora justamente a informação de que o clássico é
+    mais cartelado que a média.
+
+    Agora tenta em escada, do mais específico pro mais genérico:
+        mando do jogo -> 'geral' -> None (aí quem chamou usa a média do time)
+
+    Isso é o mesmo diagnóstico já registrado do "Padrão por Rodada": um
+    agrupamento fino demais faz o fator quase nunca ativar. A diferença é
+    que aqui existia um agrupamento mais largo já pronto e ocioso.
+    """
     if adversario_id is None:
         return None
-    cur.execute(
-        """SELECT frequencia, jogos_analisados FROM padroes_confronto_direto
-           WHERE nosso_time_id = %s AND adversario_id = %s AND mandante_filtro = %s AND tipo_padrao = %s
-             AND linha = %s AND resultado = %s AND amostra_pequena = FALSE""",
-        (nosso_time_id, adversario_id, mandante_filtro, tipo_padrao, linha, resultado),
-    )
-    return _frequencia_do_row(cur.fetchone(), True)
+
+    def consultar(filtro):
+        cur.execute(
+            """SELECT frequencia, jogos_analisados FROM padroes_confronto_direto
+               WHERE nosso_time_id = %s AND adversario_id = %s AND mandante_filtro = %s AND tipo_padrao = %s
+                 AND linha = %s AND resultado = %s AND amostra_pequena = FALSE""",
+            (nosso_time_id, adversario_id, filtro, tipo_padrao, linha, resultado),
+        )
+        return _frequencia_do_row(cur.fetchone(), True)
+
+    frequencia = consultar(mandante_filtro)
+    if frequencia is not None:
+        return frequencia
+
+    # Degrau 2: o recorte 'geral' junta mandante + visitante, então tem o
+    # dobro da amostra. Só faz sentido tentar se o pedido não era já ele.
+    if mandante_filtro != "geral":
+        return consultar("geral")
+
+    return None
 
 
 def buscar_frequencia_forma_recente(cur, resultado, time_id, suavizar=False):
