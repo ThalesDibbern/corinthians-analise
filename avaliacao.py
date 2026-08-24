@@ -61,23 +61,76 @@ def avaliar_binario(ocorreu, direcao):
     return "pendente"
 
 
+# NOVO (22/08/2026 - fechando a segunda metade da proteção da janela de
+# espera): mesmo valor de JANELA_ESPERA_ESTATISTICA_HORAS em
+# popular_banco.py. Repetido aqui em vez de importado porque avaliacao.py
+# é módulo compartilhado (app.py e arquivar_recomendacoes.py dependem
+# dele) e não deve puxar um script de coleta junto - importar
+# popular_banco.py aqui arrastaria requests, chaves de API e a lógica de
+# cota pra dentro do site. Se um dia esse número mudar, mudar nos dois.
+JANELA_ESPERA_ESTATISTICA_HORAS = 6
+
+
 def jogo_totalmente_processado(cur, jogo_id):
     """Um jogo é considerado "totalmente processado" quando as estatísticas
-    de TIME dos dois lados já foram salvas - depois disso, não vai chegar
-    mais dado novo pra esse jogo (popular_banco.py já processou ele por
-    completo, pra sempre). Usado pra distinguir "ainda não temos o dado
-    desse jogador" (esperar mais) de "esse jogador simplesmente não jogou
-    esse jogo" (pode avaliar como zero, sem ficar pendente pra sempre) -
-    sem isso, uma recomendação/aposta de jogador que ficou no banco sem
-    entrar (chute no gol, falta, desarme, impedimento, cartão) nunca tinha
-    jeito de ser avaliada, porque nunca ia aparecer uma linha em
-    jogador_estatisticas_jogo pra ele."""
+    de TIME dos dois lados já foram salvas E o jogo já saiu da janela de
+    espera - depois disso, não vai chegar mais dado novo pra esse jogo.
+    Usado pra distinguir "ainda não temos o dado desse jogador" (esperar
+    mais) de "esse jogador simplesmente não jogou esse jogo" (pode avaliar
+    como zero, sem ficar pendente pra sempre) - sem isso, uma
+    recomendação/aposta de jogador que ficou no banco sem entrar (chute no
+    gol, falta, desarme, impedimento, cartão) nunca tinha jeito de ser
+    avaliada, porque nunca ia aparecer uma linha em
+    jogador_estatisticas_jogo pra ele.
+
+    NOVO (22/08/2026 - JANELA DE ESPERA):
+    -------------------------------------
+    Antes essa função checava APENAS se existiam as 2 linhas em
+    `estatisticas_jogo`. Isso repetia exatamente o erro de raciocínio do
+    bug original de "estatística coletada no meio do jogo": confundir
+    EXISTÊNCIA do dado com MATURIDADE do dado.
+
+    A janela de 6h em popular_banco.py protege a COLETA (rebusca a
+    estatística mesmo já existindo linha salva, enquanto o jogo for
+    recente). Mas a AVALIAÇÃO roda logo em seguida, no mesmo cron
+    (popular_banco -> ... -> arquivar_recomendacoes), e continuava
+    perguntando só "existem os 2 lados?".
+
+    Consequência: rodar a cadeia completa pouco depois de um jogo gravava
+    dado parcial, encontrava as 2 linhas, dava a avaliação como definitiva
+    e CONGELAVA acertou/errou em cima de números do meio do segundo tempo.
+    Depois o popular_banco corrigia a estatística, mas a avaliação já
+    estava gravada.
+
+    O cron das 9h nunca sofreu disso (jogos da noite anterior já passaram
+    das 6h), mas um "Run Now" manual logo após um jogo, sim.
+
+    Agora exige as DUAS condições. Devolver False aqui significa
+    "pendente" em todos os pontos de uso (nunca "errou"), então o pior
+    caso é adiar a avaliação pro próximo cron - que é exatamente o
+    comportamento desejado.
+
+    Não afeta os mercados de placar (gols_total, gols_time, equipe_marca,
+    dupla chance/ambas marcam por tempo, resultado_final): esses não
+    passam por aqui de propósito, porque o placar vem confiável assim que
+    o fixture fecha em "FT" - quem sofre o atraso é o endpoint de
+    estatísticas."""
     cur.execute(
-        "SELECT COUNT(DISTINCT lado) FROM estatisticas_jogo WHERE jogo_id = %s",
-        (jogo_id,),
+        """
+        SELECT
+            (SELECT COUNT(DISTINCT lado) FROM estatisticas_jogo WHERE jogo_id = %s) AS lados,
+            (NOW() - COALESCE(j.datahora_jogo, j.data_jogo::timestamp))
+                >= (%s * INTERVAL '1 hour') AS fora_da_janela
+        FROM jogos j
+        WHERE j.id = %s
+        """,
+        (jogo_id, JANELA_ESPERA_ESTATISTICA_HORAS, jogo_id),
     )
     row = cur.fetchone()
-    return row is not None and row[0] == 2
+    if row is None:
+        return False
+    lados, fora_da_janela = row
+    return lados == 2 and bool(fora_da_janela)
 
 
 def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, direcao):
