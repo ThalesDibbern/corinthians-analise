@@ -31,6 +31,8 @@ Rodar:
 Variáveis de ambiente necessárias: DATABASE_URL
 """
 
+import base64
+import gzip
 import os
 import sys
 from datetime import datetime, timezone
@@ -84,12 +86,21 @@ def colunas_da_tabela(cur, tabela):
 def constraints_da_tabela(cur, tabela):
     """Chave primária, estrangeiras, unique e checks - já no formato SQL
     pronto, via pg_get_constraintdef. Ordena por tipo pra a PK aparecer
-    antes das FKs, que é como se costuma escrever à mão."""
+    antes das FKs, que é como se costuma escrever à mão.
+
+    IMPORTANTE (corrigido em 24/08/2026): filtra contype = 'n'. A partir do
+    Postgres 17, as restrições NOT NULL passaram a aparecer em
+    pg_constraint (antes ficavam só em pg_attribute.attnotnull). Sem esse
+    filtro, o DDL gerado saía com linhas INVÁLIDAS do tipo
+    `CONSTRAINT x_col_not_null NOT NULL col` - que não é sintaxe de
+    CREATE TABLE e quebraria o schema.sql inteiro na hora de rodar. Além
+    de redundante: o NOT NULL já sai na definição da coluna."""
     cur.execute(
         """
         SELECT conname, pg_get_constraintdef(oid), contype
         FROM pg_constraint
         WHERE conrelid = %s::regclass
+          AND contype IN ('p', 'u', 'f', 'c')
         ORDER BY CASE contype
                      WHEN 'p' THEN 1
                      WHEN 'u' THEN 2
@@ -187,6 +198,47 @@ def gerar_ddl(cur):
     return "\n".join(linhas), tabelas
 
 
+LARGURA_BLOCO = 180
+
+
+def imprimir_empacotado(ddl, tabelas):
+    """Imprime o schema comprimido (gzip + base64) em blocos numerados.
+
+    POR QUE NÃO IMPRIMIR O TEXTO DIRETO
+    -----------------------------------
+    Testado em 24/08/2026 no Railway: imprimir o DDL cru deu errado por
+    DOIS motivos ao mesmo tempo.
+
+    1) EMBARALHOU. O coletor de log do Railway atribui timestamps com
+       resolução menor que o intervalo entre as linhas, e entrega elas
+       FORA DE ORDEM. O schema saiu com colunas de uma tabela no meio de
+       outra - ilegível e impossível de reordenar com segurança.
+    2) TRUNCOU. O log foi cortado na 23ª de 49 tabelas.
+
+    Comprimir resolve os dois: o gzip reduz o volume o bastante pra não
+    truncar, e o número de sequência em cada bloco permite remontar na
+    ordem certa mesmo que o log entregue embaralhado.
+
+    Não é elegante, mas é o formato que sobrevive ao transporte."""
+    bruto = gzip.compress(ddl.encode("utf-8"), compresslevel=9)
+    texto = base64.b64encode(bruto).decode("ascii")
+    blocos = [texto[i:i + LARGURA_BLOCO] for i in range(0, len(texto), LARGURA_BLOCO)]
+
+    print("=" * 60)
+    print(f"SCHEMA EMPACOTADO - {len(tabelas)} tabelas, {len(blocos)} blocos")
+    print("Copie TODAS as linhas que começam com SCHEMA| (a ordem não importa,")
+    print("o número no início permite remontar).")
+    print("=" * 60)
+    for i, bloco in enumerate(blocos):
+        print(f"SCHEMA|{i:04d}|{bloco}")
+    print("=" * 60)
+    print(f"FIM - {len(blocos)} blocos no total")
+    print()
+    print("Tabelas encontradas:")
+    for t in tabelas:
+        print(f"  - {t}")
+
+
 def main():
     para_tela = "--stdout" in sys.argv
 
@@ -199,18 +251,12 @@ def main():
         conn.close()
 
     if para_tela:
+        # Modo cru: só serve pra rodar localmente, onde o terminal não
+        # reordena nem trunca. No Railway, usar o modo empacotado.
         print(ddl)
         return
 
-    caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema.sql")
-    with open(caminho, "w", encoding="utf-8") as f:
-        f.write(ddl)
-
-    print(f"schema.sql gerado com {len(tabelas)} tabelas em {caminho}")
-    print()
-    print("Tabelas:")
-    for t in tabelas:
-        print(f"  - {t}")
+    imprimir_empacotado(ddl, tabelas)
 
 
 if __name__ == "__main__":
