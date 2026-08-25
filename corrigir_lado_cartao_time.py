@@ -81,6 +81,8 @@ Variáveis de ambiente necessárias: DATABASE_URL
 
 import os
 import sys
+from datetime import datetime
+
 import psycopg2
 
 from avaliacao import avaliar_resultado
@@ -141,8 +143,33 @@ def modulo_ainda_bugado():
     return fonte.count(trecho_antigo) >= 2
 
 
+def cabecalho(fase):
+    """Imprime, como PRIMEIRA linha da saída, qual fase está rodando e com
+    que argumentos.
+
+    Existe por um motivo prático: no Railway a fase é escolhida pelo
+    Custom Start Command, trocar esse comando dispara um redeploy, e a
+    aba Deployments passa a ter dois deploys parecidos. Já aconteceu de
+    abrir o log do deploy ANTERIOR e concluir que o script não obedeceu.
+    Com o cabeçalho, o log se identifica sozinho.
+
+    O relógio serve pra separar duas execuções da mesma fase - o coletor
+    de log do Railway embaralha a ordem das linhas, então o timestamp
+    dele não é confiável pra isso."""
+    print("=" * 92)
+    print(f"corrigir_lado_cartao_time.py | FASE: {fase.upper()} | "
+          f"iniciado em {datetime.now():%Y-%m-%d %H:%M:%S}")
+    print(f"argv recebido: {sys.argv}")
+    if fase == "verificar":
+        print("Esta fase NÃO grava nada no banco.")
+    else:
+        print("Esta fase GRAVA no banco (UPDATE em historico_recomendacoes.resultado).")
+    print("=" * 92)
+
+
 def fase_verificar():
     """Só lê e simula. Nenhuma escrita no banco."""
+    cabecalho("verificar")
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
 
@@ -210,6 +237,7 @@ def fase_verificar():
 
 def fase_aplicar():
     """Reavalia e grava só onde mudou. Não toca em dado coletado."""
+    cabecalho("aplicar")
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = False
     cur = conn.cursor()
@@ -260,10 +288,23 @@ def fase_aplicar():
 
 
 if __name__ == "__main__":
+    # A fase pode vir por argumento OU pela variável de ambiente FASE.
+    # O argumento tem prioridade; a variável existe como caminho
+    # alternativo pra quando o Custom Start Command estiver dando
+    # trabalho (dá pra setar FASE=aplicar nas Variables do serviço e
+    # deixar o comando como `python corrigir_lado_cartao_time.py`).
+    if len(sys.argv) == 1 and os.environ.get("FASE"):
+        sys.argv.append(os.environ["FASE"].strip().lower())
+
     if len(sys.argv) != 2 or sys.argv[1] not in ("verificar", "aplicar"):
         print("Uso:")
         print("  python corrigir_lado_cartao_time.py verificar   (só simula, não grava)")
         print("  python corrigir_lado_cartao_time.py aplicar     (corrige de verdade)")
+        print("")
+        print("Alternativas que não dependem do argumento:")
+        print("  FASE=aplicar como variável de ambiente do serviço")
+        print("  python -c \"import corrigir_lado_cartao_time as m; m.fase_aplicar()\"")
+        print(f"(argv recebido: {sys.argv})")
         sys.exit(1)
 
     if sys.argv[1] == "verificar":
