@@ -32,6 +32,12 @@ sem depender de estatisticas_jogo.
 NOVO (Onda 2): dupla_chance_1t/2t, ambas_marcam_1t/2t e marca_ambos_tempos -
 usam também placar_corinthians_intervalo/placar_adversario_intervalo (o
 placar no intervalo), pra derivar o resultado de cada tempo isolado.
+
+CORRIGIDO (25/08/2026): o mercado de cartão por TIME lia o lado errado
+quando o nosso time era visitante real. A tabela `cartoes` grava `lado`
+RELATIVO AO NOSSO TIME ('mandante' = nosso time), enquanto
+`estatisticas_jogo` grava o lado REAL do jogo - a versão anterior tratava
+as duas do mesmo jeito. Ver comentário longo no bloco de "cartao".
 """
 
 
@@ -150,21 +156,48 @@ def avaliar_resultado(cur, tipo_padrao, jogador_id, jogo_id, linha, descricao, d
                 return avaliar_binario(False, d)
             return "pendente"
 
-        # NOVO: cartão por TIME (mercado de linha Mais/Menos, "Cartões -
+        # Cartão por TIME (mercado de linha Mais/Menos, "Cartões -
         # Mais/Menos Equipe 1/2") - jogador_id vem None. Destravado pela
         # correção do bug de plural em atualizar_odds.py/
         # motor_recomendacoes.py ("Cartões" não batia com "cartão"/
-        # "cartao"). Mesmo padrão de "lado" (mandante/visitante) já usado
-        # em escanteio_time - soma os cartões (tabela `cartoes` já traz
-        # `lado` por linha) do lado do NOSSO time nesse jogo específico.
+        # "cartao").
+        #
+        # CORRIGIDO (25/08/2026 - auditoria da rodada de 22-24/08):
+        # ---------------------------------------------------------
+        # A versão anterior traduzia o lado via `jogos.mandante`, copiando
+        # o padrão de `escanteio_time`. Isso está ERRADO aqui, porque as
+        # duas tabelas usam a palavra "lado" com significados DIFERENTES:
+        #
+        #   - `estatisticas_jogo.lado`  = mandante/visitante REAL do jogo
+        #     (por isso escanteio_time PRECISA traduzir via jogos.mandante)
+        #   - `cartoes.lado`            = relativo ao NOSSO time
+        #     (popular_banco.salvar_eventos grava
+        #      lado = 'mandante' if ev["team"]["id"] == nosso_time_api_id
+        #             else 'visitante')
+        #
+        # Ou seja: em `cartoes`, 'mandante' quer dizer "nosso time",
+        # SEMPRE, independente de quem jogou em casa. Traduzir via
+        # jogos.mandante fazia o mercado ler o cartão do ADVERSÁRIO toda
+        # vez que o nosso time era visitante real.
+        #
+        # Confirmado por auditoria contra fonte externa (Sofascore/ge) nos
+        # 10 jogos da rodada de 22-24/08/2026: as 14 recomendações que
+        # nomeavam o mandante real bateram 14/14; das 18 que nomeavam o
+        # visitante real, 7 divergiram e 11 só coincidiram porque os dois
+        # times tinham o mesmo número de cartões naquele jogo.
+        #
+        # `motor_padroes.py` NÃO tinha esse problema - lá o filtro é
+        # `c.lado = 'mandante'` fixo, que já é o comportamento certo. Logo
+        # a probabilidade histórica nasceu correta; só a avaliação errava.
+        #
+        # Mesma leitura fixa usada por `calcular_padrao_cartao_time` e
+        # companhia, pra não existir duas convenções no projeto.
         if not jogo_totalmente_processado(cur, jogo_id):
             return "pendente"
-        cur.execute("SELECT mandante FROM jogos WHERE id = %s", (jogo_id,))
-        info_jogo = cur.fetchone()
-        if not info_jogo:
-            return "pendente"
-        lado = "mandante" if info_jogo[0] else "visitante"
-        cur.execute("SELECT COUNT(*) FROM cartoes WHERE jogo_id = %s AND lado = %s", (jogo_id, lado))
+        cur.execute(
+            "SELECT COUNT(*) FROM cartoes WHERE jogo_id = %s AND lado = 'mandante'",
+            (jogo_id,),
+        )
         total_cartoes_time = cur.fetchone()[0]
         return avaliar_linha(float(total_cartoes_time), linha, d)
 
