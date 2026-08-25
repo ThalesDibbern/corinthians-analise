@@ -18,6 +18,17 @@ MOTIVAÇÃO (auditoria da rodada de 22-24/08/2026, fase 1):
        10 recomendações foram avaliadas em cima disso, todas como falso
        positivo.
 
+       ATUALIZADO 25/08: a fase `verificar` confirmou que a API já se
+       corrigiu (11/2 escanteios, 10/10 faltas, 20/7 finalizações, todos
+       batendo com a fonte externa). Alvo ATIVO.
+
+       Observação que não aparecia na auditoria: as FALTAS desse jogo
+       também estavam pela metade (10 no banco contra 20 reais). Não
+       existe mercado apostável de falta por jogo, então nenhuma
+       recomendação foi avaliada errada por causa disso - mas falta é
+       input do fator de correlação faltas->cartões, então esse jogo
+       vinha entrando torto no cálculo.
+
     2) Vitória x Bahia (23/08) - CARTÃO faltando
        Banco: Vitória 3, Bahia 2, total 5
        Real:  Vitória 4, Bahia 3, total 7
@@ -26,6 +37,13 @@ MOTIVAÇÃO (auditoria da rodada de 22-24/08/2026, fase 1):
        Jogo teve gol aos 90+7', então cartão tardio é plausível.
 
 LACUNA ESTRUTURAL QUE ESTE SCRIPT EXPÕE:
+    ATUALIZADO 25/08 - a janela de 6h também é CURTA DEMAIS pra
+    estatística: o jogo Fluminense x Remo foi na noite de 22/08 e o cron
+    rodou 23/08 às 9h, mais de 12h depois (portanto FORA da janela), e
+    mesmo assim a API ainda devolvia número de meio de jogo naquele
+    momento. O atraso real da API-Football se mede em DIAS, não em horas.
+    Aumentar a janela é decisão separada, fora do escopo deste script.
+
     Em `popular_banco.py` o rebusca de EVENTO é decidido por
 
         falta_eventos = not jogo_ja_processado(cur, jogo_id)
@@ -105,6 +123,7 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 # `refazer` aceita "estatisticas" e/ou "cartoes".
 ALVOS = [
     {
+        "ativo": True,
         "rotulo": "Fluminense x Remo (22/08) - escanteio parcial",
         "data": "2026-08-22",
         "mandante": "Fluminense",
@@ -113,7 +132,25 @@ ALVOS = [
         "esperado": "Fluminense 11 escanteios, Remo 2, total 13",
     },
     {
-        "rotulo": "Vitória x Bahia (23/08) - cartão faltando",
+        # DESATIVADO em 25/08/2026 depois da fase `verificar`.
+        #
+        # A API-Football AINDA devolve os mesmos 5 cartões que já estão no
+        # banco (Vitória 26' e 90'; Bahia 42', 78' e 90'), enquanto a fonte
+        # externa mostra Vitória 4 e Bahia 3 - ou seja, faltam 2 cartões do
+        # VITÓRIA, e o lado do Bahia já está correto.
+        #
+        # Aplicar agora só apagaria e regravaria exatamente o mesmo dado,
+        # gastando cota e criando escrita sem ganho. O caso Athletico-PR x
+        # Bragantino mostrou que a API pode levar ~3 dias pra agregar - a
+        # decisão é REVERIFICAR em 27/08 (antes de a coleta de odds da
+        # rodada seguinte começar) e, se ainda não tiver corrigido, partir
+        # pra correção manual no formato de
+        # `corrigir_manual_athletico_bragantino.py`.
+        #
+        # Pra religar: trocar "ativo" pra True e rodar `verificar` de novo
+        # ANTES de `aplicar`.
+        "ativo": False,
+        "rotulo": "Vitória x Bahia (23/08) - 2 cartões do Vitória faltando",
         "data": "2026-08-23",
         "mandante": "Vit",
         "visitante": "Bahia",
@@ -121,6 +158,13 @@ ALVOS = [
         "esperado": "Vitória 4 cartões, Bahia 3, total 7",
     },
 ]
+
+# `verificar` mostra TODOS os alvos (inclusive os desativados - a graça é
+# justamente poder reconferir se a API já se corrigiu). `aplicar` e
+# `reavaliar` só tocam nos ativos.
+def alvos_ativos():
+    return [a for a in ALVOS if a.get("ativo", True)]
+
 
 
 # ---------- resolução dos alvos ----------
@@ -286,8 +330,9 @@ def fase_verificar():
     try:
         for alvo in ALVOS:
             fixture_id, perspectivas = resolver_alvo(cur, alvo)
+            marca = "" if alvo.get("ativo", True) else "   [DESATIVADO - `aplicar` vai ignorar]"
             print("\n" + "=" * 88)
-            print(f"{alvo['rotulo']}")
+            print(f"{alvo['rotulo']}{marca}")
             print(f"fixture_id_api {fixture_id} | {len(perspectivas)} perspectiva(s) em `jogos`")
             print(f"esperado (fonte externa): {alvo['esperado']}")
             print("=" * 88)
@@ -348,7 +393,11 @@ def fase_aplicar():
     cur = conn.cursor()
 
     try:
-        for alvo in ALVOS:
+        ativos = alvos_ativos()
+        if not ativos:
+            print("Nenhum alvo ativo em ALVOS - nada a aplicar.")
+            return
+        for alvo in ativos:
             fixture_id, perspectivas = resolver_alvo(cur, alvo)
             print("\n" + "=" * 88)
             print(f"{alvo['rotulo']} | fixture {fixture_id}")
@@ -415,7 +464,7 @@ def fase_reavaliar():
 
     try:
         todos_jogo_ids = []
-        for alvo in ALVOS:
+        for alvo in alvos_ativos():
             _fixture_id, perspectivas = resolver_alvo(cur, alvo)
             todos_jogo_ids.extend([p[0] for p in perspectivas])
 
