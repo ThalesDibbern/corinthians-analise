@@ -261,6 +261,13 @@ EXECUCOES_PARA_ESTIMATIVA = 5
 # concluída registrada pra calcular a média de verdade.
 ESTIMATIVA_PADRAO_SEGUNDOS = 300
 
+# NOVO (26/08/2026): janela de idempotência do "Salvar aposta" - ver
+# comentário em salvar_aposta(). Segundos o bastante pra cobrir um
+# duplo-clique/duplo-submit (sempre <2s na prática), curta o bastante
+# pra nunca bloquear uma aposta legítima repetida de propósito minutos
+# depois.
+SEGUNDOS_JANELA_DUPLICATA = 10
+
 
 def marcar_execucoes_abandonadas(cur):
     """NOVO: fecha execuções que ficaram 'rodando' além do limite - quase
@@ -2161,6 +2168,36 @@ def salvar_aposta():
             )
             return redirect(voltar)
 
+        # NOVO (26/08/2026): trava de idempotência contra duplo-clique/
+        # duplo-submit no botão "Salvar aposta" - o formulário não tinha
+        # NENHUMA proteção (nem debounce no JS, nem checagem no servidor),
+        # e um clique duplo criava 2 linhas idênticas em apostas_salvas,
+        # descontando a banca 2x pra uma aposta real só. Se já existe uma
+        # aposta do MESMO usuário, com a MESMA descrição/odd/valor/pernas,
+        # criada nos últimos SEGUNDOS_JANELA_DUPLICATA segundos, trata
+        # como o mesmo clique reenviado e não insere de novo - só avisa e
+        # volta pra tela. Janela curta de propósito: uma aposta legítima
+        # repetida minutos depois (o usuário decidiu apostar de novo no
+        # mesmo mercado) deve passar normalmente.
+        cur.execute(
+            """SELECT id FROM apostas_salvas
+               WHERE usuario_id = %s AND descricao = %s AND casa_aposta = %s
+                 AND odd_combinada = %s AND valor_apostado = %s AND pernas = %s::jsonb
+                 AND criado_em > NOW() - (%s || ' seconds')::interval
+               ORDER BY id DESC LIMIT 1""",
+            (session["usuario_id"], descricao, casa_aposta, odd_combinada,
+             valor_apostado, pernas_json, SEGUNDOS_JANELA_DUPLICATA),
+        )
+        se_ja_existe = cur.fetchone()
+        if se_ja_existe:
+            cur.close()
+            flash(
+                "Essa aposta já tinha sido salva agora há pouco (clique duplicado "
+                "ignorado) - confira em Minhas apostas.",
+                "sucesso",
+            )
+            return redirect(voltar)
+
         cur.execute(
             """INSERT INTO apostas_salvas
                (descricao, casa_aposta, odd_combinada, probabilidade_combinada,
@@ -2807,6 +2844,123 @@ def _extrair_linha_direcao_da_descricao(descricao):
     return float(m.group(2)), direcao
 
 
+def avaliar_pernas_aposta(cur, pernas):
+    """NOVO (extraído de resolver_apostas_pendentes em 26/08/2026): casa
+    cada perna de uma aposta salva (individual ou múltipla) com o
+    resultado real, e devolve a lista de resultados ('acertou'/'errou'/
+    'pendente'), um por perna, na mesma ordem.
+
+    Única fonte da lógica de casamento - usada tanto por
+    resolver_apostas_pendentes (apostas ainda pendentes) quanto por
+    reabrir_apostas_desatualizadas.py (apostas JÁ resolvidas, pra
+    conferir se uma correção de dado em historico_recomendacoes mudou o
+    resultado por baixo delas). Antes essa lógica só existia dentro de
+    resolver_apostas_pendentes, e uma aposta que já tinha resultado
+    gravado nunca era reavaliada - ver seção 27/pendência do ROI."""
+    resultados_pernas = []
+    for perna in pernas:
+        if perna.get("fonte") == "manual":
+            # NOVO: usa a mesma função de avaliação compartilhada com
+            # arquivar_recomendacoes.py (avaliacao.py) - antes usava
+            # avaliar_perna_manual, uma cópia divergente que não
+            # cobria todos os mercados nem tinha a correção de
+            # "jogador ficou no banco sem entrar" que a versão
+            # automática já tinha ganho.
+            resultados_pernas.append(avaliar_resultado(
+                cur, perna["tipo_padrao"], perna.get("jogador_id"), perna["jogo_id"],
+                perna.get("linha"), perna.get("descricao"), perna.get("direcao"),
+            ))
+            continue
+
+        # NOVO (correção): casar por (tipo_padrao, linha, direção) em
+        # vez de só descrição em texto - a descrição pode mudar entre
+        # o momento em que a aposta foi salva e o momento em que a
+        # recomendação é arquivada de verdade (ex: um ajuste como
+        # suspensão sendo desativado no meio do caminho muda o texto
+        # do sufixo "(ajustado por...)", e o texto salvo nunca mais
+        # bate com o texto final - a aposta ficava pendente pra
+        # sempre). `linha`/`direcao` identificam o mercado de verdade,
+        # sem depender de como ele foi descrito em cada geração.
+        # Fallback pra descrição só pra apostas salvas ANTES dessa
+        # correção (pernas antigas, sem linha/direcao gravados).
+        if perna.get("linha") is not None or perna.get("direcao") is not None:
+            cur.execute(
+                """SELECT resultado FROM historico_recomendacoes
+                   WHERE jogo_id = %s AND tipo_padrao = %s
+                     AND jogador_id IS NOT DISTINCT FROM %s
+                     AND linha IS NOT DISTINCT FROM %s
+                     AND direcao IS NOT DISTINCT FROM %s
+                   ORDER BY id DESC LIMIT 1""",
+                (perna["jogo_id"], perna["tipo_padrao"], perna.get("jogador_id"),
+                 perna.get("linha"), perna.get("direcao")),
+            )
+        else:
+            cur.execute(
+                """SELECT resultado FROM historico_recomendacoes
+                   WHERE jogo_id = %s AND descricao = %s
+                     AND jogador_id IS NOT DISTINCT FROM %s
+                   ORDER BY id DESC LIMIT 1""",
+                (perna["jogo_id"], perna["descricao"], perna.get("jogador_id")),
+            )
+        row = cur.fetchone()
+
+        # NOVO (correção, 3ª tentativa - só pra apostas salvas ANTES
+        # dessa correção, sem linha/direção gravados): se a descrição
+        # exata não bateu, tenta por (jogo_id, tipo_padrao, jogador_id)
+        # - só aceita se isso encontrar EXATAMENTE UMA linha em
+        # historico_recomendacoes (sem ambiguidade entre "mais de 3.5"
+        # e "mais de 4.5" do mesmo jogador/mercado, por exemplo). Corre
+        # o risco de não resolver uma aposta salva antiga que tinha
+        # mais de uma linha do mesmo mercado disponível - mas é melhor
+        # que ficar pendente pra sempre.
+        if row is None and perna.get("linha") is None and perna.get("direcao") is None:
+            cur.execute(
+                """SELECT resultado FROM historico_recomendacoes
+                   WHERE jogo_id = %s AND tipo_padrao = %s
+                     AND jogador_id IS NOT DISTINCT FROM %s""",
+                (perna["jogo_id"], perna["tipo_padrao"], perna.get("jogador_id")),
+            )
+            candidatos = cur.fetchall()
+            if len(candidatos) == 1:
+                row = candidatos[0]
+
+        # NOVO (correção, 4ª tentativa): se a 3ª deu ambígua (mais de
+        # uma linha candidata pro mesmo mercado/jogo/jogador) ou não
+        # achou nada, tenta extrair a linha/direção de dentro do
+        # próprio texto salvo (ex: "Mais de 5.5") e casar com precisão
+        # - resolve o caso comum de um jogo com várias linhas do mesmo
+        # mercado arquivadas (ex: cartão total "mais de 4.5" e "mais
+        # de 5.5" do mesmo jogo, cada uma uma recomendação diferente).
+        if row is None and perna.get("linha") is None and perna.get("direcao") is None:
+            linha_extraida, direcao_extraida = _extrair_linha_direcao_da_descricao(perna.get("descricao"))
+            if linha_extraida is not None:
+                cur.execute(
+                    """SELECT resultado FROM historico_recomendacoes
+                       WHERE jogo_id = %s AND tipo_padrao = %s
+                         AND jogador_id IS NOT DISTINCT FROM %s
+                         AND linha = %s AND direcao = %s
+                       ORDER BY id DESC LIMIT 1""",
+                    (perna["jogo_id"], perna["tipo_padrao"], perna.get("jogador_id"),
+                     linha_extraida, direcao_extraida),
+                )
+                row = cur.fetchone()
+
+        resultados_pernas.append(row[0] if row else "pendente")
+
+    return resultados_pernas
+
+
+def resultado_final_das_pernas(resultados_pernas):
+    """Regra de múltipla: qualquer perna errada já erra tudo; só acerta se
+    TODAS acertaram; se sobrar pendente sem nenhuma errada, ainda não dá
+    pra fechar. Devolve None nesse último caso (não resolve ainda)."""
+    if any(r == "errou" for r in resultados_pernas):
+        return "errou"
+    if all(r == "acertou" for r in resultados_pernas):
+        return "acertou"
+    return None
+
+
 def resolver_apostas_pendentes(cur):
     """NOVO: pra cada aposta salva ainda 'pendente', confere se TODAS as
     pernas dela já têm resultado em historico_recomendacoes - só resolve
@@ -2821,101 +2975,9 @@ def resolver_apostas_pendentes(cur):
     for aposta_id, pernas_json, odd_combinada, valor_apostado, usuario_id in pendentes:
         pernas = pernas_json if isinstance(pernas_json, list) else json.loads(pernas_json)
 
-        resultados_pernas = []
-        for perna in pernas:
-            if perna.get("fonte") == "manual":
-                # NOVO: usa a mesma função de avaliação compartilhada com
-                # arquivar_recomendacoes.py (avaliacao.py) - antes usava
-                # avaliar_perna_manual, uma cópia divergente que não
-                # cobria todos os mercados nem tinha a correção de
-                # "jogador ficou no banco sem entrar" que a versão
-                # automática já tinha ganho.
-                resultados_pernas.append(avaliar_resultado(
-                    cur, perna["tipo_padrao"], perna.get("jogador_id"), perna["jogo_id"],
-                    perna.get("linha"), perna.get("descricao"), perna.get("direcao"),
-                ))
-                continue
-
-            # NOVO (correção): casar por (tipo_padrao, linha, direção) em
-            # vez de só descrição em texto - a descrição pode mudar entre
-            # o momento em que a aposta foi salva e o momento em que a
-            # recomendação é arquivada de verdade (ex: um ajuste como
-            # suspensão sendo desativado no meio do caminho muda o texto
-            # do sufixo "(ajustado por...)", e o texto salvo nunca mais
-            # bate com o texto final - a aposta ficava pendente pra
-            # sempre). `linha`/`direcao` identificam o mercado de verdade,
-            # sem depender de como ele foi descrito em cada geração.
-            # Fallback pra descrição só pra apostas salvas ANTES dessa
-            # correção (pernas antigas, sem linha/direcao gravados).
-            if perna.get("linha") is not None or perna.get("direcao") is not None:
-                cur.execute(
-                    """SELECT resultado FROM historico_recomendacoes
-                       WHERE jogo_id = %s AND tipo_padrao = %s
-                         AND jogador_id IS NOT DISTINCT FROM %s
-                         AND linha IS NOT DISTINCT FROM %s
-                         AND direcao IS NOT DISTINCT FROM %s
-                       ORDER BY id DESC LIMIT 1""",
-                    (perna["jogo_id"], perna["tipo_padrao"], perna.get("jogador_id"),
-                     perna.get("linha"), perna.get("direcao")),
-                )
-            else:
-                cur.execute(
-                    """SELECT resultado FROM historico_recomendacoes
-                       WHERE jogo_id = %s AND descricao = %s
-                         AND jogador_id IS NOT DISTINCT FROM %s
-                       ORDER BY id DESC LIMIT 1""",
-                    (perna["jogo_id"], perna["descricao"], perna.get("jogador_id")),
-                )
-            row = cur.fetchone()
-
-            # NOVO (correção, 3ª tentativa - só pra apostas salvas ANTES
-            # dessa correção, sem linha/direção gravados): se a descrição
-            # exata não bateu, tenta por (jogo_id, tipo_padrao, jogador_id)
-            # - só aceita se isso encontrar EXATAMENTE UMA linha em
-            # historico_recomendacoes (sem ambiguidade entre "mais de 3.5"
-            # e "mais de 4.5" do mesmo jogador/mercado, por exemplo). Corre
-            # o risco de não resolver uma aposta salva antiga que tinha
-            # mais de uma linha do mesmo mercado disponível - mas é melhor
-            # que ficar pendente pra sempre.
-            if row is None and perna.get("linha") is None and perna.get("direcao") is None:
-                cur.execute(
-                    """SELECT resultado FROM historico_recomendacoes
-                       WHERE jogo_id = %s AND tipo_padrao = %s
-                         AND jogador_id IS NOT DISTINCT FROM %s""",
-                    (perna["jogo_id"], perna["tipo_padrao"], perna.get("jogador_id")),
-                )
-                candidatos = cur.fetchall()
-                if len(candidatos) == 1:
-                    row = candidatos[0]
-
-            # NOVO (correção, 4ª tentativa): se a 3ª deu ambígua (mais de
-            # uma linha candidata pro mesmo mercado/jogo/jogador) ou não
-            # achou nada, tenta extrair a linha/direção de dentro do
-            # próprio texto salvo (ex: "Mais de 5.5") e casar com precisão
-            # - resolve o caso comum de um jogo com várias linhas do mesmo
-            # mercado arquivadas (ex: cartão total "mais de 4.5" e "mais
-            # de 5.5" do mesmo jogo, cada uma uma recomendação diferente).
-            if row is None and perna.get("linha") is None and perna.get("direcao") is None:
-                linha_extraida, direcao_extraida = _extrair_linha_direcao_da_descricao(perna.get("descricao"))
-                if linha_extraida is not None:
-                    cur.execute(
-                        """SELECT resultado FROM historico_recomendacoes
-                           WHERE jogo_id = %s AND tipo_padrao = %s
-                             AND jogador_id IS NOT DISTINCT FROM %s
-                             AND linha = %s AND direcao = %s
-                           ORDER BY id DESC LIMIT 1""",
-                        (perna["jogo_id"], perna["tipo_padrao"], perna.get("jogador_id"),
-                         linha_extraida, direcao_extraida),
-                    )
-                    row = cur.fetchone()
-
-            resultados_pernas.append(row[0] if row else "pendente")
-
-        if any(r == "errou" for r in resultados_pernas):
-            resultado_final = "errou"
-        elif all(r == "acertou" for r in resultados_pernas):
-            resultado_final = "acertou"
-        else:
+        resultados_pernas = avaliar_pernas_aposta(cur, pernas)
+        resultado_final = resultado_final_das_pernas(resultados_pernas)
+        if resultado_final is None:
             continue  # ainda tem perna pendente - não resolve ainda
 
         if resultado_final == "acertou":
