@@ -298,19 +298,55 @@ def salvar_padroes(cur, resultados):
         print(f"  {nome}: {jogos_com_cartao}/{jogos_analisados} jogos com cartão ({frequencia}%)")
 
 
-def calcular_padroes_escanteio(cur, time_id):
+def calcular_padroes_escanteio(cur, time_id, lado="geral"):
     """Olha os escanteios DESSE time (não do adversário) nos últimos jogos
     dele, e calcula a frequência de passar de cada linha testada (3.5, 4.5, ...).
     NOVO (multi-time): filtra por nosso_time_id - sem isso, misturaria
-    escanteios de jogos de times rastreados diferentes."""
+    escanteios de jogos de times rastreados diferentes.
+
+    NOVO (25/08/2026 - separação por mando): o parâmetro `lado` aceita
+    'mandante', 'visitante' ou 'geral'. Motivo, medido na base inteira
+    (1652 jogos, 5 temporadas):
+
+        mandante  5.82 escanteios/jogo
+        visitante 4.54 escanteios/jogo
+        vantagem  1.29  (estável: 1.34 / 1.32 / 1.20 / 1.28 / 1.28 por ano)
+
+    Até aqui existia UM número por (time, linha), misturando casa e fora,
+    enquanto a casa de apostas precifica os dois separadamente. Isso vale
+    ~7 pontos de probabilidade em toda linha, sempre no mesmo sentido -
+    mais que a margem da casa (~5%), e portanto suficiente pra fabricar VE
+    positivo onde não existe.
+
+    Sintoma na auditoria da rodada de 22-24/08/2026: das 74 recomendações
+    de escanteio de time, 69 estavam no lado errado (44 de "Menos" pra
+    mandante e 25 de "Mais" pra visitante), com taxa de acerto de 24.3%
+    contra 54.3% previstos.
+
+    IMPORTANTE - o filtro de lado vem ANTES do LIMIT. Se viesse depois, o
+    recorte pegaria ~metade dos últimos 50 jogos e a janela efetiva ficaria
+    sem controle. Assim cada lado tem sua própria janela de
+    JANELA_MAXIMA_DE_JOGOS.
+
+    Vale lembrar que `estatisticas_jogo.lado` é o mando REAL do jogo (ao
+    contrário de `cartoes.lado`, que é relativo ao nosso time) - por isso
+    a tradução via `j.mandante` abaixo está correta aqui."""
+    if lado == "mandante":
+        filtro_lado = "AND j.mandante = TRUE"
+    elif lado == "visitante":
+        filtro_lado = "AND j.mandante = FALSE"
+    else:
+        filtro_lado = ""
+
     cur.execute(
-        """
+        f"""
         SELECT eg.escanteios
         FROM estatisticas_jogo eg
         JOIN jogos j ON j.id = eg.jogo_id
         WHERE j.nosso_time_id = %s
           AND ((j.mandante = TRUE AND eg.lado = 'mandante')
            OR (j.mandante = FALSE AND eg.lado = 'visitante'))
+          {filtro_lado}
         ORDER BY j.data_jogo DESC
         LIMIT %s
         """,
@@ -333,22 +369,26 @@ def calcular_padroes_escanteio(cur, time_id):
     return resultados, jogos_analisados
 
 
-def salvar_padroes_escanteio(cur, resultados, time_id):
+def salvar_padroes_escanteio(cur, resultados, time_id, lado="geral"):
+    """ATENÇÃO: o ON CONFLICT usa (time_id, linha, lado). A constraint
+    antiga era (time_id, linha) - a migração
+    `migrar_padroes_escanteio_lado.py` PRECISA rodar antes deste código
+    subir, senão o INSERT quebra e derruba o cron."""
     for linha, jogos_analisados, jogos_acima, frequencia, media in resultados:
         cur.execute(
             """
-            INSERT INTO padroes_time_escanteio (time_id, linha, jogos_analisados, jogos_acima_da_linha, frequencia, media, atualizado_em)
-            VALUES (%s, %s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (time_id, linha) DO UPDATE SET
+            INSERT INTO padroes_time_escanteio (time_id, linha, lado, jogos_analisados, jogos_acima_da_linha, frequencia, media, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, linha, lado) DO UPDATE SET
                 jogos_analisados = EXCLUDED.jogos_analisados,
                 jogos_acima_da_linha = EXCLUDED.jogos_acima_da_linha,
                 frequencia = EXCLUDED.frequencia,
                 media = EXCLUDED.media,
                 atualizado_em = NOW()
             """,
-            (time_id, linha, jogos_analisados, jogos_acima, frequencia, media),
+            (time_id, linha, lado, jogos_analisados, jogos_acima, frequencia, media),
         )
-        print(f"  Mais de {linha} escanteios: {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
+        print(f"  [{lado}] Mais de {linha} escanteios: {jogos_acima}/{jogos_analisados} jogos ({frequencia}%)")
 
 
 def calcular_padrao_linha_time_estatistica(cur, time_id, coluna, linhas_testadas):
@@ -2932,16 +2972,26 @@ def main():
         for time_id, time_nome, time_api_football_id in times_rastreados:
             print(f"\n========== Padrões de time: {time_nome} ==========")
 
-            print("Calculando padrões de escanteio do time...")
-            resultados_escanteio, jogos_analisados = calcular_padroes_escanteio(cur, time_id)
-
-            if not resultados_escanteio:
-                print(f"  Dados insuficientes ainda para escanteio ({jogos_analisados} jogos analisados, "
-                      f"mínimo de {JOGOS_MINIMOS_PARA_ANALISAR}).")
-            else:
-                salvar_padroes_escanteio(cur, resultados_escanteio, time_id)
-                conn.commit()
-                print(f"  Concluído! Padrões de escanteio calculados com base em {jogos_analisados} jogo(s).")
+            # NOVO (25/08/2026): três recortes por time - 'geral' (o que já
+            # existia), 'mandante' e 'visitante'. O recorte 'geral' continua
+            # sendo calculado e gravado porque é o degrau de fallback da
+            # escada em motor_recomendacoes.buscar_frequencia_escanteio_time,
+            # usada quando o recorte específico não alcança o piso próprio
+            # (times de histórico curto, como Chapecoense e Remo hoje).
+            print("Calculando padrões de escanteio do time (geral + por mando)...")
+            for lado_escanteio in ("geral", "mandante", "visitante"):
+                resultados_escanteio, jogos_analisados = calcular_padroes_escanteio(
+                    cur, time_id, lado=lado_escanteio
+                )
+                if not resultados_escanteio:
+                    print(f"  [{lado_escanteio}] Dados insuficientes ainda para escanteio "
+                          f"({jogos_analisados} jogos analisados, mínimo de "
+                          f"{JOGOS_MINIMOS_PARA_ANALISAR}).")
+                else:
+                    salvar_padroes_escanteio(cur, resultados_escanteio, time_id, lado=lado_escanteio)
+                    conn.commit()
+                    print(f"  [{lado_escanteio}] Concluído! Padrões de escanteio calculados "
+                          f"com base em {jogos_analisados} jogo(s).")
 
             print("Calculando padrões de escanteio TOTAL do jogo (mandante + visitante)...")
             resultados_escanteio_total, jogos_analisados_escanteio_total = calcular_padroes_escanteio_total(cur, time_id)
