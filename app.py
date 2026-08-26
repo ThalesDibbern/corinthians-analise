@@ -2254,6 +2254,109 @@ def cancelar_aposta():
     return redirect("/minhas-apostas")
 
 
+@app.route("/corrigir-aposta-manual", methods=["POST"])
+def corrigir_aposta_manual():
+    """NOVO (26/08/2026): correção manual pra aposta JÁ RESOLVIDA (acertou/
+    errou) - não serve pra pendente, que já tem o cancelamento normal via
+    /cancelar-aposta. Existe pra dois casos que o casamento automático
+    contra historico_recomendacoes não cobre: (1) uma duplicata de
+    duplo-clique que já "terminou o jogo" e não pode mais ser cancelada
+    pelo caminho antigo (ele só apaga pendente); (2) um resultado que o
+    usuário sabe estar errado por um motivo que o dado automático nunca
+    vai ter (ex: evento que a API-Football nunca gravou - seção 27).
+
+    Três ações (`acao` no form): 'cancelar' (apaga a linha, como se a
+    aposta nunca tivesse existido), 'acertou', 'errou' (troca o resultado
+    e ajusta a banca pro valor certo). Toda aposta tocada aqui é marcada
+    `resolvido_manualmente = TRUE` - fica IMUNE a
+    reabrir_apostas_desatualizadas.py dali pra frente, porque uma decisão
+    manual não deve ser desfeita sem avisar por uma reavaliação
+    automática que rodar depois.
+
+    Trava de banca: o efeito líquido de UMA aposta resolvida na banca,
+    do momento em que foi salva até agora, é sempre exatamente o valor
+    do campo `retorno` (lucro se acertou, -stake se errou - conferido:
+    -stake + (stake+lucro) = lucro; -stake + 0 = -stake). Por isso
+    zerar o efeito antigo é sempre `registrar_movimento_banca(..., -retorno_
+    salvo, ...)`, e aplicar um novo resultado é só a diferença entre o
+    retorno novo e o antigo numa tacada só - não precisa de dois
+    movimentos separados (estorno + novo crédito)."""
+    aposta_id = request.form.get("aposta_id")
+    acao = request.form.get("acao")
+
+    if acao not in ("cancelar", "acertou", "errou"):
+        flash("Ação de correção inválida.", "erro")
+        return redirect("/minhas-apostas")
+
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+
+        # Só mexe em aposta do próprio usuário, e só se ela já estiver
+        # resolvida - pendente usa o fluxo de /cancelar-aposta de sempre.
+        cur.execute(
+            """SELECT resultado, retorno, valor_apostado, odd_combinada
+               FROM apostas_salvas
+               WHERE id = %s AND usuario_id = %s AND resultado IN ('acertou', 'errou')""",
+            (aposta_id, session["usuario_id"]),
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            flash(
+                "Aposta não encontrada, não é sua, ou ainda está pendente "
+                "(pendente cancela pelo botão normal).",
+                "erro",
+            )
+            return redirect("/minhas-apostas")
+
+        resultado_salvo, retorno_salvo, valor_apostado, odd_combinada = row
+        retorno_salvo = float(retorno_salvo or 0)
+        valor_apostado = float(valor_apostado)
+
+        if acao == "cancelar":
+            # Zera o efeito líquido que essa aposta teve na banca até
+            # agora e apaga a linha - fica como se nunca tivesse existido.
+            ajuste = round(-retorno_salvo, 2)
+            if ajuste != 0:
+                registrar_movimento_banca(cur, session["usuario_id"], "estorno_manual", ajuste, aposta_id)
+            cur.execute(
+                "DELETE FROM apostas_salvas WHERE id = %s AND usuario_id = %s",
+                (aposta_id, session["usuario_id"]),
+            )
+            conn.commit()
+            cur.close()
+            flash("Aposta cancelada manualmente e banca ajustada.", "sucesso")
+            return redirect("/minhas-apostas")
+
+        # acao in ('acertou', 'errou'): recalcula o retorno pro resultado
+        # NOVO e move só a diferença em relação ao que já estava aplicado.
+        novo_resultado = acao
+        if novo_resultado == "acertou":
+            novo_retorno = round(valor_apostado * (float(odd_combinada) - 1), 2)
+        else:
+            novo_retorno = round(-valor_apostado, 2)
+
+        ajuste = round(novo_retorno - retorno_salvo, 2)
+        if ajuste != 0:
+            registrar_movimento_banca(cur, session["usuario_id"], "correcao_manual", ajuste, aposta_id)
+
+        cur.execute(
+            """UPDATE apostas_salvas
+               SET resultado = %s, retorno = %s, resolvido_em = NOW(),
+                   resolvido_manualmente = TRUE
+               WHERE id = %s AND usuario_id = %s""",
+            (novo_resultado, novo_retorno, aposta_id, session["usuario_id"]),
+        )
+        conn.commit()
+        cur.close()
+        flash(f"Aposta corrigida manualmente pra '{novo_resultado}' e banca ajustada.", "sucesso")
+    finally:
+        conn.close()
+
+    return redirect("/minhas-apostas")
+
+
 @app.route("/banca-movimento", methods=["POST"])
 def banca_movimento():
     """NOVO (banca): deposita ou resgata um valor (fictício, não é dinheiro
@@ -2425,6 +2528,46 @@ PAGINA_ROI = """
             cursor: pointer;
         }
         .btn-cancelar:hover { background: #f8514922; }
+        .btn-corrigir {
+            background: transparent;
+            color: #8b949e;
+            border: 1px solid #8b949e;
+            border-radius: 8px;
+            padding: 7px 14px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-corrigir:hover { background: #8b949e22; }
+        .painel-corrigir {
+            display: none;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+        .painel-corrigir.aberto { display: flex; }
+        .btn-corrigir-opcao {
+            border-radius: 8px;
+            padding: 7px 14px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-corrigir-cancelar {
+            background: transparent; color: #8b949e; border: 1px solid #8b949e;
+        }
+        .btn-corrigir-cancelar:hover { background: #8b949e22; }
+        .btn-corrigir-acertou {
+            background: transparent; color: #3fb950; border: 1px solid #3fb950;
+        }
+        .btn-corrigir-acertou:hover { background: #23863622; }
+        .btn-corrigir-errou {
+            background: transparent; color: #f85149; border: 1px solid #f85149;
+        }
+        .btn-corrigir-errou:hover { background: #f8514922; }
+        .tag-manual {
+            font-size: 0.72rem; color: #8b949e; margin-top: 6px;
+        }
         .vazio {
             text-align: center; color: #8b949e; padding: 32px 24px;
             background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
@@ -2815,6 +2958,36 @@ PAGINA_ROI = """
                 <input type="hidden" name="aposta_id" value="{{ a.id }}">
                 <button type="submit" class="btn-cancelar">❌ Cancelar aposta</button>
             </form>
+            {% else %}
+            <div class="salvar-linha">
+                <button type="button" class="btn-corrigir"
+                        onclick="document.getElementById('painel-corrigir-{{ a.id }}').classList.toggle('aberto')">
+                    🔧 Corrigir manualmente
+                </button>
+            </div>
+            <div class="painel-corrigir" id="painel-corrigir-{{ a.id }}">
+                <form method="POST" action="/corrigir-aposta-manual"
+                      onsubmit="return confirm('Cancelar esta aposta? A linha vai desaparecer e a banca será ajustada de volta como se ela nunca tivesse existido.');">
+                    <input type="hidden" name="aposta_id" value="{{ a.id }}">
+                    <input type="hidden" name="acao" value="cancelar">
+                    <button type="submit" class="btn-corrigir-opcao btn-corrigir-cancelar">🗑️ Cancelar aposta</button>
+                </form>
+                <form method="POST" action="/corrigir-aposta-manual"
+                      onsubmit="return confirm('Marcar esta aposta como ACERTOU? A banca será ajustada pro novo resultado.');">
+                    <input type="hidden" name="aposta_id" value="{{ a.id }}">
+                    <input type="hidden" name="acao" value="acertou">
+                    <button type="submit" class="btn-corrigir-opcao btn-corrigir-acertou">✅ Aposta deu certo</button>
+                </form>
+                <form method="POST" action="/corrigir-aposta-manual"
+                      onsubmit="return confirm('Marcar esta aposta como ERROU? A banca será ajustada pro novo resultado.');">
+                    <input type="hidden" name="aposta_id" value="{{ a.id }}">
+                    <input type="hidden" name="acao" value="errou">
+                    <button type="submit" class="btn-corrigir-opcao btn-corrigir-errou">❌ Aposta deu errado</button>
+                </form>
+            </div>
+            {% if a.resolvido_manualmente %}
+            <div class="tag-manual">🔧 corrigido manualmente - imune à reavaliação automática</div>
+            {% endif %}
             {% endif %}
         </div>
         {% endfor %}
@@ -3036,7 +3209,7 @@ def buscar_apostas_salvas(cur, usuario_id):
     cur.execute(
         """
         SELECT id, descricao, casa_aposta, odd_combinada, valor_apostado,
-               resultado, retorno, criado_em, pernas
+               resultado, retorno, criado_em, pernas, resolvido_manualmente
         FROM apostas_salvas
         WHERE usuario_id = %s
         ORDER BY criado_em DESC
@@ -3044,7 +3217,7 @@ def buscar_apostas_salvas(cur, usuario_id):
         (usuario_id,),
     )
     colunas = ["id", "descricao", "casa_aposta", "odd_combinada", "valor_apostado",
-               "resultado", "retorno", "criado_em", "pernas"]
+               "resultado", "retorno", "criado_em", "pernas", "resolvido_manualmente"]
     apostas = [dict(zip(colunas, row)) for row in cur.fetchall()]
 
     # NOVO: extrai o(s) jogo_id de cada perna (uma aposta pode ser uma
