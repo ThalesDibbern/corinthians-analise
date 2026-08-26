@@ -1,6 +1,6 @@
 -- ============================================================
 -- SCHEMA DO PROJETO - gerado automaticamente por gerar_schema.py
--- Gerado em: 2026-08-24 16:03 UTC
+-- Gerado em: 2026-08-26 02:14 UTC
 --
 -- Este arquivo descreve o ESTADO do banco, não as mudanças.
 -- Serve pra reconstruir tudo do zero e pra consultar o tipo real
@@ -666,9 +666,11 @@ CREATE TABLE IF NOT EXISTS padroes_time_escanteio (
     media numeric(4,2) NOT NULL,
     atualizado_em timestamp without time zone DEFAULT now(),
     time_id integer NOT NULL,
-    CONSTRAINT padroes_time_escanteio_time_linha_key UNIQUE (time_id, linha),
+    lado character varying(10) DEFAULT 'geral'::character varying NOT NULL,
+    CONSTRAINT padroes_time_escanteio_time_linha_lado_key UNIQUE (time_id, linha, lado),
     CONSTRAINT padroes_time_escanteio_time_id_fkey FOREIGN KEY (time_id) REFERENCES times(id)
 );
+CREATE INDEX idx_padroes_time_escanteio_time_lado_linha ON public.padroes_time_escanteio USING btree (time_id, lado, linha);
 
 -- ---------- padroes_time_handicap ----------
 CREATE TABLE IF NOT EXISTS padroes_time_handicap (
