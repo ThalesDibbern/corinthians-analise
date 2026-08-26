@@ -69,6 +69,13 @@ aposta com resultado salvo IGUAL ao recalculado é contada e mostrada no
 resumo - se esse número não bater com "quase todas as apostas", é sinal
 de bug NESTE script, não motivo pra aplicar.
 
+⚠️ ORDEM OBRIGATÓRIA (26/08/2026): rodar
+`migrar_apostas_resolvido_manualmente.py` ANTES deste script - ele passou
+a excluir da reavaliação toda aposta com `resolvido_manualmente = TRUE`
+(correção manual feita em /minhas-apostas), e essa coluna só existe depois
+da migração. Sem ela, a query quebra - de propósito, não passa a
+"funcionar sem a trava" silenciosamente.
+
 Rodar:
     python reabrir_apostas_desatualizadas.py verificar
     python reabrir_apostas_desatualizadas.py aplicar
@@ -119,11 +126,20 @@ def imprimir_cabecalho(fase):
 
 
 def buscar_apostas_resolvidas(cur):
+    # NOVO (26/08/2026): exclui resolvido_manualmente = TRUE - uma
+    # correção manual (botão "Corrigir manualmente" em /minhas-apostas)
+    # é uma decisão explícita do usuário, muitas vezes justamente porque
+    # o dado automático está errado ou nunca vai existir (evento que a
+    # API-Football nunca gravou). Reavaliar por cima desfaria a correção
+    # sem avisar. Requer a migração migrar_apostas_resolvido_manualmente.py
+    # já aplicada - se a coluna não existir, essa query falha, e é
+    # melhor falhar alto do que rodar sem essa trava.
     cur.execute(
         """SELECT id, pernas, odd_combinada, valor_apostado, usuario_id,
                   resultado, retorno, descricao, resolvido_em
            FROM apostas_salvas
            WHERE resultado IN ('acertou', 'errou')
+             AND resolvido_manualmente = FALSE
            ORDER BY id"""
     )
     return cur.fetchall()
