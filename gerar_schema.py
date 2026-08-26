@@ -33,6 +33,7 @@ Variáveis de ambiente necessárias: DATABASE_URL
 
 import base64
 import gzip
+import zlib
 import os
 import sys
 from datetime import datetime, timezone
@@ -198,7 +199,7 @@ def gerar_ddl(cur):
     return "\n".join(linhas), tabelas
 
 
-LARGURA_BLOCO = 180
+LARGURA_BLOCO = 120
 
 
 def imprimir_empacotado(ddl, tabelas):
@@ -219,20 +220,49 @@ def imprimir_empacotado(ddl, tabelas):
     truncar, e o número de sequência em cada bloco permite remontar na
     ordem certa mesmo que o log entregue embaralhado.
 
+    NOVO (25/08/2026) - CHECKSUM POR BLOCO
+    --------------------------------------
+    A primeira remontagem real falhou: 46 das 49 tabelas voltaram, e o
+    gzip descarrilou nos últimos bytes com "CRC check failed". O
+    mecanismo de numeração funcionou (32 blocos embaralhados remontados
+    na ordem certa), mas faltava a peça seguinte: descobrir QUAL bloco
+    tinha se corrompido no caminho.
+
+    Sem checksum por bloco, um caractere perdido em qualquer lugar
+    obriga a repetir a execução inteira e torcer. Com checksum, o bloco
+    ruim se identifica sozinho e basta reenviar aquela linha.
+
+    O formato passou a ser:
+
+        SCHEMA|<seq>|<crc8>|<dados>
+
+    onde crc8 são os 8 primeiros dígitos hex do CRC32 daquele pedaço.
+    Custa 9 caracteres por linha e transforma "quebrou em algum lugar"
+    em "quebrou no bloco 31".
+
+    A largura do bloco também caiu de 180 pra 120: bloco menor significa
+    menos dados perdidos quando um deles se corrompe, e mais chance de o
+    problema estar em UM bloco só.
+
     Não é elegante, mas é o formato que sobrevive ao transporte."""
     bruto = gzip.compress(ddl.encode("utf-8"), compresslevel=9)
     texto = base64.b64encode(bruto).decode("ascii")
     blocos = [texto[i:i + LARGURA_BLOCO] for i in range(0, len(texto), LARGURA_BLOCO)]
+    crc_total = format(zlib.crc32(texto.encode("ascii")) & 0xFFFFFFFF, "08x")
 
     print("=" * 60)
     print(f"SCHEMA EMPACOTADO - {len(tabelas)} tabelas, {len(blocos)} blocos")
-    print("Copie TODAS as linhas que começam com SCHEMA| (a ordem não importa,")
-    print("o número no início permite remontar).")
+    print(f"CRC-TOTAL|{crc_total}|{len(texto)}")
+    print("Copie TODAS as linhas que começam com SCHEMA| e a linha CRC-TOTAL.")
+    print("A ordem não importa - o número em cada linha permite remontar.")
+    print("Cada bloco carrega o próprio checksum, então um bloco corrompido")
+    print("se identifica sozinho e só ele precisa ser reenviado.")
     print("=" * 60)
     for i, bloco in enumerate(blocos):
-        print(f"SCHEMA|{i:04d}|{bloco}")
+        crc = format(zlib.crc32(bloco.encode("ascii")) & 0xFFFFFFFF, "08x")
+        print(f"SCHEMA|{i:04d}|{crc}|{bloco}")
     print("=" * 60)
-    print(f"FIM - {len(blocos)} blocos no total")
+    print(f"FIM - {len(blocos)} blocos no total, CRC-TOTAL {crc_total}")
     print()
     print("Tabelas encontradas:")
     for t in tabelas:
