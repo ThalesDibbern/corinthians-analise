@@ -5942,9 +5942,20 @@ def buscar_estatisticas_time(cur, time_id):
         if tipo != "posse":
             bloco["itens"].append({"linha": linha, "frequencia": frequencia})
 
+    # NOVO (25/08/2026): `padroes_time_escanteio` passou a guardar TRÊS
+    # recortes por (time, linha) - 'geral', 'mandante' e 'visitante' - pra
+    # corrigir o mercado de escanteio, que ignorava mando de campo (na
+    # base: mandante 5.82 x visitante 4.54 escanteios por jogo).
+    #
+    # Aqui a tela continua mostrando só o 'geral', que é exatamente o que
+    # ela mostrava antes. Sem o filtro, o card passaria a exibir 15 linhas
+    # em vez de 5. Mostrar o recorte por mando na interface é melhoria
+    # separada, de propósito: não entra no mesmo deploy que mexe em
+    # fórmula.
     cur.execute(
         """SELECT linha, jogos_analisados, frequencia, media
-           FROM padroes_time_escanteio WHERE time_id = %s ORDER BY linha""",
+           FROM padroes_time_escanteio WHERE time_id = %s AND lado = 'geral'
+           ORDER BY linha""",
         (time_id,),
     )
     for linha, jogos_analisados, frequencia, media in cur.fetchall():
