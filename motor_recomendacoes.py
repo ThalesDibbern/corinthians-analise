@@ -328,6 +328,29 @@ def buscar_odds_futuras(cur):
 # a calibração continua válida pro grosso do volume.
 JOGOS_MINIMOS_HISTORICO_COMPLETO = 60
 
+# NOVO (25/08/2026 - separação de escanteio por mando)
+#
+# Piso PRÓPRIO do recorte por lado de `padroes_time_escanteio`, mais alto
+# que JOGOS_MINIMOS_PARA_ANALISAR (=5, em motor_padroes.py). Amostra
+# dividida em subgrupos merece piso próprio - mesmo princípio que criou
+# JOGOS_MINIMOS_FATOR_ZONA_MOMENTO = 10.
+#
+# Onde 15 cai hoje:
+#   18 times estabelecidos -> 50 por lado (janela cheia) -> usam o recorte
+#   Chapecoense (22 jogos)  -> ~11 por lado -> cai no 'geral'
+#   Remo (23 jogos)         -> ~11 por lado -> cai no 'geral'
+#
+# E é ALCANÇÁVEL: terminando o Brasileirão com 38 jogos eles chegam a 19
+# por lado e passam a usar o recorte. Isso é o oposto do piso de 40 jogos
+# que foi rejeitado na sessão da suavização - aquele era exclusão
+# permanente disfarçada de temporária, porque o campeonato só tem 38
+# rodadas.
+JOGOS_MINIMOS_ESCANTEIO_POR_LADO = 15
+
+# Abaixo desta amostra, a frequência lida é suavizada por Laplace mesmo
+# que o TIME tenha histórico completo. Ver _deve_suavizar_pela_amostra.
+JOGOS_MINIMOS_AMOSTRA_CONFIAVEL = 30
+
 
 def carregar_total_jogos_por_time(cur):
     """NOVO (suavização): conta quantos jogos JÁ CONCLUÍDOS cada time tem,
@@ -392,6 +415,66 @@ def _frequencia_do_row(row, suavizar):
     return round(100 * (acertos + 1) / (jogos + 2), 2)
 
 
+def _deve_suavizar_pela_amostra(row, suavizar_por_time):
+    """NOVO (25/08/2026): decide a suavização pela amostra da PRÓPRIA LINHA
+    lida, e não só pelo total de jogos do time.
+
+    POR QUE existe: `suavizar` é calculado no loop principal a partir do
+    total de jogos do time (JOGOS_MINIMOS_HISTORICO_COMPLETO = 60). Esse
+    número descreve bem uma tabela de padrão geral, mas deixa de descrever
+    a amostra assim que o padrão passa a ser recortado - foi exatamente o
+    buraco encontrado em 22/08 no confronto direto, onde o Corinthians
+    contava como "histórico completo" por ter 173 jogos enquanto o
+    confronto específico tinha 5.
+
+    Com o escanteio separado por mando o mesmo risco reaparece: um time
+    que faz 5.8 escanteios de média em casa tem ~80% de chance de passar
+    de 3.5, e 50 jogos de recorte podem dar 50/50 = 100%. Frequência de
+    100% multiplica por 1.0 na múltipla e some da conta - o buraco que a
+    suavização de Laplace foi criada pra fechar.
+
+    Regra, em três degraus:
+
+      1. o time já era de histórico curto -> suaviza
+         (comportamento antigo, preservado sem mudança)
+
+      2. a linha lida tem amostra pequena
+         (< JOGOS_MINIMOS_AMOSTRA_CONFIAVEL) -> suaviza
+
+      3. a frequência é 0% ou 100% -> suaviza SEMPRE, seja qual for a
+         amostra
+
+    O degrau 3 não é detalhe - foi pego em bancada e é o motivo de a regra
+    não ser só "amostra < 30". Um recorte cheio tem 50 jogos, acima de
+    qualquer limiar razoável, e mesmo assim 50/50 = 100% é possível numa
+    linha baixa (um mandante que faz 5.8 escanteios de média passa de 3.5
+    em ~80% dos jogos; 50 acertos seguidos é raro mas acontece em ~200
+    linhas de recorte). Só aumentar o limiar acima de 50 resolveria isso,
+    mas ao custo de suavizar TODA leitura e deslocar a escala do mercado
+    inteiro - o que a sessão da suavização decidiu explicitamente evitar.
+
+    Tratar 0% e 100% como caso próprio conserta o extremo sem mexer no
+    resto da distribuição. E é coerente com o princípio já registrado:
+    probabilidade de 100% não é aposta ótima, é sinal de amostra
+    insuficiente - nenhum evento esportivo tem certeza absoluta.
+
+    Efeito num recorte de 50 jogos com 40 acertos: 80% vira 78.85%.
+    Num recorte de 50/50: 100% vira 98.08%.
+    Conservador de propósito - puxa pro centro, nunca pro extremo."""
+    if suavizar_por_time:
+        return True
+    if not row or row[0] is None:
+        return False
+
+    frequencia = float(row[0])
+    if frequencia >= 100.0 or frequencia <= 0.0:
+        return True
+
+    if len(row) < 2 or not row[1]:
+        return False
+    return int(row[1]) < JOGOS_MINIMOS_AMOSTRA_CONFIAVEL
+
+
 def buscar_frequencia_cartao(cur, jogador_id, suavizar=False):
     cur.execute(
         "SELECT frequencia, jogos_analisados FROM padroes_jogador_cartao WHERE jogador_id = %s",
@@ -416,12 +499,50 @@ def buscar_frequencia_simples_jogador(cur, jogador_id, tipo, suavizar=False):
     return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_escanteio_time(cur, linha, time_id, suavizar=False):
+def buscar_frequencia_escanteio_time(cur, linha, time_id, suavizar=False, mandante=None):
+    """NOVO (25/08/2026 - separação por mando): escada de dois degraus,
+    no mesmo formato já usado por `buscar_frequencia_confronto`:
+
+        recorte do mando do jogo  ->  'geral'  ->  None
+
+    POR QUE, em números medidos na base inteira (1652 jogos, 5 temporadas):
+    mandante faz 5.82 escanteios por jogo, visitante 4.54 - vantagem de
+    1.29, estável ano a ano (1.34 / 1.32 / 1.20 / 1.28 / 1.28). A tabela
+    guardava UM número por (time, linha), misturando os dois, enquanto a
+    casa precifica separado. Isso vale ~7 pontos de probabilidade em toda
+    linha e sempre no mesmo sentido - acima da margem da casa (~5%).
+
+    Resultado da auditoria de 22-24/08/2026: 69 das 74 recomendações desse
+    mercado saíram do lado errado, com 24.3% de acerto contra 54.3%
+    previstos.
+
+    O piso do recorte por lado (JOGOS_MINIMOS_ESCANTEIO_POR_LADO) é maior
+    que o piso geral de propósito: amostra dividida em subgrupos merece
+    piso próprio - mesmo princípio que criou
+    JOGOS_MINIMOS_FATOR_ZONA_MOMENTO. E é um piso ALCANÇÁVEL: um time que
+    termine o Brasileirão com 38 jogos chega a 19 por lado e passa a usar
+    o recorte específico.
+
+    `mandante=None` (chamador que ainda não passa o mando) cai direto no
+    'geral', preservando o comportamento antigo em vez de adivinhar."""
+    if mandante is not None:
+        lado = "mandante" if mandante else "visitante"
+        cur.execute(
+            """SELECT frequencia, jogos_analisados FROM padroes_time_escanteio
+               WHERE linha = %s AND time_id = %s AND lado = %s""",
+            (linha, time_id, lado),
+        )
+        row = cur.fetchone()
+        if row and row[0] is not None and row[1] and int(row[1]) >= JOGOS_MINIMOS_ESCANTEIO_POR_LADO:
+            return _frequencia_do_row(row, _deve_suavizar_pela_amostra(row, suavizar))
+
     cur.execute(
-        "SELECT frequencia, jogos_analisados FROM padroes_time_escanteio WHERE linha = %s AND time_id = %s",
+        """SELECT frequencia, jogos_analisados FROM padroes_time_escanteio
+           WHERE linha = %s AND time_id = %s AND lado = 'geral'""",
         (linha, time_id),
     )
-    return _frequencia_do_row(cur.fetchone(), suavizar)
+    row = cur.fetchone()
+    return _frequencia_do_row(row, _deve_suavizar_pela_amostra(row, suavizar))
 
 
 def buscar_frequencia_escanteio_total(cur, linha, time_id, suavizar=False):
@@ -1572,7 +1693,24 @@ def calcular_recomendacoes(cur):
             # não arrisca aplicar errado - fica sem recomendação por
             # segurança, em vez de aplicar a frequência do time errado.
             if bate_nosso_time and not bate_adversario:
-                frequencia_bruta = buscar_frequencia_escanteio_time(cur, linha, nosso_time_id, suavizar=suavizar)
+                # NOVO (25/08/2026): passa o mando REAL do nosso time nesse
+                # jogo, pra escolher o recorte certo de
+                # `padroes_time_escanteio`.
+                #
+                # Aqui a leitura é direta e não precisa de tradução: este
+                # bloco só gera recomendação quando
+                # `bate_nosso_time and not bate_adversario`, ou seja, o time
+                # nomeado no mercado É SEMPRE o nosso_time da linha - nunca
+                # o adversário. Logo `mandante` (vindo de jogos.mandante,
+                # a mesma variável que alimenta `mandante_filtro_atual`) é
+                # o mando dele, sem inversão possível.
+                #
+                # Vale registrar por quê: foi exatamente uma tradução de
+                # mando entre tabelas com semânticas diferentes que gerou o
+                # bug do cartao_time, corrigido nesta mesma data.
+                frequencia_bruta = buscar_frequencia_escanteio_time(
+                    cur, linha, nosso_time_id, suavizar=suavizar, mandante=mandante
+                )
 
                 # NOVO (Grupo A): Zona da Tabela + Padrão por Rodada, os
                 # dois calculados em cima da própria média geral do time
