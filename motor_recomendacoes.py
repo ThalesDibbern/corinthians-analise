@@ -614,19 +614,96 @@ def buscar_frequencia_equipe_marca(cur, time_id, suavizar=False):
     return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
-def buscar_frequencia_dupla_chance_tempo(cur, time_id, periodo, lado, resultado, suavizar=False):
-    """NOVO (Onda 2 - Dupla Chance por tempo): frequência de UM resultado
-    específico ('1X'/'12'/'2X') nesse período (1T/2T), separado por lado
-    (mandante/visitante), porque jogar em casa ou fora muda bastante a
-    chance de cada resultado."""
-    cur.execute(
-        """
-        SELECT frequencia, jogos_analisados FROM padroes_dupla_chance_tempo
-        WHERE time_id = %s AND periodo = %s AND lado = %s AND resultado = %s
-        """,
-        (time_id, periodo, lado, resultado),
-    )
-    return _frequencia_do_row(cur.fetchone(), suavizar)
+def buscar_frequencia_dupla_chance_tempo(cur, periodo, resultado, mandante_id,
+                                         visitante_id, suavizar=False):
+    """Dupla Chance por tempo ('1X'/'12'/'2X' no 1T ou no 2T).
+
+    REESCRITA EM 26/08/2026 - passou a combinar OS DOIS LADOS.
+    ---------------------------------------------------------
+    Antes esta função lia UMA linha só, a do `nosso_time` daquela
+    perspectiva:
+
+        buscar_frequencia_dupla_chance_tempo(cur, nosso_time_id, "1T",
+                                             mandante_filtro_atual, "1X")
+
+    Isso tinha dois defeitos, os dois medidos na auditoria da rodada de
+    22-24/08/2026:
+
+    1) USAVA METADE DA INFORMAÇÃO.
+       "1X no primeiro tempo" é um evento do JOGO: o mandante não perde o
+       1T. Quem informa sobre isso são os DOIS times - o histórico do
+       mandante jogando em casa E o do visitante jogando fora. A versão
+       antiga lia só o lado do `nosso_time` da linha. Quando o nosso time
+       era o visitante, a linha `visitante/1X` guarda a taxa em que os
+       ADVERSÁRIOS GENÉRICOS que ele enfrentou fora não perderam o 1T -
+       não diz nada sobre o adversário desta partida. A outra metade da
+       informação já estava na tabela e simplesmente não era consultada.
+
+    2) O MESMO EVENTO GANHAVA DUAS PROBABILIDADES.
+       Um confronto entre dois times rastreados gera 2 linhas em `jogos`,
+       e cada uma produzia sua própria estimativa do MESMO evento. Na
+       rodada auditada, 7 dos 25 eventos apareceram duas vezes, com até
+       6 pontos de diferença (Bragantino x Grêmio, 2T-2X: 72,0% e 66,0%).
+       Como o filtro de VE só aceita a aposta quando a probabilidade é
+       alta o bastante, ele sempre escolhia a MAIOR das duas - seleção
+       adversa embutida no mercado.
+
+    Resultado medido do mercado antes desta correção: 13 acertos em 25
+    eventos (52,0%) contra 73,3% previstos. Gap de -21,3 pontos, com
+    p = 0,018 de acontecer por acaso.
+
+    COMO COMBINA:
+        P(resultado) = média das duas leituras, PONDERADA por
+                       `jogos_analisados` de cada uma.
+
+    A ponderação é o que faz o lado com histórico maior pesar mais, e
+    também o que torna desnecessário um piso rígido: uma linha de 6 jogos
+    entra com peso 6 contra 25 da outra, em vez de ser descartada ou de
+    valer o mesmo. O piso mínimo já existe uma camada acima -
+    `motor_padroes.calcular_padroes_dupla_chance_tempo` só grava a linha
+    se houver JOGOS_MINIMOS_PARA_ANALISAR jogos.
+
+    Cada lado é suavizado ANTES de entrar na média, pela própria amostra
+    (ver `_deve_suavizar_pela_amostra`). Isso importa aqui mais que em
+    outros mercados: o filtro `placar_intervalo IS NOT NULL` corta muito
+    a janela, porque o placar de intervalo só passou a ser coletado
+    recentemente. Na prática este mercado roda com 12 a 25 jogos por
+    lado, não com os 50 da janela - foi assim que apareceu o
+    "Fluminense 1T-1X = 92,9%", que é 12 de 12 jogos em casa já suavizado.
+
+    Como as duas perspectivas do mesmo jogo passam a ler exatamente as
+    mesmas duas linhas, elas agora produzem o MESMO número, e a duplicata
+    desaparece da lista de recomendações.
+
+    ESCADA: se um dos lados não existir, usa o outro sozinho. Se nenhum
+    existir, devolve None e quem chamou não gera recomendação.
+    """
+    if mandante_id is None or visitante_id is None:
+        return None
+
+    leituras = []
+    for time_id, lado in ((mandante_id, "mandante"), (visitante_id, "visitante")):
+        cur.execute(
+            """
+            SELECT frequencia, jogos_analisados FROM padroes_dupla_chance_tempo
+            WHERE time_id = %s AND periodo = %s AND lado = %s AND resultado = %s
+            """,
+            (time_id, periodo, lado, resultado),
+        )
+        row = cur.fetchone()
+        if not row or row[0] is None or not row[1]:
+            continue
+        freq = _frequencia_do_row(row, _deve_suavizar_pela_amostra(row, suavizar))
+        if freq is None:
+            continue
+        leituras.append((freq, int(row[1])))
+
+    if not leituras:
+        return None
+    peso_total = sum(peso for _f, peso in leituras)
+    if peso_total <= 0:
+        return None
+    return round(sum(f*peso for f, peso in leituras)/peso_total, 2)
 
 
 def buscar_frequencia_ambas_marcam_tempo(cur, time_id, periodo, lado, suavizar=False):
@@ -1877,19 +1954,29 @@ def calcular_recomendacoes(cur):
                     frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "dupla_chance_1t" and not jogador_id and direcao_normalizada in ("1x", "12", "2x"):
-            # NOVO (Onda 2): Dupla Chance é mercado do JOGO (1X/12/2X são
-            # direção relativa a mandante/visitante, igual resultado_final)
-            # - não precisa de identificação de time por nome, cada
-            # direção já tem a própria frequência guardada (não é um par
-            # Mais/Menos complementar).
+            # Dupla Chance é mercado do JOGO (1X/12/2X são direção relativa
+            # a mandante/visitante, igual resultado_final) - não precisa de
+            # identificação de time por nome, cada direção já tem a própria
+            # frequência guardada (não é um par Mais/Menos complementar).
+            #
+            # ATUALIZADO 26/08/2026: passa os DOIS times em vez do
+            # `nosso_time_id` daquela perspectiva. A frequência agora é a
+            # média ponderada de duas leituras - o mandante como mandante e
+            # o visitante como visitante. Ver o comentário longo em
+            # `buscar_frequencia_dupla_chance_tempo`.
+            #
+            # Efeito colateral desejado: como as duas perspectivas do mesmo
+            # jogo passam a ler exatamente as mesmas duas linhas, o mesmo
+            # evento deixa de receber duas probabilidades diferentes, e o
+            # filtro de VE para de escolher sempre a maior das duas.
             frequencia = buscar_frequencia_dupla_chance_tempo(
-                cur, nosso_time_id, "1T", mandante_filtro_atual, direcao_normalizada.upper(),
+                cur, "1T", direcao_normalizada.upper(), mandante_id, visitante_id,
                 suavizar=suavizar
             )
 
         elif tipo == "dupla_chance_2t" and not jogador_id and direcao_normalizada in ("1x", "12", "2x"):
             frequencia = buscar_frequencia_dupla_chance_tempo(
-                cur, nosso_time_id, "2T", mandante_filtro_atual, direcao_normalizada.upper(),
+                cur, "2T", direcao_normalizada.upper(), mandante_id, visitante_id,
                 suavizar=suavizar
             )
 
