@@ -1372,8 +1372,14 @@ PAGINA_HISTORICO = """
             border: 1px solid #21262d; border-radius: 12px;
         }
         .rodada-titulo {
-            font-weight: 700; font-size: 0.95rem; color: #e6edf3; margin-bottom: 12px;
+            cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+            font-weight: 700; font-size: 0.95rem; color: #e6edf3; margin-bottom: 0;
         }
+        .rodada-titulo:hover { color: #58a6ff; }
+        .rodada-seta { color: #8b949e; transition: transform 0.15s; font-size: 0.85rem; }
+        .bloco-rodada.aberto .rodada-seta { transform: rotate(180deg); }
+        .bloco-rodada .colunas-resultado { display: none; margin-top: 14px; margin-bottom: 0; }
+        .bloco-rodada.aberto .colunas-resultado { display: grid; }
         .btn-baixar {
             display: inline-block; background: transparent; color: #58a6ff;
             border: 1px solid #58a6ff; border-radius: 8px; padding: 6px 12px;
@@ -1558,8 +1564,11 @@ PAGINA_HISTORICO = """
 
     <div id="secao-rodadas">
         {% for bloco in blocos_rodadas %}
-        <div class="bloco-rodada">
-            <div class="rodada-titulo">{{ bloco.rotulo }}</div>
+        <div class="bloco-rodada{{ ' aberto' if loop.first else '' }}" id="bloco-rodada-{{ bloco.rodada_id }}">
+            <div class="rodada-titulo" onclick="toggleRodadaBloco('{{ bloco.rodada_id }}')">
+                <span>{{ bloco.rotulo }}</span>
+                <span class="rodada-seta">▾</span>
+            </div>
             <div class="colunas-resultado">
                 <div class="coluna">
                     <div class="coluna-cabecalho coluna-verde">✅ Acertou ({{ bloco.acertou|length }})</div>
@@ -1839,14 +1848,21 @@ PAGINA_HISTORICO = """
 
         function construirBlocoRodadaJS(bloco) {
             return `
-                <div class="bloco-rodada">
-                    <div class="rodada-titulo">${escaparHtml(bloco.rotulo)}</div>
+                <div class="bloco-rodada" id="bloco-rodada-${bloco.rodada_id}">
+                    <div class="rodada-titulo" onclick="toggleRodadaBloco('${bloco.rodada_id}')">
+                        <span>${escaparHtml(bloco.rotulo)}</span>
+                        <span class="rodada-seta">▾</span>
+                    </div>
                     <div class="colunas-resultado">
                         ${construirColunaRodadaJS(bloco, 'acertou', '✅', 'coluna-verde', 'Acertou', 'Baixar certas')}
                         ${construirColunaRodadaJS(bloco, 'errou', '❌', 'coluna-vermelha', 'Errou', 'Baixar erradas')}
                     </div>
                 </div>
             `;
+        }
+
+        function toggleRodadaBloco(rodadaId) {
+            document.getElementById('bloco-rodada-' + rodadaId).classList.toggle('aberto');
         }
 
         function carregarMaisRodadas() {
