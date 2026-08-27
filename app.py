@@ -25,7 +25,10 @@ import secrets
 import subprocess
 import sys
 import threading
+import csv
+import io
 from decimal import Decimal, ROUND_FLOOR
+from urllib.parse import quote
 from functools import wraps
 from itertools import combinations
 from datetime import datetime, timedelta, timezone
@@ -1364,6 +1367,28 @@ PAGINA_HISTORICO = """
         .coluna-cinza { background: #8b949e22; color: #8b949e; border: 1px solid #8b949e55; }
         .coluna-roxa { background: #a371f722; color: #a371f7; border: 1px solid #a371f755; }
         .secao-pendentes { margin-bottom: 28px; }
+        .bloco-rodada {
+            margin-bottom: 20px; padding: 16px; background: #0d1117;
+            border: 1px solid #21262d; border-radius: 12px;
+        }
+        .rodada-titulo {
+            font-weight: 700; font-size: 0.95rem; color: #e6edf3; margin-bottom: 12px;
+        }
+        .btn-baixar {
+            display: inline-block; background: transparent; color: #58a6ff;
+            border: 1px solid #58a6ff; border-radius: 8px; padding: 6px 12px;
+            font-size: 0.78rem; font-weight: 600; text-decoration: none;
+            margin-bottom: 10px; cursor: pointer;
+        }
+        .btn-baixar:hover { background: #58a6ff22; }
+        .btn-carregar-mais {
+            background: transparent; color: #8b949e; border: 1px solid #8b949e;
+            border-radius: 8px; padding: 9px 20px; font-size: 0.85rem; font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-carregar-mais:hover:not(:disabled) { background: #8b949e22; }
+        .btn-carregar-mais:disabled { opacity: 0.6; cursor: default; }
+        .carregar-mais-wrap { text-align: center; margin: 8px 0 28px; }
         .paginacao {
             display: flex; align-items: center; justify-content: center; gap: 14px;
             margin-top: 4px; font-size: 0.82rem; color: #8b949e;
@@ -1525,6 +1550,67 @@ PAGINA_HISTORICO = """
             {% endif %}
         </div>
     </div>
+
+    <div class="coluna-cabecalho coluna-roxa" style="margin-top: 8px;">🗓️ Odds por Rodada</div>
+    <p class="secao-subtitulo">Mesmas recomendações individuais de cima, agora separadas por rodada - acertos e
+        erros em colunas próprias, com botão pra baixar cada lado em CSV. Rodadas de antes de 21/08/2026 (sem o
+        dado de rodada gravado ainda) caem no grupo "Sem rodada identificada", no fim da lista.</p>
+
+    <div id="secao-rodadas">
+        {% for bloco in blocos_rodadas %}
+        <div class="bloco-rodada">
+            <div class="rodada-titulo">{{ bloco.rotulo }}</div>
+            <div class="colunas-resultado">
+                <div class="coluna">
+                    <div class="coluna-cabecalho coluna-verde">✅ Acertou ({{ bloco.acertou|length }})</div>
+                    <a class="btn-baixar" href="/historico/rodada/{{ bloco.rodada_url }}/download/acertou.csv">⬇️ Baixar certas</a>
+                    <div id="lista-rodada-{{ bloco.rodada_id }}-acertou">
+                        {% if bloco.acertou %}
+                            {% for i in bloco.acertou %}{{ cartao_item(i) }}{% endfor %}
+                        {% else %}
+                            <div class="vazio">Nenhum acerto nessa rodada.</div>
+                        {% endif %}
+                    </div>
+                    {% if bloco.acertou|length > 10 %}
+                    <div class="paginacao">
+                        <button class="btn-pagina" id="anterior-lista-rodada-{{ bloco.rodada_id }}-acertou"
+                                onclick="mudarPagina('lista-rodada-{{ bloco.rodada_id }}-acertou', -1)">← Anterior</button>
+                        <span id="label-lista-rodada-{{ bloco.rodada_id }}-acertou"></span>
+                        <button class="btn-pagina" id="proximo-lista-rodada-{{ bloco.rodada_id }}-acertou"
+                                onclick="mudarPagina('lista-rodada-{{ bloco.rodada_id }}-acertou', 1)">Próxima →</button>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="coluna">
+                    <div class="coluna-cabecalho coluna-vermelha">❌ Errou ({{ bloco.errou|length }})</div>
+                    <a class="btn-baixar" href="/historico/rodada/{{ bloco.rodada_url }}/download/errou.csv">⬇️ Baixar erradas</a>
+                    <div id="lista-rodada-{{ bloco.rodada_id }}-errou">
+                        {% if bloco.errou %}
+                            {% for i in bloco.errou %}{{ cartao_item(i) }}{% endfor %}
+                        {% else %}
+                            <div class="vazio">Nenhum erro nessa rodada.</div>
+                        {% endif %}
+                    </div>
+                    {% if bloco.errou|length > 10 %}
+                    <div class="paginacao">
+                        <button class="btn-pagina" id="anterior-lista-rodada-{{ bloco.rodada_id }}-errou"
+                                onclick="mudarPagina('lista-rodada-{{ bloco.rodada_id }}-errou', -1)">← Anterior</button>
+                        <span id="label-lista-rodada-{{ bloco.rodada_id }}-errou"></span>
+                        <button class="btn-pagina" id="proximo-lista-rodada-{{ bloco.rodada_id }}-errou"
+                                onclick="mudarPagina('lista-rodada-{{ bloco.rodada_id }}-errou', 1)">Próxima →</button>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    {% if tem_mais_rodadas %}
+    <div class="carregar-mais-wrap">
+        <button class="btn-carregar-mais" id="btn-carregar-mais-rodadas" onclick="carregarMaisRodadas()">Carregar mais rodadas</button>
+    </div>
+    {% endif %}
 
     <div class="secao-pendentes">
         <div class="coluna-cabecalho coluna-cinza">⏳ Pendente ({{ pendentes|length }})</div>
@@ -1689,6 +1775,102 @@ PAGINA_HISTORICO = """
         }
 
         ['lista-acertou', 'lista-errou', 'lista-pendente'].forEach(renderizarPagina);
+
+        // NOVO (26/08/2026): seção "Odds por Rodada" - paginação das
+        // listas renderizadas pelo Jinja no primeiro carregamento (ids
+        // vem prontos do servidor, um pra cada rodada x resultado).
+        [
+            {% for bloco in blocos_rodadas %}
+            'lista-rodada-{{ bloco.rodada_id }}-acertou',
+            'lista-rodada-{{ bloco.rodada_id }}-errou',
+            {% endfor %}
+        ].forEach(renderizarPagina);
+
+        let offsetRodadas = {{ blocos_rodadas|length }};
+
+        function escaparHtml(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+        }
+
+        // Mesmo markup do macro Jinja cartao_item, só que montado em JS -
+        // usado pelos blocos de rodada carregados via AJAX (o Jinja só
+        // roda no primeiro carregamento da página).
+        function construirCartaoItemJS(i) {
+            return `
+                <div class="cartao item-pagina">
+                    <div class="cartao-topo">
+                        <span class="jogo">${i.data_jogo} \u00b7 ${escaparHtml(i.nosso_time)} x ${escaparHtml(i.adversario)}</span>
+                        <span class="badge badge-${i.resultado}">${i.resultado}</span>
+                    </div>
+                    <div class="descricao">${escaparHtml(i.descricao)}</div>
+                    <div class="metricas">
+                        <span>${escaparHtml(i.casa_aposta)}</span>
+                        <span>Odd: <b>${i.odd_oferecida}</b></span>
+                        <span>Probabilidade: <b>${i.probabilidade_historica}%</b></span>
+                        <span>VE: <b>${i.valor_esperado}</b></span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function construirColunaRodadaJS(bloco, resultado, emoji, corClasse, titulo, textoBotao) {
+            const itens = bloco[resultado];
+            const listaId = 'lista-rodada-' + bloco.rodada_id + '-' + resultado;
+            const itensHtml = itens.length
+                ? itens.map(construirCartaoItemJS).join('')
+                : `<div class="vazio">Nenhum${resultado === 'acertou' ? ' acerto' : ' erro'} nessa rodada.</div>`;
+            const paginacaoHtml = itens.length > 10 ? `
+                <div class="paginacao">
+                    <button class="btn-pagina" id="anterior-${listaId}" onclick="mudarPagina('${listaId}', -1)">← Anterior</button>
+                    <span id="label-${listaId}"></span>
+                    <button class="btn-pagina" id="proximo-${listaId}" onclick="mudarPagina('${listaId}', 1)">Próxima →</button>
+                </div>` : '';
+            return `
+                <div class="coluna">
+                    <div class="coluna-cabecalho ${corClasse}">${emoji} ${titulo} (${itens.length})</div>
+                    <a class="btn-baixar" href="/historico/rodada/${bloco.rodada_url}/download/${resultado}.csv">⬇️ ${textoBotao}</a>
+                    <div id="${listaId}">${itensHtml}</div>
+                    ${paginacaoHtml}
+                </div>
+            `;
+        }
+
+        function construirBlocoRodadaJS(bloco) {
+            return `
+                <div class="bloco-rodada">
+                    <div class="rodada-titulo">${escaparHtml(bloco.rotulo)}</div>
+                    <div class="colunas-resultado">
+                        ${construirColunaRodadaJS(bloco, 'acertou', '✅', 'coluna-verde', 'Acertou', 'Baixar certas')}
+                        ${construirColunaRodadaJS(bloco, 'errou', '❌', 'coluna-vermelha', 'Errou', 'Baixar erradas')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function carregarMaisRodadas() {
+            const btn = document.getElementById('btn-carregar-mais-rodadas');
+            btn.disabled = true;
+            btn.textContent = 'Carregando...';
+            fetch(`/api/historico-rodadas?offset=${offsetRodadas}`)
+                .then(r => r.json())
+                .then(dados => {
+                    const container = document.getElementById('secao-rodadas');
+                    dados.blocos.forEach(bloco => {
+                        container.insertAdjacentHTML('beforeend', construirBlocoRodadaJS(bloco));
+                        renderizarPagina('lista-rodada-' + bloco.rodada_id + '-acertou');
+                        renderizarPagina('lista-rodada-' + bloco.rodada_id + '-errou');
+                    });
+                    offsetRodadas += dados.blocos.length;
+                    if (dados.tem_mais) {
+                        btn.disabled = false;
+                        btn.textContent = 'Carregar mais rodadas';
+                    } else {
+                        btn.remove();
+                    }
+                });
+        }
     </script>
 
     {% if multiplas_destaque or resumo_multiplas.acertou + resumo_multiplas.errou > 0 %}
@@ -1959,7 +2141,106 @@ def buscar_detalhamento_faixa(cur, inicio_faixa):
     return [dict(zip(colunas, row)) for row in cur.fetchall()]
 
 
-# NOVO (26/08/2026): card separado de "Acertos e erros por LINHA DE ODD",
+# NOVO (26/08/2026): seção "Odds por Rodada" em /historico - mesmas
+# recomendações individuais (nunca múltipla), agrupadas por j.rodada em
+# vez de misturadas, com botão de baixar CSV de acertos/erros separado
+# por rodada. Rodadas de antes da migração de 21/08/2026 (jogos.rodada
+# ainda NULL na época) caem juntas no grupo "Sem rodada identificada",
+# no fim da lista - decisão combinada com Thales: não faz backfill agora,
+# a rodada de 22-24/08 já é a primeira completa com o dado certo.
+QUANTIDADE_RODADAS_POR_CARGA = 3
+
+
+def _numero_rodada(rodada):
+    """Extrai o número final de uma rodada tipo 'Regular Season - 20' -> 20.
+    A API-Football manda esse texto pronto (fixture['league']['round']),
+    nunca só o número, então precisa extrair pra poder ordenar direito
+    (ordenar o TEXTO colocaria 'Regular Season - 9' depois de 'Regular
+    Season - 20', porque '9' > '2' como string)."""
+    if not rodada:
+        return None
+    m = re.search(r"(\d+)\s*$", rodada)
+    return int(m.group(1)) if m else None
+
+
+def _rotulo_rodada(rodada):
+    if not rodada:
+        return "Sem rodada identificada"
+    numero = _numero_rodada(rodada)
+    return f"Rodada {numero}" if numero is not None else rodada
+
+
+def _slug_rodada(rodada):
+    """Versão só com [a-z0-9_] de uma rodada, pra usar em id de elemento
+    HTML (não pode ter espaço/acento/hífen sem risco de quebrar seletor
+    JS) - separado de rodada_url (que preserva o texto original, só
+    percent-encoded, pra bater com o que tá gravado no banco)."""
+    bruto = rodada if rodada else "sem_rodada"
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", bruto).strip("_").lower()
+    return slug or "sem_rodada"
+
+
+def buscar_rodadas_ordenadas(cur):
+    """Lista de toda rodada (texto bruto de jogos.rodada) com pelo menos
+    uma recomendação individual avaliada, da mais recente pra mais
+    antiga (pelo número extraído - ver _numero_rodada). Rodada sem número
+    reconhecível (incluindo NULL) vai pro fim."""
+    cur.execute(
+        """
+        SELECT DISTINCT j.rodada
+        FROM historico_recomendacoes h
+        JOIN jogos j ON j.id = h.jogo_id
+        WHERE h.resultado IN ('acertou', 'errou')
+        """
+    )
+    rodadas = [row[0] for row in cur.fetchall()]
+    rodadas.sort(key=lambda r: (_numero_rodada(r) is None, -(_numero_rodada(r) or 0)))
+    return rodadas
+
+
+def buscar_itens_da_rodada(cur, rodada):
+    """Mesmas colunas de buscar_detalhamento_faixa, filtradas por rodada -
+    `IS NOT DISTINCT FROM` pra funcionar tanto pra rodada normal quanto
+    pro grupo NULL ('Sem rodada identificada')."""
+    cur.execute(
+        """
+        SELECT h.data_jogo, t.nome, j.adversario, h.descricao, h.casa_aposta,
+               h.odd_oferecida, h.probabilidade_historica, h.valor_esperado, h.resultado
+        FROM historico_recomendacoes h
+        JOIN jogos j ON j.id = h.jogo_id
+        JOIN times t ON t.id = j.nosso_time_id
+        WHERE h.resultado IN ('acertou', 'errou')
+          AND j.rodada IS NOT DISTINCT FROM %s
+        ORDER BY h.data_jogo DESC, h.id DESC
+        """,
+        (rodada,),
+    )
+    colunas = ["data_jogo", "nosso_time", "adversario", "descricao", "casa_aposta",
+               "odd_oferecida", "probabilidade_historica", "valor_esperado", "resultado"]
+    return [dict(zip(colunas, row)) for row in cur.fetchall()]
+
+
+def montar_blocos_rodadas(cur, todas_rodadas, offset, quantidade):
+    """Monta o bloco (rótulo, ids, itens separados por resultado) de um
+    LOTE de rodadas - usado tanto no primeiro carregamento de /historico
+    quanto no botão "Carregar mais rodadas" via AJAX. offset/quantidade
+    paginam a lista de RODADAS; dentro de cada rodada, a paginação de
+    itens continua sendo a de sempre (client-side, 10 por página)."""
+    lote = todas_rodadas[offset:offset + quantidade]
+    blocos = []
+    for rodada in lote:
+        itens = buscar_itens_da_rodada(cur, rodada)
+        blocos.append({
+            "rotulo": _rotulo_rodada(rodada),
+            "rodada_id": _slug_rodada(rodada),
+            "rodada_url": quote(rodada, safe="") if rodada else "_sem_rodada_",
+            "acertou": [i for i in itens if i["resultado"] == "acertou"],
+            "errou": [i for i in itens if i["resultado"] == "errou"],
+        })
+    tem_mais = (offset + quantidade) < len(todas_rodadas)
+    return blocos, tem_mais
+
+
 # igual ao de probabilidade histórica em espírito, mas agrupando por
 # faixa de odd de 0.10 em 0.10 (ex: 1.30-1.40) em vez de faixa de
 # probabilidade - pedido explícito pra não misturar os dois cards.
@@ -2185,6 +2466,10 @@ def historico():
         itens = buscar_historico(cur)
         calibracao = buscar_calibracao(cur)
         calibracao_odd = buscar_calibracao_odd(cur)
+        todas_rodadas = buscar_rodadas_ordenadas(cur)
+        blocos_rodadas, tem_mais_rodadas = montar_blocos_rodadas(
+            cur, todas_rodadas, 0, QUANTIDADE_RODADAS_POR_CARGA
+        )
         multiplas_destaque = buscar_multiplas_destaque(cur)
         resumo_multiplas = montar_resumo_multiplas(cur)
         multiplas_acertou = [c for c in multiplas_destaque if c["resultado"] == "acertou"]
@@ -2211,6 +2496,7 @@ def historico():
     return render_template_string(
         PAGINA_HISTORICO, acertos=acertos, erros=erros, pendentes=pendentes,
         resumo=resumo, calibracao=calibracao, calibracao_odd=calibracao_odd,
+        blocos_rodadas=blocos_rodadas, tem_mais_rodadas=tem_mais_rodadas,
         multiplas_destaque=multiplas_destaque, resumo_multiplas=resumo_multiplas,
         multiplas_acertou=multiplas_acertou, multiplas_errou=multiplas_errou,
         multiplas_pendente=multiplas_pendente,
@@ -3664,6 +3950,77 @@ def api_calibracao_odd_detalhamento(indice_faixa):
         item["probabilidade_historica"] = float(item["probabilidade_historica"])
         item["valor_esperado"] = float(item["valor_esperado"])
     return jsonify(itens)
+
+
+@app.route("/api/historico-rodadas")
+def api_historico_rodadas():
+    """NOVO (26/08/2026): endpoint AJAX do botão "Carregar mais rodadas"
+    na seção "Odds por Rodada" de /historico - devolve o próximo lote de
+    rodadas (QUANTIDADE_RODADAS_POR_CARGA por vez) a partir de `offset`,
+    já separadas em acertou/errou. offset conta RODADAS, não itens."""
+    offset = request.args.get("offset", 0, type=int)
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        todas_rodadas = buscar_rodadas_ordenadas(cur)
+        blocos, tem_mais = montar_blocos_rodadas(cur, todas_rodadas, offset, QUANTIDADE_RODADAS_POR_CARGA)
+        cur.close()
+    finally:
+        conn.close()
+
+    for bloco in blocos:
+        for lista in (bloco["acertou"], bloco["errou"]):
+            for item in lista:
+                item["data_jogo"] = str(item["data_jogo"])
+                item["odd_oferecida"] = float(item["odd_oferecida"])
+                item["probabilidade_historica"] = float(item["probabilidade_historica"])
+                item["valor_esperado"] = float(item["valor_esperado"])
+    return jsonify({"blocos": blocos, "tem_mais": tem_mais})
+
+
+@app.route("/historico/rodada/<rodada_url>/download/<resultado>.csv")
+def download_rodada_csv(rodada_url, resultado):
+    """NOVO (26/08/2026): baixa em CSV as recomendações individuais
+    (nunca múltipla) de UMA rodada, já filtradas por acertou/errou -
+    botão "⬇️ Baixar certas"/"⬇️ Baixar erradas" de cada bloco de rodada
+    em /historico. `rodada_url` chega aqui já decodificado de volta pro
+    texto original de jogos.rodada (o Werkzeug decodifica o segmento da
+    URL antes de rotear) - '_sem_rodada_' é o sentinel pro grupo sem
+    rodada identificada (rodada NULL no banco)."""
+    if resultado not in ("acertou", "errou"):
+        return "resultado inválido - use 'acertou' ou 'errou'", 400
+
+    rodada = None if rodada_url == "_sem_rodada_" else rodada_url
+
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        itens = buscar_itens_da_rodada(cur, rodada)
+        cur.close()
+    finally:
+        conn.close()
+    itens = [i for i in itens if i["resultado"] == resultado]
+
+    # BOM no início: sem isso o Excel abre acento/ç como caractere quebrado
+    # em CSV UTF-8 (comportamento conhecido do Excel, não bug do projeto).
+    buffer = io.StringIO()
+    buffer.write("\ufeff")
+    writer = csv.writer(buffer)
+    writer.writerow(["Data", "Nosso time", "Adversário", "Mercado", "Casa de apostas",
+                      "Odd", "Probabilidade histórica (%)", "Valor esperado", "Resultado"])
+    for i in itens:
+        writer.writerow([
+            i["data_jogo"], i["nosso_time"], i["adversario"], i["descricao"],
+            i["casa_aposta"], i["odd_oferecida"], i["probabilidade_historica"],
+            i["valor_esperado"], i["resultado"],
+        ])
+
+    nome_arquivo = f"odds_{_slug_rodada(rodada)}_{resultado}.csv"
+    return Response(
+        buffer.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{nome_arquivo}"'},
+    )
 
 
 @app.route("/minhas-apostas")
