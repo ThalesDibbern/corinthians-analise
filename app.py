@@ -25,6 +25,7 @@ import secrets
 import subprocess
 import sys
 import threading
+from decimal import Decimal, ROUND_FLOOR
 from functools import wraps
 from itertools import combinations
 from datetime import datetime, timedelta, timezone
@@ -1436,6 +1437,42 @@ PAGINA_HISTORICO = """
     </div>
     {% endif %}
 
+    {% if calibracao_odd.melhor_faixa %}
+    <div class="calibracao" onclick="document.getElementById('modal-calibracao-odd').style.display='flex'">
+        <div class="calibracao-titulo">📈 A maior taxa de acerto está na faixa de odd
+            {{ calibracao_odd.melhor_faixa.rotulo }}</div>
+        <div class="calibracao-nota">{{ calibracao_odd.melhor_faixa.taxa }}% de acerto nessa faixa
+            ({{ calibracao_odd.melhor_faixa.total }} aposta(s) resolvida(s) nela) - clique pra ver o detalhamento
+            completo por linha de odd. Com poucas apostas resolvidas ainda, isso é instável - fica mais
+            confiável conforme o histórico crescer.</div>
+    </div>
+
+    <div id="modal-calibracao-odd" class="modal-fundo" onclick="if(event.target===this) this.style.display='none'">
+        <div class="modal-caixa">
+            <div class="modal-topo">
+                <span class="modal-titulo">Acertos e erros por linha de odd</span>
+                <span class="modal-fechar" onclick="document.getElementById('modal-calibracao-odd').style.display='none'">✕</span>
+            </div>
+            {% for item in calibracao_odd.detalhamento %}
+            <div class="calibracao-faixa">
+                <div class="modal-linha modal-linha-clicavel" onclick="toggleFaixaCalibracaoOdd({{ item.indice }})">
+                    <span>{{ item.rotulo }}
+                        <span class="faixa-seta" id="seta-odd-faixa-{{ item.indice }}">▾</span>
+                    </span>
+                    <span>
+                        <b style="color:{{ '#3fb950' if item.taxa >= 50 else '#f85149' }}">{{ item.taxa }}% de acerto</b>
+                        <span style="color:#8b949e; font-size: 0.85em;">
+                            ({{ item.acertou }} acerto(s) / {{ item.errou }} erro(s))
+                        </span>
+                    </span>
+                </div>
+                <div class="faixa-detalhe" id="detalhe-odd-faixa-{{ item.indice }}" style="display:none;"></div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     {% macro cartao_item(i) %}
         <div class="cartao item-pagina">
             <div class="cartao-topo">
@@ -1575,6 +1612,43 @@ PAGINA_HISTORICO = """
 
         function renderizarTabelaFaixa(inicioFaixa, itens) {
             const detalheDiv = document.getElementById('detalhe-faixa-' + inicioFaixa);
+            renderizarTabelaFaixaEm(detalheDiv, itens);
+        }
+
+        // NOVO (26/08/2026): tabela expansivel por faixa de ODD, no card
+        // separado "Acertos e erros por linha de odd" - mesmo padrao do
+        // card de probabilidade acima (busca sob demanda, cache por
+        // faixa), so que indexado por INDICE da faixa (inteiro, 1.30 vira
+        // 13) em vez do inicio em %, pra nao arriscar problema de
+        // arredondamento de float na URL/id do elemento.
+        const CACHE_FAIXA_CALIBRACAO_ODD = {};
+
+        function toggleFaixaCalibracaoOdd(indiceFaixa) {
+            const detalheDiv = document.getElementById('detalhe-odd-faixa-' + indiceFaixa);
+            const seta = document.getElementById('seta-odd-faixa-' + indiceFaixa);
+            const abrindo = detalheDiv.style.display === 'none';
+            detalheDiv.style.display = abrindo ? 'block' : 'none';
+            seta.style.transform = abrindo ? 'rotate(180deg)' : 'rotate(0deg)';
+            if (!abrindo) return;
+
+            if (CACHE_FAIXA_CALIBRACAO_ODD[indiceFaixa]) {
+                renderizarTabelaFaixaEm(detalheDiv, CACHE_FAIXA_CALIBRACAO_ODD[indiceFaixa]);
+                return;
+            }
+            detalheDiv.innerHTML = '<div class="vazio">Carregando...</div>';
+            fetch(`/api/calibracao-odd/${indiceFaixa}`)
+                .then(r => r.json())
+                .then(itens => {
+                    CACHE_FAIXA_CALIBRACAO_ODD[indiceFaixa] = itens;
+                    renderizarTabelaFaixaEm(detalheDiv, itens);
+                });
+        }
+
+        // NOVO (26/08/2026): extraida de renderizarTabelaFaixa pra ser
+        // reaproveitada pelos dois cards (probabilidade e odd) - mesmo
+        // formato de tabela nos dois, so muda QUAL faixa alimentou os
+        // itens.
+        function renderizarTabelaFaixaEm(detalheDiv, itens) {
             if (!itens.length) {
                 detalheDiv.innerHTML = '<div class="vazio">Nenhuma recomendacao avaliada nessa faixa ainda.</div>';
                 return;
@@ -1885,6 +1959,133 @@ def buscar_detalhamento_faixa(cur, inicio_faixa):
     return [dict(zip(colunas, row)) for row in cur.fetchall()]
 
 
+# NOVO (26/08/2026): card separado de "Acertos e erros por LINHA DE ODD",
+# igual ao de probabilidade histórica em espírito, mas agrupando por
+# faixa de odd de 0.10 em 0.10 (ex: 1.30-1.40) em vez de faixa de
+# probabilidade - pedido explícito pra não misturar os dois cards.
+#
+# Faixas combinadas com Thales (26/08/2026):
+#   - piso: qualquer odd abaixo de 1.20 cai na mesma primeira faixa
+#     "1.10 - 1.20" (não existe faixa própria pra odd de 1.01 até 1.19,
+#     viraria uma faixa quase vazia isolada)
+#   - teto: qualquer odd a partir de 4.00 cai numa faixa só "4.00+"
+#     (aberta, sem limite superior) - odd alta é rara aqui, uma faixa por
+#     0.10 lá em cima ficaria com 0-1 amostra cada, sem informar nada
+#   - ORDEM: decrescente (odd mais alta primeiro), igual o card de
+#     probabilidade
+FAIXA_ODD_LARGURA = Decimal("0.10")
+INDICE_ODD_MINIMO = 11   # 1.10 * 10 - piso: tudo abaixo cai aqui também
+INDICE_ODD_TETO = 40     # 4.00 * 10 - teto: tudo a partir daqui cai aqui também
+
+
+def _indice_faixa_odd(odd_decimal):
+    """Índice inteiro da faixa de odd (largura 0.10). Trabalha em Decimal
+    o tempo todo, nunca converte pra float antes de bucketizar - odd é
+    NUMERIC(10,2) no banco, e binário não representa 0.1 exato (1.30 * 10
+    pode virar 12.999999999998 em float e cair na faixa errada). Decimal
+    com 2 casas não tem esse problema: 1.30 * 10 = 13.0 exato."""
+    indice = int((odd_decimal * 10).to_integral_value(rounding=ROUND_FLOOR))
+    if indice < INDICE_ODD_MINIMO:
+        return INDICE_ODD_MINIMO
+    if indice >= INDICE_ODD_TETO:
+        return INDICE_ODD_TETO
+    return indice
+
+
+def _rotular_faixa_odd(indice):
+    """Devolve (inicio, fim, rotulo) - fim é None na faixa-teto aberta
+    ('4.00+'), pra não ter que fazer aritmética condicional dentro do
+    Jinja (que fica ilegível pra concatenar string com condicional)."""
+    inicio_decimal = Decimal(indice) / Decimal(10)
+    inicio = f"{inicio_decimal:.2f}"
+    if indice >= INDICE_ODD_TETO:
+        return inicio, None, f"{inicio}+"
+    fim_decimal = inicio_decimal + FAIXA_ODD_LARGURA
+    fim = f"{fim_decimal:.2f}"
+    return inicio, fim, f"{inicio} - {fim}"
+
+
+def buscar_calibracao_odd(cur):
+    """Mesma ideia de buscar_calibracao, mas por LINHA DE ODD em vez de
+    probabilidade histórica - card separado em /historico, logo abaixo
+    do de probabilidade."""
+    cur.execute(
+        """
+        SELECT odd_oferecida, resultado, COUNT(*)
+        FROM historico_recomendacoes
+        WHERE resultado IN ('acertou', 'errou')
+        GROUP BY odd_oferecida, resultado
+        """
+    )
+    faixas = {}
+    for odd, resultado, contagem in cur.fetchall():
+        indice = _indice_faixa_odd(odd)
+        faixas.setdefault(indice, {"acertou": 0, "errou": 0})
+        faixas[indice][resultado] += contagem
+
+    detalhamento = []
+    for indice, dados in sorted(faixas.items(), reverse=True):
+        total = dados["acertou"] + dados["errou"]
+        taxa = round(100 * dados["acertou"] / total, 1) if total else 0.0
+        inicio, fim, rotulo = _rotular_faixa_odd(indice)
+        detalhamento.append({
+            "indice": indice,
+            "inicio": inicio,
+            "fim": fim,
+            "rotulo": rotulo,
+            "acertou": dados["acertou"],
+            "errou": dados["errou"],
+            "total": total,
+            "taxa": taxa,
+        })
+
+    melhor_faixa = None
+    for item in detalhamento:
+        if item["total"] == 0:
+            continue
+        if melhor_faixa is None or item["taxa"] > melhor_faixa["taxa"]:
+            melhor_faixa = {
+                "rotulo": item["rotulo"], "taxa": item["taxa"], "total": item["total"],
+            }
+
+    return {"detalhamento": detalhamento, "melhor_faixa": melhor_faixa}
+
+
+def buscar_detalhamento_faixa_odd(cur, indice_faixa):
+    """Detalhamento completo de uma faixa de odd específica - mesmo
+    formato de buscar_detalhamento_faixa, usado pelo endpoint AJAX do
+    card de linha de odd. Só individual (historico_recomendacoes) - não
+    entra nenhuma múltipla, igual o card de probabilidade."""
+    if indice_faixa >= INDICE_ODD_TETO:
+        condicao = "h.odd_oferecida >= %s"
+        params = (Decimal(INDICE_ODD_TETO) / Decimal(10),)
+    elif indice_faixa <= INDICE_ODD_MINIMO:
+        condicao = "h.odd_oferecida < %s"
+        params = (Decimal(INDICE_ODD_MINIMO) / Decimal(10) + FAIXA_ODD_LARGURA,)
+    else:
+        inicio_decimal = Decimal(indice_faixa) / Decimal(10)
+        fim_decimal = inicio_decimal + FAIXA_ODD_LARGURA
+        condicao = "h.odd_oferecida >= %s AND h.odd_oferecida < %s"
+        params = (inicio_decimal, fim_decimal)
+
+    cur.execute(
+        f"""
+        SELECT h.data_jogo, t.nome, j.adversario, h.descricao, h.casa_aposta,
+               h.odd_oferecida, h.probabilidade_historica, h.valor_esperado, h.resultado
+        FROM historico_recomendacoes h
+        JOIN jogos j ON j.id = h.jogo_id
+        JOIN times t ON t.id = j.nosso_time_id
+        WHERE h.resultado IN ('acertou', 'errou')
+          AND {condicao}
+        ORDER BY h.odd_oferecida DESC, h.id DESC
+        """,
+        params,
+    )
+    colunas = ["data_jogo", "nosso_time", "adversario", "descricao", "casa_aposta",
+               "odd_oferecida", "probabilidade_historica", "valor_esperado", "resultado"]
+    return [dict(zip(colunas, row)) for row in cur.fetchall()]
+
+
 # NOVO: piso de probabilidade histórica pra uma múltipla aparecer na lista
 # de "múltiplas em destaque" do /historico. Só controla ESSA lista - não
 # afeta a página principal (onde as odds são geradas, sem piso nenhum) nem
@@ -1983,6 +2184,7 @@ def historico():
         cur = conn.cursor()
         itens = buscar_historico(cur)
         calibracao = buscar_calibracao(cur)
+        calibracao_odd = buscar_calibracao_odd(cur)
         multiplas_destaque = buscar_multiplas_destaque(cur)
         resumo_multiplas = montar_resumo_multiplas(cur)
         multiplas_acertou = [c for c in multiplas_destaque if c["resultado"] == "acertou"]
@@ -2008,7 +2210,7 @@ def historico():
 
     return render_template_string(
         PAGINA_HISTORICO, acertos=acertos, erros=erros, pendentes=pendentes,
-        resumo=resumo, calibracao=calibracao,
+        resumo=resumo, calibracao=calibracao, calibracao_odd=calibracao_odd,
         multiplas_destaque=multiplas_destaque, resumo_multiplas=resumo_multiplas,
         multiplas_acertou=multiplas_acertou, multiplas_errou=multiplas_errou,
         multiplas_pendente=multiplas_pendente,
@@ -3432,6 +3634,27 @@ def api_calibracao_detalhamento(inicio_faixa):
     try:
         cur = conn.cursor()
         itens = buscar_detalhamento_faixa(cur, inicio_faixa)
+        cur.close()
+    finally:
+        conn.close()
+    for item in itens:
+        item["data_jogo"] = str(item["data_jogo"])
+        item["odd_oferecida"] = float(item["odd_oferecida"])
+        item["probabilidade_historica"] = float(item["probabilidade_historica"])
+        item["valor_esperado"] = float(item["valor_esperado"])
+    return jsonify(itens)
+
+
+@app.route("/api/calibracao-odd/<int:indice_faixa>")
+def api_calibracao_odd_detalhamento(indice_faixa):
+    """NOVO (26/08/2026): mesma ideia de api_calibracao_detalhamento, mas
+    pro card separado "Acertos e erros por linha de odd" - indice_faixa é
+    inteiro (1.30 vira 13), nunca a odd em si, pra não arriscar
+    arredondamento de float na URL."""
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        itens = buscar_detalhamento_faixa_odd(cur, indice_faixa)
         cur.close()
     finally:
         conn.close()
