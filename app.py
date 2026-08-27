@@ -1901,10 +1901,23 @@ def montar_resumo_multiplas(cur):
     somado com montar_resumo_historico(itens): essa lista é pré-filtrada
     (só as 5 melhores de cada jogo por probabilidade histórica), então é
     uma amostra enviesada pra cima - misturar com a taxa de acerto geral
-    daria um número mais bonito, mas enganoso."""
+    daria um número mais bonito, mas enganoso.
+
+    NOVO (26/08/2026 - correção de duplicata): uma combinação que cruza 2
+    jogos gera 2 LINHAS em historico_multiplas_destaque, de propósito (uma
+    por jogo - ver migrar_assinatura_multiplas_destaque.py). Sem isso, ela
+    contava 2x nesse resumo, inflando acertou/errou/taxa. `COUNT(DISTINCT
+    COALESCE(assinatura, 'id-'||id))` conta cada combinação UMA vez: linhas
+    com a MESMA assinatura colapsam numa só; linhas sem assinatura ainda
+    (não passaram pelo backfill) cada uma conta por si - nunca colide com
+    outra linha sem assinatura só porque as duas são NULL."""
     cur.execute(
-        "SELECT resultado, COUNT(*) FROM historico_multiplas_destaque "
-        "WHERE resultado IN ('acertou', 'errou') GROUP BY resultado"
+        """
+        SELECT resultado, COUNT(DISTINCT COALESCE(assinatura, 'id-' || id::text))
+        FROM historico_multiplas_destaque
+        WHERE resultado IN ('acertou', 'errou')
+        GROUP BY resultado
+        """
     )
     contagem = dict(cur.fetchall())
     acertou = contagem.get("acertou", 0)
@@ -1921,13 +1934,27 @@ def buscar_multiplas_destaque(cur):
     Só as linhas AINDA com detalhe completo aparecem como card (as
     comprimidas, fora da janela de rodadas recentes, não têm mais
     descrição/odd pra mostrar - elas só entram no resumo agregado de
-    montar_resumo_multiplas, lido direto do banco)."""
+    montar_resumo_multiplas, lido direto do banco).
+
+    NOVO (26/08/2026 - correção de duplicata): mesma correção de
+    montar_resumo_multiplas, aplicada à lista detalhada - DISTINCT ON
+    (COALESCE(assinatura, 'id-'||id)) devolve só UMA linha por combinação
+    real, mesmo que ela exista fisicamente 2x (cruzando 2 jogos). Escolhe
+    a linha de menor id como representante - tanto faz qual das 2, o
+    conteúdo (descrição/odd/jogos/probabilidade) é idêntico nas duas por
+    construção, o campo `jogos` já lista os jogos envolvidos."""
     cur.execute(
         """
         SELECT jogo_id, rodada, casa_aposta, descricao, odd_combinada, jogos,
                probabilidade_combinada, resultado
-        FROM historico_multiplas_destaque
-        WHERE casa_aposta IS NOT NULL
+        FROM (
+            SELECT DISTINCT ON (COALESCE(assinatura, 'id-' || id::text))
+                   jogo_id, rodada, casa_aposta, descricao, odd_combinada, jogos,
+                   probabilidade_combinada, resultado, id
+            FROM historico_multiplas_destaque
+            WHERE casa_aposta IS NOT NULL
+            ORDER BY COALESCE(assinatura, 'id-' || id::text), id
+        ) dedup
         ORDER BY probabilidade_combinada DESC
         """
     )
