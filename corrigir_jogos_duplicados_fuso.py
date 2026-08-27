@@ -108,16 +108,20 @@ def decidir_merge(cur, par):
         id_b: {"data_jogo": data_b, "datahora_jogo": datahora_b, "fixture_id_api": fixture_b, "total_ref": total_b, "detalhe": detalhe_b},
     }
 
-    # a sobrevivente herda data/fixture da perdedora só se a PERDEDORA tiver
-    # fixture_id_api real (positivo) e a sobrevivente não - confia no dado
-    # confirmado pela API-Football.
-    herdar_da_perdedora = dados[perdedora]["fixture_id_api"] > 0 and dados[sobrevivente]["fixture_id_api"] <= 0
+    # a sobrevivente herda o fixture_id_api real da perdedora quando ela
+    # tiver um (identidade confiável, sempre vale reaproveitar) - mas
+    # NUNCA herda data_jogo/datahora_jogo de lá. Caso real que provou
+    # isso (27/08/2026): a perdedora tinha fixture_id_api real E data
+    # ERRADA (30/08, quando o jogo é de verdade dia 29) - "ter o fixture
+    # confirmado" não significa "ter a data certa", são dois dados
+    # independentes que podem vir de fontes diferentes.
+    herdar_fixture_da_perdedora = dados[perdedora]["fixture_id_api"] > 0 and dados[sobrevivente]["fixture_id_api"] <= 0
 
     return {
         "sobrevivente": sobrevivente,
         "perdedora": perdedora,
         "dados": dados,
-        "herdar_da_perdedora": herdar_da_perdedora,
+        "herdar_fixture_da_perdedora": herdar_fixture_da_perdedora,
     }
 
 
@@ -138,16 +142,14 @@ def buscar_tabelas_que_referenciam_jogos(cur):
     return cur.fetchall()
 
 
-def mesclar(cur, sobrevivente, perdedora, herdar_da_perdedora, dados):
-    if herdar_da_perdedora:
-        cur.execute(
-            "UPDATE jogos SET data_jogo = %s, datahora_jogo = %s, fixture_id_api = %s WHERE id = %s",
-            (dados[perdedora]["data_jogo"], dados[perdedora]["datahora_jogo"],
-             dados[perdedora]["fixture_id_api"], sobrevivente),
-        )
-        print(f"  Sobrevivente #{sobrevivente} herdou data/fixture_id_api de #{perdedora} "
-              f"(era {dados[sobrevivente]['fixture_id_api']}, virou {dados[perdedora]['fixture_id_api']})")
-
+def mesclar(cur, sobrevivente, perdedora, herdar_fixture_da_perdedora, dados):
+    # CORRIGIDO (27/08/2026): a ordem importa. `fixture_id_api` tem
+    # constraint UNIQUE junto com `nosso_time_id` - tentar botar na
+    # sobrevivente o MESMO fixture_id_api que a perdedora ainda tem
+    # gravado bate de frente com essa trava (a perdedora só solta esse
+    # valor quando é apagada). Por isso a herança do fixture_id_api vai
+    # por ÚLTIMO agora, depois de reatribuir tudo e apagar a perdedora -
+    # não antes.
     tabelas = buscar_tabelas_que_referenciam_jogos(cur)
     for tabela, coluna in tabelas:
         cur.execute(f'UPDATE "{tabela}" SET "{coluna}" = %s WHERE "{coluna}" = %s', (sobrevivente, perdedora))
@@ -171,8 +173,19 @@ def mesclar(cur, sobrevivente, perdedora, herdar_da_perdedora, dados):
     if cur.rowcount:
         print(f"    reatribuído: {cur.rowcount} linha(s) em apostas_salvas.pernas (JSONB)")
 
+    fixture_a_herdar = dados[perdedora]["fixture_id_api"]
+
     cur.execute("DELETE FROM jogos WHERE id = %s", (perdedora,))
     print(f"  Apagado: jogo #{perdedora} (perdedora, já sem referências)")
+
+    if herdar_fixture_da_perdedora:
+        cur.execute(
+            "UPDATE jogos SET fixture_id_api = %s WHERE id = %s",
+            (fixture_a_herdar, sobrevivente),
+        )
+        print(f"  Sobrevivente #{sobrevivente} herdou fixture_id_api de #{perdedora} "
+              f"(era {dados[sobrevivente]['fixture_id_api']}, virou {fixture_a_herdar}). "
+              f"Data/hora do sobrevivente NÃO foi tocada (fica {dados[sobrevivente]['data_jogo']}).")
 
 
 def fase_verificar():
@@ -194,8 +207,8 @@ def fase_verificar():
                   f"fixture_id_api={dados[s]['fixture_id_api']}, data={dados[s]['data_jogo']})")
             print(f"  Perdedora:    #{p}  (refs: {dados[p]['detalhe']}, total={dados[p]['total_ref']}, "
                   f"fixture_id_api={dados[p]['fixture_id_api']}, data={dados[p]['data_jogo']})")
-            if plano["herdar_da_perdedora"]:
-                print(f"  -> sobrevivente vai herdar data/fixture_id_api de #{p} (fixture real confirmado lá)")
+            if plano["herdar_fixture_da_perdedora"]:
+                print(f"  -> sobrevivente vai herdar SÓ o fixture_id_api de #{p} (data/hora não muda)")
             print()
 
         print("Se fizer sentido, rode: python corrigir_jogos_duplicados_fuso.py aplicar")
@@ -222,7 +235,7 @@ def fase_aplicar():
         for par in pares:
             plano = decidir_merge(cur, par)
             print(f"\nMesclando #{plano['perdedora']} -> #{plano['sobrevivente']}:")
-            mesclar(cur, plano["sobrevivente"], plano["perdedora"], plano["herdar_da_perdedora"], plano["dados"])
+            mesclar(cur, plano["sobrevivente"], plano["perdedora"], plano["herdar_fixture_da_perdedora"], plano["dados"])
 
         conn.commit()
         print(f"\n✅ Concluído e commitado. {len(pares)} par(es) mesclado(s).")
