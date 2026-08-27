@@ -419,6 +419,20 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
     mandante_id = get_or_create_time(cur, mandante_oddspapi_id, mandante_nome)
     visitante_id = get_or_create_time(cur, visitante_oddspapi_id, visitante_nome)
 
+    # CORRIGIDO (27/08/2026): `adversario` (o texto que vira jogos.adversario)
+    # antes vinha CRU de quem chamou essa função - às vezes texto da OddsPapi
+    # ("Sao Paulo FC SP"), às vezes de outro lugar. Quando o adversário
+    # TAMBÉM é time rastreado, a linha da perspectiva DELE grava o nome dele
+    # via `times.nome` ("Sao Paulo") - textos diferentes pro MESMO time,
+    # dependendo de qual perspectiva criou a linha primeiro. Isso quebrava o
+    # agrupamento por nome do card "Jogos disponíveis" (que junta as duas
+    # perspectivas comparando o par de nomes) - o mesmo jogo real virava 2
+    # cards. Corrigido usando SEMPRE o nome canônico de `times.nome` (já
+    # resolvido acima via mandante_id/visitante_id), nunca o texto cru.
+    adversario_id_canonico = visitante_id if mandante else mandante_id
+    cur.execute("SELECT nome FROM times WHERE id = %s", (adversario_id_canonico,))
+    adversario_canonico = cur.fetchone()[0]
+
     cur.execute(
         "SELECT id, arbitro, datahora_jogo FROM jogos "
         "WHERE data_jogo = %s AND mandante_id = %s AND visitante_id = %s AND nosso_time_id = %s",
@@ -481,7 +495,7 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
                                        arbitro, mandante_id, visitante_id)
                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
                 (fixture_id_real, fixture_id_real, nosso_time_id, data_jogo, datahora_jogo,
-                 adversario, mandante, "Brasileirão Série A",
+                 adversario_canonico, mandante, "Brasileirão Série A",
                  arbitro, mandante_id, visitante_id),
             )
             return cur.fetchone()[0]
@@ -490,9 +504,34 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
             print(f"  Aviso: ID real {fixture_id_real} já em uso por outro registro - "
                   "criando esse jogo com ID automático (verificar depois se não duplicou).")
 
+    # NOVO (27/08/2026): antes de gerar um fixture_id sintético, verifica se
+    # a OUTRA perspectiva desse mesmo jogo real já existe (o adversário
+    # também pode ser time rastreado, e essa linha dele pode ter sido criada
+    # antes - num run anterior, ou mais cedo nesse mesmo run). Se existir,
+    # reaproveita o fixture_id_api DELA em vez de sortear um novo - real ou
+    # sintético, tanto faz, só precisa ser o MESMO nas duas linhas, porque é
+    # a identidade usada pra travar múltipla com pernas contraditórias do
+    # mesmo jogo (`chave_mercado_da_perna`, ver seção 11-B da
+    # documentação). Sem isso, as duas perspectivas do mesmo jogo real
+    # podiam nascer com fixture_id_api DIFERENTE (uma real confirmada pela
+    # API-Football, outra sintética por azar de timing) - a trava contra
+    # pernas contraditórias não reconhecia que era o mesmo jogo.
+    if fixture_id_real is None:
+        cur.execute(
+            "SELECT fixture_id_api FROM jogos "
+            "WHERE data_jogo = %s AND mandante_id = %s AND visitante_id = %s AND nosso_time_id != %s",
+            (data_jogo, mandante_id, visitante_id, nosso_time_id),
+        )
+        outra_perspectiva = cur.fetchone()
+        if outra_perspectiva:
+            fixture_id_real = outra_perspectiva[0]
+            print(f"  Reaproveitando fixture_id_api {fixture_id_real} da outra perspectiva "
+                  "desse mesmo jogo real.")
+
     # NOVO: fixture_id_api é obrigatório agora - se a API-Football não
     # confirmou o fixture real (ex: chave ausente, falha de rede, ou o
-    # jogo ainda nem apareceu na agenda da API-Football), usa um valor
+    # jogo ainda nem apareceu na agenda da API-Football) E a outra
+    # perspectiva também não existe ainda pra reaproveitar, usa um valor
     # sintético NEGATIVO (nunca colide com um fixture_id real, que é
     # sempre positivo) só pra não violar a coluna obrigatória.
     #
@@ -514,7 +553,7 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
                                adversario, mandante, competicao, arbitro,
                                mandante_id, visitante_id)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-        (fixture_id_para_salvar, nosso_time_id, data_jogo, datahora_jogo, adversario, mandante,
+        (fixture_id_para_salvar, nosso_time_id, data_jogo, datahora_jogo, adversario_canonico, mandante,
          "Brasileirão Série A", arbitro, mandante_id, visitante_id),
     )
     return cur.fetchone()[0]
