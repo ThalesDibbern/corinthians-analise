@@ -44,6 +44,16 @@ candidata fica pronta, os jogos dela têm o "top-5 por probabilidade
 histórica" recalculado em `historico_multiplas_destaque` - substitui a
 página /historico, que antes recalculava tudo ao vivo a cada acesso.
 
+NOVO (26/08/2026): `selecionar_top5_do_jogo` agora também grava a
+`assinatura` de cada combinação (vinda de `multiplas_candidatas.
+assinatura`, a identidade estável de cada múltipla) em
+`historico_multiplas_destaque`. A ESCRITA continua gerando 2 linhas pra
+uma combinação que cruza 2 jogos (decisão consciente, mantida) - só a
+LEITURA em app.py passa a deduplicar usando essa coluna, corrigindo a
+combinação aparecer 2x na lista de /historico e contar 2x no resumo
+agregado. Precisa da migração migrar_assinatura_multiplas_destaque.py
+rodada ANTES.
+
 Variáveis de ambiente:
   - DATABASE_URL -> a URL de conexão do Postgres (mesma usada nos outros scripts)
 """
@@ -240,7 +250,7 @@ def selecionar_top5_do_jogo(cur, jogo_id):
 
     cur.execute(
         """
-        SELECT casa_aposta, descricao, odd_combinada, jogos, probabilidade_combinada, resultado
+        SELECT assinatura, casa_aposta, descricao, odd_combinada, jogos, probabilidade_combinada, resultado
         FROM multiplas_candidatas
         WHERE avaliada = TRUE AND jogos @> %s::jsonb
         ORDER BY probabilidade_combinada DESC
@@ -255,15 +265,15 @@ def selecionar_top5_do_jogo(cur, jogo_id):
     rodada = row[0] if row else None
 
     cur.execute("DELETE FROM historico_multiplas_destaque WHERE jogo_id = %s", (jogo_id,))
-    for casa, descricao, odd, jogos, prob, resultado in top5:
+    for assinatura, casa, descricao, odd, jogos, prob, resultado in top5:
         cur.execute(
             """
             INSERT INTO historico_multiplas_destaque
                 (jogo_id, rodada, casa_aposta, descricao, odd_combinada, jogos,
-                 probabilidade_combinada, resultado)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 probabilidade_combinada, resultado, assinatura)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (jogo_id, rodada, casa, descricao, odd, json.dumps(jogos, default=str), prob, resultado),
+            (jogo_id, rodada, casa, descricao, odd, json.dumps(jogos, default=str), prob, resultado, assinatura),
         )
     return len(top5)
 
