@@ -452,6 +452,35 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
         )
         row = cur.fetchone()
 
+    if not row:
+        # NOVO (27/08/2026): fecha a lacuna que causou o caso RB Bragantino
+        # x São Paulo - as duas buscas acima exigem `data_jogo` EXATA. Se
+        # esse mesmo jogo real já existe no banco com uma data 1 dia pra
+        # mais ou pra menos (a OddsPapi e a API-Football podem divergir -
+        # não é só fuso, um dos dois pode estar com dado velho de antes de
+        # um reagendamento), a busca por data exata não encontra e o
+        # código cai pra baixo e CRIA UM JOGO NOVO, duplicado. Antes de
+        # criar, procura por essa janela de 1 dia - se achar, reaproveita
+        # o jogo existente (sem duplicar) e SÓ AVISA da divergência, sem
+        # decidir sozinho qual data está certa (não dá pra saber por
+        # código qual das duas fontes está desatualizada - fica pra
+        # checagem manual).
+        cur.execute(
+            "SELECT id, arbitro, datahora_jogo, data_jogo FROM jogos "
+            "WHERE mandante_id = %s AND visitante_id = %s AND nosso_time_id = %s "
+            "AND data_jogo BETWEEN %s - INTERVAL '1 day' AND %s + INTERVAL '1 day'",
+            (mandante_id, visitante_id, nosso_time_id, data_jogo, data_jogo),
+        )
+        row_proximo = cur.fetchone()
+        if row_proximo:
+            jogo_id, arbitro_salvo, datahora_salva, data_salva = row_proximo
+            if data_salva != data_jogo:
+                print(f"  ⚠️  Jogo #{jogo_id} já existe com data {data_salva}, mas essa chamada "
+                      f"calculou {data_jogo} pro mesmo confronto - reaproveitando o jogo #{jogo_id} "
+                      "SEM criar duplicata. Data NÃO alterada automaticamente (não dá pra saber por "
+                      "código qual fonte está certa) - checar na mão qual data é a real.")
+            row = (jogo_id, arbitro_salvo, datahora_salva)
+
     if row:
         jogo_id, arbitro_salvo, datahora_salva = row
         if arbitro_salvo is None:
