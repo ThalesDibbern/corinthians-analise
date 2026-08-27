@@ -3007,6 +3007,39 @@ PAGINA_ROI = """
         .btn-salvar-odd { background: #238636; color: white; }
         .btn-salvar-odd:disabled { background: #21262d; color: #8b949e; cursor: not-allowed; }
 
+        /* NOVO (26/08/2026): seletor de jogo por rodada (segundo modal,
+           por cima do Criador de Odd) - substitui o <select> achatado com
+           todo jogo da janela de -45/+30 dias misturado. */
+        .modal-caixa-jogos { max-width: 640px; }
+        .jogo-escolhido-box {
+            display: flex; justify-content: space-between; align-items: center; gap: 10px;
+            background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+            padding: 9px 12px; font-size: 0.85rem;
+        }
+        .jogo-escolhido-trocar {
+            color: #58a6ff; cursor: pointer; font-size: 0.78rem; flex-shrink: 0;
+            white-space: nowrap;
+        }
+        .lista-rodadas-jogo { max-height: 58vh; overflow-y: auto; margin-top: 4px; }
+        .rodada-jogo-item {
+            border: 1px solid #21262d; border-radius: 10px; margin-bottom: 8px; overflow: hidden;
+        }
+        .rodada-jogo-cabecalho {
+            padding: 12px 14px; cursor: pointer; display: flex; justify-content: space-between;
+            align-items: center; background: #161b22;
+        }
+        .rodada-jogo-cabecalho:hover { background: #1c2129; }
+        .rodada-jogo-titulo { font-weight: 700; font-size: 0.88rem; }
+        .rodada-jogo-periodo { color: #8b949e; font-size: 0.78rem; }
+        .rodada-jogo-lista { display: none; padding: 6px 10px 10px; }
+        .rodada-jogo-lista.aberta { display: block; }
+        .jogo-escolher-item {
+            padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+            display: flex; justify-content: space-between; gap: 10px;
+        }
+        .jogo-escolher-item:hover { background: #1f6feb22; }
+        .jogo-escolher-item span:last-child { color: #8b949e; font-size: 0.78rem; white-space: nowrap; }
+
         .cartao {
             background: #161b22; border: 1px solid #30363d; border-radius: 12px;
             padding: 16px 20px; margin-bottom: 12px;
@@ -3143,7 +3176,11 @@ PAGINA_ROI = """
         }
 
         // NOVO (Criador de Odd) --------------------------------------------
-        const JOGOS_CRIADOR_ODD = {{ jogos_criador_odd|tojson }};
+        const RODADAS_CRIADOR_ODD = {{ jogos_criador_odd|tojson }};
+        // Achatado a partir de RODADAS_CRIADOR_ODD - mantém o mesmo formato
+        // que o resto do código já espera (adicionarPernaCriadorOdd faz
+        // JOGOS_CRIADOR_ODD.find(...) por id, sem se importar com rodada).
+        const JOGOS_CRIADOR_ODD = RODADAS_CRIADOR_ODD.flatMap(r => r.jogos);
         const MERCADOS_CRIADOR_ODD = {
             "cartao": {"label": "Cartão de Jogador", "jogador": true, "modo": "binario"},
             "impedimento": {"label": "Impedimento (Jogador)", "jogador": true, "modo": "binario"},
@@ -3160,10 +3197,8 @@ PAGINA_ROI = """
         let pernasCriadorOdd = [];
 
         function abrirCriadorOdd() {
-            const selectJogo = document.getElementById('criador-odd-jogo');
-            selectJogo.innerHTML = JOGOS_CRIADOR_ODD.map(j =>
-                `<option value="${j.id}">${j.data_jogo} · ${j.nosso_time} x ${j.adversario}</option>`
-            ).join('');
+            document.getElementById('criador-odd-jogo').value = '';
+            document.getElementById('criador-odd-jogo-label').textContent = 'Nenhum jogo escolhido';
 
             const selectMercado = document.getElementById('criador-odd-mercado');
             selectMercado.innerHTML = Object.entries(MERCADOS_CRIADOR_ODD).map(([chave, m]) =>
@@ -3176,12 +3211,60 @@ PAGINA_ROI = """
             document.getElementById('criador-odd-valor').value = '';
             document.getElementById('criador-odd-odd').value = '';
             atualizarCamposCriadorOdd();
-            atualizarJogadoresCriadorOdd();
             document.getElementById('modal-criador-odd').classList.add('aberto');
         }
 
         function fecharCriadorOdd() {
             document.getElementById('modal-criador-odd').classList.remove('aberto');
+        }
+
+        // NOVO (26/08/2026): segundo modal, por cima do Criador de Odd -
+        // lista as rodadas (rótulo + período de datas), cada uma
+        // expansível pra ver os jogos dela. Escolher um jogo fecha esse
+        // modal e volta pro Criador de Odd já com o jogo marcado.
+        function abrirEscolherJogo() {
+            const container = document.getElementById('lista-rodadas-jogo');
+            container.innerHTML = RODADAS_CRIADOR_ODD.map((r, idx) => `
+                <div class="rodada-jogo-item">
+                    <div class="rodada-jogo-cabecalho" onclick="toggleRodadaJogo(${idx})">
+                        <span class="rodada-jogo-titulo">${escaparHtmlCriadorOdd(r.rotulo)}</span>
+                        <span class="rodada-jogo-periodo">${escaparHtmlCriadorOdd(r.periodo)}</span>
+                    </div>
+                    <div class="rodada-jogo-lista" id="rodada-jogo-lista-${idx}">
+                        ${r.jogos.map(j => `
+                            <div class="jogo-escolher-item" onclick="selecionarJogoCriadorOdd(${j.id})">
+                                <span>${escaparHtmlCriadorOdd(j.nosso_time)} x ${escaparHtmlCriadorOdd(j.adversario)}</span>
+                                <span>${j.data_jogo}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+            document.getElementById('modal-escolher-jogo').classList.add('aberto');
+        }
+
+        function fecharEscolherJogo() {
+            document.getElementById('modal-escolher-jogo').classList.remove('aberto');
+        }
+
+        function toggleRodadaJogo(idx) {
+            document.getElementById('rodada-jogo-lista-' + idx).classList.toggle('aberta');
+        }
+
+        function selecionarJogoCriadorOdd(jogoId) {
+            const jogo = JOGOS_CRIADOR_ODD.find(j => String(j.id) === String(jogoId));
+            document.getElementById('criador-odd-jogo').value = jogoId;
+            document.getElementById('criador-odd-jogo-label').textContent = jogo
+                ? `${jogo.data_jogo} \u00b7 ${jogo.nosso_time} x ${jogo.adversario}`
+                : ('Jogo #' + jogoId);
+            fecharEscolherJogo();
+            atualizarJogadoresCriadorOdd();
+        }
+
+        function escaparHtmlCriadorOdd(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
         }
 
         function atualizarCamposCriadorOdd() {
@@ -3206,6 +3289,10 @@ PAGINA_ROI = """
             if (!mercado.jogador) return;
             const jogoId = document.getElementById('criador-odd-jogo').value;
             const selectJogador = document.getElementById('criador-odd-jogador');
+            if (!jogoId) {
+                selectJogador.innerHTML = '<option value="">Escolhe um jogo primeiro</option>';
+                return;
+            }
             selectJogador.innerHTML = '<option>Carregando...</option>';
             fetch(`/api/jogadores-jogo/${jogoId}`)
                 .then(r => r.json())
@@ -3217,6 +3304,10 @@ PAGINA_ROI = """
 
         function adicionarPernaCriadorOdd() {
             const jogoId = document.getElementById('criador-odd-jogo').value;
+            if (!jogoId) {
+                alert('Escolhe um jogo primeiro.');
+                return;
+            }
             const jogoInfo = JOGOS_CRIADOR_ODD.find(j => String(j.id) === String(jogoId));
             const tipoPadrao = document.getElementById('criador-odd-mercado').value;
             const mercado = MERCADOS_CRIADOR_ODD[tipoPadrao];
@@ -3301,7 +3392,11 @@ PAGINA_ROI = """
 
             <div class="modal-campo">
                 <label>Jogo</label>
-                <select id="criador-odd-jogo" onchange="atualizarJogadoresCriadorOdd()"></select>
+                <div class="jogo-escolhido-box">
+                    <span id="criador-odd-jogo-label">Nenhum jogo escolhido</span>
+                    <span class="jogo-escolhido-trocar" onclick="abrirEscolherJogo()">Escolher jogo</span>
+                </div>
+                <input type="hidden" id="criador-odd-jogo">
             </div>
             <div class="modal-campo">
                 <label>Mercado</label>
@@ -3348,6 +3443,18 @@ PAGINA_ROI = """
             <div class="modal-botoes-finais">
                 <button type="button" class="btn-fechar-modal" onclick="fecharCriadorOdd()">Cancelar</button>
                 <button type="button" class="btn-salvar-odd" id="btn-salvar-criador-odd" onclick="salvarCriadorOdd()" disabled>💾 Salvar aposta</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modal-escolher-jogo" style="z-index: 1100;">
+        <div class="modal-caixa modal-caixa-jogos">
+            <h2>🗓️ Escolher jogo</h2>
+            <p class="modal-sub">Jogos da temporada atual, organizados por rodada. Clica numa rodada pra ver
+                os jogos dela.</p>
+            <div class="lista-rodadas-jogo" id="lista-rodadas-jogo"></div>
+            <div class="modal-botoes-finais">
+                <button type="button" class="btn-fechar-modal" onclick="fecharEscolherJogo()">Fechar</button>
             </div>
         </div>
     </div>
@@ -3796,26 +3903,75 @@ def buscar_movimentos_banca(cur, usuario_id, limite=20):
     return [dict(zip(colunas, row)) for row in cur.fetchall()]
 
 
-def buscar_jogos_para_criador_odd(cur):
-    """NOVO (Criador de Odd): jogos dos times rastreados, numa janela
-    razoável em torno de "agora" (45 dias pra trás, 30 pra frente) - usado
-    no seletor de jogo do popup. Não lista TODOS os jogos já coletados
-    (seriam milhares, com 10 times x 5 temporadas) - só uma janela prática
-    que cobre tanto uma aposta recente (já feita, só precisa ser anotada)
-    quanto um jogo que ainda vai acontecer."""
+_MESES_PT = {
+    1: "janeiro", 2: "fevereiro", 3: "março", 4: "abril", 5: "maio", 6: "junho",
+    7: "julho", 8: "agosto", 9: "setembro", 10: "outubro", 11: "novembro", 12: "dezembro",
+}
+
+
+def _periodo_datas_rodada(datas):
+    """Formata a janela de datas de uma rodada ('27 a 30 de outubro') a
+    partir de uma lista de datetime.date já ordenada. Rodada de 1 jogo só
+    (ou todos no mesmo dia) mostra só a data única; janela cruzando meses
+    diferentes escreve o mês nas duas pontas."""
+    if not datas:
+        return ""
+    primeira, ultima = datas[0], datas[-1]
+    if primeira == ultima:
+        return f"{primeira.day} de {_MESES_PT[primeira.month]}"
+    if primeira.month == ultima.month:
+        return f"{primeira.day} a {ultima.day} de {_MESES_PT[ultima.month]}"
+    return f"{primeira.day} de {_MESES_PT[primeira.month]} a {ultima.day} de {_MESES_PT[ultima.month]}"
+
+
+def buscar_rodadas_para_criador_odd(cur):
+    """NOVO (Criador de Odd, 26/08/2026): jogos da TEMPORADA ATUAL dos
+    times rastreados, agrupados por rodada - substitui a janela de -45/
+    +30 dias que jogava tudo achatado num <select> só (quase impossível
+    de achar o jogo certo, especialmente com jogo futuro sem nada a ver
+    com o que a pessoa queria anotar misturado junto).
+
+    Usa `jogos.rodada_numero` (coluna já pronta, extraída pelo
+    popular_banco.py a partir do texto da API - não precisa reparsear
+    aqui). Escopado no ANO CORRENTE, não no histórico completo: rodada é
+    numerada de 1 a 38 TODO ano, então sem esse corte a rodada 20 de 2022
+    colidiria com a rodada 20 de 2026 no agrupamento."""
     cur.execute(
         """
-        SELECT j.id, t.nome, j.adversario, j.data_jogo
+        SELECT j.id, j.rodada, j.rodada_numero, t.nome, j.adversario, j.data_jogo
         FROM jogos j
         JOIN times t ON t.id = j.nosso_time_id
-        WHERE j.data_jogo BETWEEN CURRENT_DATE - INTERVAL '45 days' AND CURRENT_DATE + INTERVAL '30 days'
-        ORDER BY j.data_jogo DESC
+        WHERE EXTRACT(YEAR FROM j.data_jogo) = EXTRACT(YEAR FROM CURRENT_DATE)
+        ORDER BY j.data_jogo
         """
     )
-    return [
-        {"id": row[0], "nosso_time": row[1], "adversario": row[2], "data_jogo": str(row[3])}
-        for row in cur.fetchall()
-    ]
+
+    grupos = {}
+    for jogo_id, rodada_texto, rodada_numero, nosso_time, adversario, data_jogo in cur.fetchall():
+        chave = rodada_numero if rodada_numero is not None else (rodada_texto or "_sem_rodada_")
+        grupo = grupos.setdefault(chave, {
+            "rodada_numero": rodada_numero, "rodada_texto": rodada_texto, "datas": [], "jogos": [],
+        })
+        grupo["datas"].append(data_jogo)
+        grupo["jogos"].append({
+            "id": jogo_id, "nosso_time": nosso_time, "adversario": adversario, "data_jogo": str(data_jogo),
+        })
+
+    rodadas = []
+    for grupo in grupos.values():
+        if grupo["rodada_numero"] is not None:
+            rotulo = f"Rodada {grupo['rodada_numero']}"
+        else:
+            rotulo = grupo["rodada_texto"] or "Sem rodada identificada"
+        rodadas.append({
+            "rodada_numero": grupo["rodada_numero"],
+            "rotulo": rotulo,
+            "periodo": _periodo_datas_rodada(sorted(grupo["datas"])),
+            "jogos": grupo["jogos"],  # já vêm ordenados por data_jogo (ORDER BY da query)
+        })
+
+    rodadas.sort(key=lambda r: (r["rodada_numero"] is None, -(r["rodada_numero"] or 0)))
+    return rodadas
 
 
 @app.route("/api/jogadores-jogo/<int:jogo_id>")
@@ -4034,7 +4190,7 @@ def minhas_apostas():
         apostas = buscar_apostas_salvas(cur, session["usuario_id"])
         banca_atual = buscar_banca(cur, session["usuario_id"])
         movimentos_banca = buscar_movimentos_banca(cur, session["usuario_id"])
-        jogos_criador_odd = buscar_jogos_para_criador_odd(cur)
+        rodadas_criador_odd = buscar_rodadas_para_criador_odd(cur)
         cur.close()
     finally:
         conn.close()
@@ -4076,7 +4232,7 @@ def minhas_apostas():
         PAGINA_ROI, resumo=resumo, apostas=apostas,
         pontos_grafico=pontos_grafico, svg_grafico=svg_grafico,
         banca_atual=round(banca_atual, 2), movimentos_banca=movimentos_banca,
-        jogos_criador_odd=jogos_criador_odd,
+        jogos_criador_odd=rodadas_criador_odd,
         nav_html=barra_navegacao("roi", round(banca_atual, 2)),
     )
 
