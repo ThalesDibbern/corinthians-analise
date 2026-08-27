@@ -42,6 +42,7 @@ import os
 import re
 import time
 import json
+import random
 from datetime import datetime, timezone
 
 import requests
@@ -490,10 +491,23 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
                   "criando esse jogo com ID automático (verificar depois se não duplicou).")
 
     # NOVO: fixture_id_api é obrigatório agora - se a API-Football não
-    # confirmou o fixture real (ex: chave ausente, falha de rede), usa um
-    # valor sintético negativo (nunca colide com um fixture_id real, que é
+    # confirmou o fixture real (ex: chave ausente, falha de rede, ou o
+    # jogo ainda nem apareceu na agenda da API-Football), usa um valor
+    # sintético NEGATIVO (nunca colide com um fixture_id real, que é
     # sempre positivo) só pra não violar a coluna obrigatória.
-    fixture_id_para_salvar = fixture_id_real if fixture_id_real is not None else -int(time.time() * 1000)
+    #
+    # CORRIGIDO (27/08/2026): a versão anterior usava
+    # `-int(time.time() * 1000)` (milissegundos) - só que `fixture_id_api`
+    # é `integer` (INT4) no banco, que vai só até ~2,147,483,647. Época
+    # atual em milissegundos já tem 13 dígitos (~1.777 TRILHÃO), estourando
+    # o tipo na hora do INSERT ("integer out of range") e derrubando o
+    # script inteiro (e, por consequência, todo o resto do cron -
+    # motor_padroes, motor_recomendacoes etc. não rodavam também). Trocado
+    # por um inteiro negativo ALEATÓRIO dentro de uma faixa que cabe com
+    # folga em INT4 - não precisa codificar tempo nenhum, só precisa ser
+    # negativo (nunca colide com fixture real) e praticamente impossível
+    # de colidir entre si (1 em 2 bilhões).
+    fixture_id_para_salvar = fixture_id_real if fixture_id_real is not None else -random.randint(1, 2_000_000_000)
 
     cur.execute(
         """INSERT INTO jogos (fixture_id_api, nosso_time_id, data_jogo, datahora_jogo,
