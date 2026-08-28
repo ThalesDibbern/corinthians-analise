@@ -351,6 +351,49 @@ JOGOS_MINIMOS_ESCANTEIO_POR_LADO = 15
 # que o TIME tenha histórico completo. Ver _deve_suavizar_pela_amostra.
 JOGOS_MINIMOS_AMOSTRA_CONFIAVEL = 30
 
+# NOVO (28/08/2026 - confronto direto como PRIOR, não como substituto)
+# ---------------------------------------------------------------------
+# Peso do padrão geral do time, em "jogos equivalentes", quando o
+# confronto direto é combinado com ele em vez de simplesmente substituí-lo.
+#
+# O DEFEITO QUE ISSO CORRIGE: a escada do confronto direto era
+# `confronto -> geral -> média do time`, ou seja SUBSTITUIÇÃO. Um confronto
+# de 7 jogos derrubava por completo os 138 jogos de histórico do time - e os
+# 7 já estavam DENTRO dos 138. Não era informação nova sendo somada, era um
+# recorte pequeno vetando o conjunto inteiro.
+#
+# Caso medido (Cruzeiro x Vasco, 27/08/2026, "Mais de 8.5 escanteios"):
+#   - confronto direto: 7 de 7 jogos acima da linha -> 88,9% suavizado
+#     -> 96,9% depois da correlação. O sistema exibia 97%.
+#   - a base inteira: Cruzeiro 71,0% (138 jogos), Vasco 61,3% (137 jogos)
+#   Ou seja: a resposta honesta era ~63-70%, não 97%. Sete jogos seguidos
+#   acima da linha, com taxa real de ~63%, acontecem por acaso em ~4% dos
+#   pares - e com 190 pares de times x 6 linhas, sequências assim aparecem
+#   às dezenas (medido: 80+ linhas com frequência 100% e n=5 na base).
+#
+# COMO FUNCIONA: em vez de Laplace puxar a frequência pra 50% (um prior
+# arbitrário que quase nunca é a resposta certa), o confronto é encolhido
+# em direção ao PADRÃO GERAL DO PRÓPRIO TIME naquela linha:
+#
+#     P = (acertos_confronto + k * freq_geral) / (n_confronto + k)
+#
+# Quando n_confronto == k, os dois pesam igual; abaixo disso o geral
+# domina, acima o confronto assume - de forma contínua, sem degrau. Isso
+# generaliza a suavização de Laplace, que é exatamente este formato com
+# k=2 e freq_geral=50%.
+#
+# POR QUE 10: dois times se enfrentam ~2x por temporada, então k=10
+# significa que o confronto só empata com o geral depois de ~5 temporadas
+# de confrontos. Conservador de propósito - na rodada de 22-24/08 o
+# confronto direto em escanteio_total deu gap de -19,9 (40,5% observado
+# contra 60,4% previsto, 37 recomendações), contra +1,5 do grupo SEM
+# confronto direto (78 recomendações). O mecanismo nunca demonstrou
+# vantagem neste mercado; até que demonstre, entra com peso pequeno.
+#
+# ESCOLHIDO COMO CONSTANTE de propósito: calibrar k depois é trocar um
+# número, não reescrever lógica.
+PESO_PRIOR_CONFRONTO_DIRETO = 10
+
 
 def carregar_total_jogos_por_time(cur):
     """NOVO (suavização): conta quantos jogos JÁ CONCLUÍDOS cada time tem,
@@ -413,6 +456,39 @@ def _frequencia_do_row(row, suavizar):
     jogos = int(jogos)
     acertos = frequencia / 100 * jogos
     return round(100 * (acertos + 1) / (jogos + 2), 2)
+
+
+def _encolher_para_prior(frequencia_confronto, jogos_confronto, frequencia_geral):
+    """NOVO (28/08/2026): combina a frequência do confronto direto com a
+    frequência geral do time, ponderando pelo tamanho da amostra do
+    confronto - ver PESO_PRIOR_CONFRONTO_DIRETO pro diagnóstico completo.
+
+        P = (acertos_confronto + k * freq_geral) / (n_confronto + k)
+
+    onde acertos_confronto = freq_confronto/100 * n_confronto.
+
+    É a mesma forma da suavização de Laplace `(a+1)/(n+2)`, só que
+    encolhendo em direção ao padrão real do time em vez de 50%. Vantagens
+    sobre subir o piso de amostra (a alternativa considerada e descartada):
+
+      - nenhum confronto é DESCARTADO, só entra com o peso que merece.
+        Isso importa pros times que sobem e descem entre Série A e B
+        (Coritiba, Vitória, Santos, Mirassol...), que têm histórico
+        picotado: um piso de 8 jogos zerava o confronto direto deles por
+        completo (medido), enquanto aqui eles continuam contando.
+      - a transição é contínua: um confronto de 12 jogos pesa mais que um
+        de 7, que pesa mais que um de 5, sem degrau arbitrário.
+
+    Com jogos_confronto = 0 não há o que combinar - devolve o prior."""
+    if not jogos_confronto:
+        return round(frequencia_geral, 2)
+
+    acertos = frequencia_confronto / 100 * jogos_confronto
+    combinado = (
+        (acertos + PESO_PRIOR_CONFRONTO_DIRETO * frequencia_geral / 100)
+        / (jogos_confronto + PESO_PRIOR_CONFRONTO_DIRETO)
+    )
+    return round(100 * combinado, 2)
 
 
 def _deve_suavizar_pela_amostra(row, suavizar_por_time):
@@ -766,6 +842,17 @@ def buscar_frequencia_confronto(cur, nosso_time_id, adversario_id, mandante_filt
     confronto - hoje sempre Corinthians), pra não colidir com o confronto
     do mesmo adversário visto de outro time no futuro.
 
+    ⚠️ NOVO (28/08/2026): esta função virou um WRAPPER de
+    `buscar_confronto_detalhado`. Ela mantém o comportamento antigo
+    (confronto SUBSTITUI o padrão geral, suavizado por Laplace em direção
+    a 50%) e é usada por cartao_total, cartao_time e resultado_final.
+    `escanteio_total` NÃO usa mais esta função - lá o confronto é
+    encolhido em direção ao padrão geral do time (ver
+    PESO_PRIOR_CONFRONTO_DIRETO), porque foi o único mercado onde o
+    defeito da substituição foi medido de verdade. Se/quando o mesmo for
+    medido nos outros 3, é só trocar a chamada deles pela versão
+    detalhada.
+
     NOVO (21/08/2026 - suavização SEMPRE ativa aqui): o parâmetro
     `suavizar` recebido é IGNORADO de propósito - confronto direto é
     sempre suavizado, independente do tamanho do histórico do time.
@@ -811,6 +898,33 @@ def buscar_frequencia_confronto(cur, nosso_time_id, adversario_id, mandante_filt
     agrupamento fino demais faz o fator quase nunca ativar. A diferença é
     que aqui existia um agrupamento mais largo já pronto e ocioso.
     """
+    detalhe = buscar_confronto_detalhado(
+        cur, nosso_time_id, adversario_id, mandante_filtro, tipo_padrao, linha, resultado
+    )
+    return detalhe[0] if detalhe else None
+
+
+def buscar_confronto_detalhado(cur, nosso_time_id, adversario_id, mandante_filtro,
+                               tipo_padrao, linha=0, resultado="", frequencia_geral=None):
+    """NOVO (28/08/2026): mesma busca de buscar_frequencia_confronto, mas
+    devolvendo `(frequencia, jogos_analisados)` em vez de só a frequência,
+    e aceitando `frequencia_geral` como PRIOR.
+
+    Existe separada de propósito: `buscar_frequencia_confronto` é usada por
+    4 mercados (escanteio_total, cartao_total, cartao_time,
+    resultado_final) e continua com a assinatura e o comportamento de
+    sempre. Só quem quiser o encolhimento e o tamanho da amostra chama esta
+    aqui - hoje, apenas escanteio_total (escopo deliberado: é o único
+    mercado onde o defeito foi MEDIDO; mexer nos outros sem medir antes
+    repetiria o erro já registrado de "adicionar filtro a mercado
+    defeituoso faz o filtro levar a culpa").
+
+    `jogos_analisados` volta junto porque sem ele não dá pra auditar
+    depois com que peso cada recomendação foi calculada - a descrição
+    passa a mostrar isso.
+
+    Quando `frequencia_geral` é None, cai no comportamento antigo (Laplace
+    sempre ligado): sem prior, não existe pra onde encolher."""
     if adversario_id is None:
         return None
 
@@ -821,11 +935,18 @@ def buscar_frequencia_confronto(cur, nosso_time_id, adversario_id, mandante_filt
                  AND linha = %s AND resultado = %s AND amostra_pequena = FALSE""",
             (nosso_time_id, adversario_id, filtro, tipo_padrao, linha, resultado),
         )
-        return _frequencia_do_row(cur.fetchone(), True)
+        row = cur.fetchone()
+        if not row or row[0] is None:
+            return None
 
-    frequencia = consultar(mandante_filtro)
-    if frequencia is not None:
-        return frequencia
+        jogos = int(row[1]) if len(row) > 1 and row[1] else 0
+        if frequencia_geral is None:
+            return (_frequencia_do_row(row, True), jogos)
+        return (_encolher_para_prior(float(row[0]), jogos, frequencia_geral), jogos)
+
+    achado = consultar(mandante_filtro)
+    if achado is not None:
+        return achado
 
     # Degrau 2: o recorte 'geral' junta mandante + visitante, então tem o
     # dobro da amostra. Só faz sentido tentar se o pedido não era já ele.
@@ -1584,6 +1705,11 @@ def calcular_recomendacoes(cur):
         resultado_cor = None
         fator_arbitro_aplicado = None
         veio_de_confronto_direto = False
+        # NOVO (28/08/2026): quantos jogos o confronto direto tinha - só é
+        # preenchido em escanteio_total (único mercado que usa
+        # buscar_confronto_detalhado hoje). Vai pra descrição, pra dar pra
+        # auditar depois com que amostra cada recomendação foi calculada.
+        jogos_confronto_direto = None
         fator_suspensao_aplicado = None
         descricoes_grupo_a = []  # NOVO (Grupo A): nomes dos fatores novos aplicados nessa perna
         fator_grupo_a_aplicado = None  # NOVO (Grupo A): multiplicador final já combinado+limitado
@@ -1815,14 +1941,28 @@ def calcular_recomendacoes(cur):
             # contra esse adversário (ex: "escanteios totais contra o
             # Palmeiras, jogando em casa"); só cai pro padrão geral do time
             # se não houver confronto direto com amostra suficiente ainda.
-            frequencia_bruta = buscar_frequencia_confronto(
-                cur, nosso_time_id, adversario_id, mandante_filtro_atual, "escanteio_total", linha=linha,
-                suavizar=suavizar
+            # NOVO (28/08/2026): o padrão geral é buscado ANTES do confronto,
+            # não mais no `else`. Ele deixou de ser só o plano B e passou a
+            # ser o PRIOR pro qual o confronto direto é encolhido - ver
+            # PESO_PRIOR_CONFRONTO_DIRETO e _encolher_para_prior.
+            #
+            # Antes: confronto de 7 jogos SUBSTITUÍA os 138 jogos do time.
+            # Agora: os dois são combinados ponderando pela amostra, e os 7
+            # jogos do confronto entram com o peso de 7 jogos - não com o
+            # peso de uma certeza.
+            frequencia_geral = buscar_frequencia_escanteio_total(
+                cur, linha, nosso_time_id, suavizar=suavizar
             )
-            if frequencia_bruta is not None:
+
+            confronto = buscar_confronto_detalhado(
+                cur, nosso_time_id, adversario_id, mandante_filtro_atual, "escanteio_total",
+                linha=linha, frequencia_geral=frequencia_geral
+            )
+            if confronto is not None:
+                frequencia_bruta, jogos_confronto_direto = confronto
                 veio_de_confronto_direto = True
             else:
-                frequencia_bruta = buscar_frequencia_escanteio_total(cur, linha, nosso_time_id, suavizar=suavizar)
+                frequencia_bruta = frequencia_geral
 
             # NOVO (Grupo A - Correlação entre Estatísticas): primeiro fator
             # do Grupo A a atuar num mercado de JOGO INTEIRO. Par usado:
@@ -2126,7 +2266,15 @@ def calcular_recomendacoes(cur):
             descricao_final += f" (ajustado por {lista_fatores}, fator combinado {fator_grupo_a_aplicado:.2f}x)"
 
         if veio_de_confronto_direto:
-            descricao_final += " (confronto direto)"
+            # NOVO (28/08/2026): mostra a amostra quando ela é conhecida.
+            # Sem isso não dá pra auditar depois se uma recomendação saiu de
+            # um confronto de 5 jogos ou de 15 - e foi exatamente esse tipo
+            # de cegueira que fez o "97% do Cruzeiro x Vasco" passar
+            # despercebido até alguém estranhar o número na tela.
+            if jogos_confronto_direto:
+                descricao_final += f" (confronto direto: {jogos_confronto_direto} jogos)"
+            else:
+                descricao_final += " (confronto direto)"
 
         if valor_esperado > VALOR_ESPERADO_MINIMO:
             recomendacoes.append({
