@@ -823,6 +823,90 @@ def buscar_frequencia_resultado(cur, lado, resultado, time_id, suavizar=False):
     return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
+# NOVO (28/08/2026): "vitória do mandante" na perspectiva do mandante é a
+# MESMA coisa que "derrota do visitante" na perspectiva do visitante. Pra
+# combinar as duas leituras do mesmo evento, a do outro lado precisa ser
+# INVERTIDA - somar "vitória do A" com "vitória do B" seria somar dois
+# eventos opostos. O empate é o único simétrico (empate pro mandante =
+# empate pro visitante), e é justamente onde a inflação foi medida.
+_RESULTADO_ESPELHADO = {"vitoria": "derrota", "empate": "empate", "derrota": "vitoria"}
+
+
+def buscar_frequencia_resultado_combinada(cur, resultado_nosso_time, nosso_time_id,
+                                          mandante_id, visitante_id, suavizar=False):
+    """NOVO (28/08/2026): probabilidade de um resultado combinando as DUAS
+    perspectivas do jogo, ponderada por `jogos_analisados`.
+
+    O DEFEITO QUE ISSO CORRIGE: o resultado de uma partida é um evento do
+    JOGO - os dois times informam sobre ele. O motor lia só a linha do
+    `nosso_time` daquela perspectiva e jogava a outra metade fora. Como
+    cada jogo entre dois times rastreados gera duas perspectivas, o mesmo
+    empate saía com duas probabilidades diferentes, e o filtro de VE
+    sempre escolhia a MAIOR das duas - seleção adversa embutida.
+
+    Medido na rodada de 22-24/08/2026 (mercado de empate):
+      - 5 de 7 pares divergiam, até 20,9 pontos (Chapecoense x São Paulo:
+        50,77% contra 29,90% pro mesmo empate)
+      - média do que o VE escolhia: 42,6% | se combinasse: 38,5%
+      - taxa real de empate na base: 27,3% (203 de 743 jogos, 24 meses)
+      - resultado: 0 acertos em 17 recomendações de empate (~10 jogos reais)
+
+    Mesmo desenho já validado na Dupla Chance por tempo (seção 29 da
+    documentação): média ponderada por amostra, cada lado suavizado ANTES
+    de entrar na média, escada se faltar um dos lados.
+
+    A ponderação dispensa piso rígido: uma linha de 11 jogos entra com
+    peso 11 contra 50 da outra, em vez de ser descartada ou de valer o
+    mesmo.
+
+    ATENÇÃO ao mexer aqui: o `_RESULTADO_ESPELHADO` acima não é detalhe.
+    Sem a inversão, "vitória do Palmeiras" seria somada com "vitória do
+    Vasco" - eventos opostos, resultado sem significado nenhum. É a mesma
+    armadilha do campo `lado` com dupla semântica que já causou o bug do
+    cartão de time."""
+    if mandante_id is None or visitante_id is None:
+        return None
+    if resultado_nosso_time not in _RESULTADO_ESPELHADO:
+        return None
+
+    somos_mandante = (nosso_time_id == mandante_id)
+    lado_nosso = "mandante" if somos_mandante else "visitante"
+    lado_adversario = "visitante" if somos_mandante else "mandante"
+    adversario_id = visitante_id if somos_mandante else mandante_id
+    resultado_adversario = _RESULTADO_ESPELHADO[resultado_nosso_time]
+
+    def ler(lado, resultado, time_id):
+        cur.execute(
+            "SELECT frequencia, jogos_analisados FROM padroes_time_resultado "
+            "WHERE lado = %s AND resultado = %s AND time_id = %s",
+            (lado, resultado, time_id),
+        )
+        row = cur.fetchone()
+        if not row or row[0] is None:
+            return None
+        jogos = int(row[1]) if len(row) > 1 and row[1] else 0
+        if not jogos:
+            return None
+        frequencia = _frequencia_do_row(row, _deve_suavizar_pela_amostra(row, suavizar))
+        if frequencia is None:
+            return None
+        return (frequencia, jogos)
+
+    leituras = [
+        leitura for leitura in (
+            ler(lado_nosso, resultado_nosso_time, nosso_time_id),
+            ler(lado_adversario, resultado_adversario, adversario_id),
+        ) if leitura is not None
+    ]
+    if not leituras:
+        return None
+
+    peso_total = sum(jogos for _freq, jogos in leituras)
+    if not peso_total:
+        return None
+    return round(sum(freq * jogos for freq, jogos in leituras) / peso_total, 2)
+
+
 def buscar_id_corinthians(cur):
     """NOVO (confronto direto): busca o id do Corinthians na tabela `times`,
     usado pra identificar o adversário de cada jogo por ID (comparando com
@@ -2178,20 +2262,33 @@ def calcular_recomendacoes(cur):
         elif tipo == "resultado_final" and not jogador_id:
             resultado_cor = resultado_do_ponto_de_vista_corinthians(direcao, mandante)
             if resultado_cor:
-                # NOVO (confronto direto): tenta primeiro o resultado
-                # específico contra esse adversário (ex: "Corinthians nunca
-                # perde pro São Paulo em casa"); só cai pro padrão geral por
-                # mandante/visitante se não houver confronto direto com
-                # amostra suficiente ainda.
-                frequencia = buscar_frequencia_confronto(
-                    cur, nosso_time_id, adversario_id, mandante_filtro_atual, "resultado_final", resultado=resultado_cor,
+                # NOVO (28/08/2026): duas mudanças, na ordem em que
+                # importam - ver buscar_frequencia_resultado_combinada e
+                # PESO_PRIOR_CONFRONTO_DIRETO.
+                #
+                # 1. O padrão geral agora COMBINA as duas perspectivas do
+                #    jogo (ponderado por amostra, com a inversão
+                #    vitória/derrota). Antes lia só o lado do nosso time e
+                #    o mesmo empate saía com dois números diferentes.
+                # 2. Ele é buscado ANTES do confronto direto, porque deixou
+                #    de ser só o plano B: virou o PRIOR pro qual o confronto
+                #    é encolhido. Antes um confronto de 5 jogos SUBSTITUÍA
+                #    o histórico inteiro - foi assim que saiu "63,88% de
+                #    empate", número que não existe no futebol.
+                frequencia_geral = buscar_frequencia_resultado_combinada(
+                    cur, resultado_cor, nosso_time_id, mandante_id, visitante_id,
                     suavizar=suavizar
                 )
-                if frequencia is not None:
+
+                confronto = buscar_confronto_detalhado(
+                    cur, nosso_time_id, adversario_id, mandante_filtro_atual, "resultado_final",
+                    resultado=resultado_cor, frequencia_geral=frequencia_geral
+                )
+                if confronto is not None:
+                    frequencia, jogos_confronto_direto = confronto
                     veio_de_confronto_direto = True
                 else:
-                    lado = "mandante" if mandante else "visitante"
-                    frequencia = buscar_frequencia_resultado(cur, lado, resultado_cor, nosso_time_id, suavizar=suavizar)
+                    frequencia = frequencia_geral
 
                 # NOVO (forma recente, já existia) + Grupo A (Zona da
                 # Tabela + Padrão por Rodada). IMPORTANTE: Zona/Rodada só
