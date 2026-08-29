@@ -2300,7 +2300,30 @@ def calcular_recomendacoes(cur):
                 # na aposta de Empate/Derrota não faria sentido com o dado
                 # que temos).
                 if frequencia is not None:
-                    fator_forma = calcular_fator_forma_recente(cur, resultado_cor, nosso_time_id)
+                    # NOVO (28/08/2026): forma recente NÃO se aplica ao
+                    # EMPATE. Vitória e derrota são assimétricos - "time em
+                    # boa fase" vence mais E o adversário perde mais, então
+                    # o fator tem direção clara e as duas perspectivas se
+                    # complementam. O empate é o ÚNICO resultado simétrico:
+                    # é o mesmo evento pros dois lados, e não existe "time
+                    # em boa fase empata mais" - a afirmação não tem sinal.
+                    #
+                    # O que acontecia sem essa trava (medido em 28/08/2026,
+                    # antes da correção): o mesmo empate recebia 0.85x de
+                    # uma perspectiva e 1.15x da outra, e saía com DOIS
+                    # números pro MESMO evento -
+                    #   Cruzeiro x Vasco:      55,55% x 0.85 = 47,22%
+                    #                          55,55% x 1.15 = 63,88%
+                    #   Atlético-MG x Vitória: 55,55%/... = 49,29% e 36,43%
+                    # A camada de baixo (padrão combinado + confronto) já
+                    # dava o mesmo valor nos dois lados; era o fator que
+                    # reintroduzia a divergência. E como o filtro de VE
+                    # sempre escolhe a maior das duas, isso era seleção
+                    # adversa pura: o fator não estava medindo nada, só
+                    # escolhendo qual perspectiva virava recomendação.
+                    fator_forma = None
+                    if resultado_cor != "empate":
+                        fator_forma = calcular_fator_forma_recente(cur, resultado_cor, nosso_time_id)
 
                     fator_zona = None
                     fator_rodada = None
