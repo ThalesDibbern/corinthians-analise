@@ -1292,6 +1292,61 @@ def montar_descricao_handicap(nome_time, mandante, linha):
     return f"Handicap - {nome_time} {linha_time:+.1f}"
 
 
+def aplicar_fator(frequencia, fator, espaco_chances=False):
+    """Aplica um fator do Grupo A sobre uma frequência (0-100).
+
+    `espaco_chances=False` (padrão) - comportamento histórico: multiplica a
+    probabilidade direto e corta em 100. Mantido em todos os mercados menos
+    escanteio, porque eles estão calibrados COM essa fórmula hoje
+    (cartao_total, por exemplo, está em +5,3/+3,5 de gap) e trocar tudo de
+    uma vez tiraria a possibilidade de medir o que mudou.
+
+    `espaco_chances=True` - converte pra chances, multiplica, converte de
+    volta:
+
+        chance = p / (1 - p);  chance * fator;  p = chance / (1 + chance)
+
+    POR QUE ISSO EXISTE (medido em 28/08/2026, Atlético-PR x Fluminense):
+    "Escanteios Total - Mais de 7.5" apareceu com 100,0% de probabilidade e
+    odd 1.34. O 100% NÃO era o modelo afirmando certeza - era o corte. O
+    confronto já encolhido dava ~93%, a correlação de 1.09x pediu 101,4%, e
+    o `min(..., 100.0)` cravou em 100.
+
+    Três problemas que isso causava, todos resolvidos aqui:
+      1. Probabilidade de 100% não existe - promete certeza que nenhum dado
+         sustenta, e o filtro de VE adora (VE = 0.34 naquele caso).
+      2. A perna virava fantasma na múltipla: multiplica por 1,0 e some sem
+         deixar rastro. Visto ao vivo - múltipla de escanteio 100% + gols
+         96% saía exatamente 96%.
+      3. O corte destruía informação: 101% e 130% viravam ambos "100%", e a
+         diferença entre uma aposta boa e uma absurda sumia.
+
+    Em espaço de chances o estouro é IMPOSSÍVEL por construção, e o efeito
+    do fator diminui naturalmente perto dos extremos - o que também é mais
+    fiel ao que o fator significa: "9% mais escanteios" quase não muda a
+    chance de passar de 7.5 num jogo que já espera 11.
+
+    Efeito colateral conhecido e aceito: o fator fica MAIS FRACO em toda a
+    escala (4-6 pontos no meio), simetricamente nas duas direções - fator
+    que aumenta aumenta menos, fator que diminui diminui menos. Não há
+    viés pra cima nem pra baixo. Se depois de 2-3 rodadas o efeito ficar
+    fraco demais, o ajuste é alargar os tetos (FATOR_*_MINIMO/MAXIMO), não
+    voltar pra multiplicação direta."""
+    if fator is None or frequencia is None:
+        return frequencia
+    if not espaco_chances:
+        return min(round(frequencia * fator, 2), 100.0)
+
+    p = frequencia / 100
+    if p <= 0 or p >= 1:
+        # 0% e 100% crus não têm chance definida (divisão por zero). Não
+        # deveriam chegar aqui - a suavização de Laplace trava os extremos
+        # antes - mas se chegarem, devolve como está em vez de estourar.
+        return round(frequencia, 2)
+    chance = (p / (1 - p)) * fator
+    return round(100 * chance / (1 + chance), 2)
+
+
 def combinar_fatores(fatores):
     """Recebe uma lista de (fator_ou_None, descricao_curta). Ignora os
     None (fator não pôde ser calculado ou amostra insuficiente), multiplica
@@ -2014,7 +2069,13 @@ def calcular_recomendacoes(cur):
                         (fator_rodada, "padrão por rodada"),
                     ])
                     if fator_grupo_a_aplicado is not None:
-                        frequencia_bruta = min(round(frequencia_bruta * fator_grupo_a_aplicado, 2), 100.0)
+                        # NOVO (28/08/2026): espaço de chances - ver
+                        # aplicar_fator. Ligado só nos dois mercados de
+                        # escanteio por enquanto; os outros seguem na
+                        # multiplicação direta até darem o mesmo problema.
+                        frequencia_bruta = aplicar_fator(
+                            frequencia_bruta, fator_grupo_a_aplicado, espaco_chances=True
+                        )
 
                 if frequencia_bruta is not None:
                     frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
@@ -2064,7 +2125,13 @@ def calcular_recomendacoes(cur):
                     (fator_correlacao, "correlação chutes/escanteios"),
                 ])
                 if fator_grupo_a_aplicado is not None:
-                    frequencia_bruta = min(round(frequencia_bruta * fator_grupo_a_aplicado, 2), 100.0)
+                    # NOVO (28/08/2026): espaço de chances - ver
+                    # aplicar_fator. É ESTE ponto que produzia o 100,0%
+                    # cravado do Atlético-PR x Fluminense (confronto
+                    # encolhido ~93% x 1.09 = 101,4% -> cortado em 100).
+                    frequencia_bruta = aplicar_fator(
+                        frequencia_bruta, fator_grupo_a_aplicado, espaco_chances=True
+                    )
 
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "mais" else round(100 - frequencia_bruta, 2)
