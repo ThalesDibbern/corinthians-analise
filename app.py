@@ -577,6 +577,17 @@ PAGINA = """
             cursor: pointer;
         }
         button:hover { background: #2ea043; }
+        /* NOVO (29/08/2026): "🔍 Só mostrar (sem gerar)" - de propósito
+           visualmente SECUNDÁRIO (contorno, sem preenchimento) em relação
+           ao verde. O verde é a ação que gasta cota da OddsPapi e regera
+           tudo; este aqui é o inofensivo, que só relê o que já existe. A
+           diferença visual evita clicar no caro achando que é o barato. */
+        .btn-so-mostrar {
+            background: transparent;
+            color: #58a6ff;
+            border: 1px solid #58a6ff;
+        }
+        .btn-so-mostrar:hover { background: #58a6ff22; }
         .cartao {
             background: #161b22;
             border: 1px solid #30363d;
@@ -855,9 +866,19 @@ PAGINA = """
                     <input type="number" step="0.01" min="1.01" name="odd_max" id="odd_max" value="{{ odd_max }}">
                 </div>
                 <button type="submit">Gerar recomendações da rodada</button>
+                <!-- NOVO (29/08/2026): mesmo formulário, mesmos campos de
+                     odd mínima/máxima - a única diferença é que este botão
+                     envia `apenas_mostrar=1`, e o servidor usa isso pra
+                     NÃO disparar atualização de odds nem regerar
+                     recomendação: só relê o que já está gravado e refiltra
+                     pela faixa. Serve pra trocar de faixa no meio de uma
+                     investigação sem gastar cota da OddsPapi e sem mudar o
+                     dado que está sendo investigado. -->
+                <button type="submit" name="apenas_mostrar" value="1" class="btn-so-mostrar">🔍 Só mostrar (sem gerar)</button>
             </div>
             <p class="nota-espera">Se fizer mais de 1h desde a última atualização, pode demorar alguns segundos
-                (o app aciona a busca de odds mais recentes antes de mostrar o resultado).</p>
+                (o app aciona a busca de odds mais recentes antes de mostrar o resultado).
+                <b>"Só mostrar"</b> nunca busca odds nem recalcula nada — exibe apenas o que já foi gerado antes.</p>
         </form>
         {% if ultima_atualizacao_odds %}
         <div class="linha-atualizacao">
@@ -7913,7 +7934,37 @@ def index():
     # como saber que não foi um clique novo. Agora quem decide é um token
     # de uso único: só é um "clique real" se veio com o token certo, e
     # esse token nunca sobrevive a um F5 (é consumido no primeiro uso).
-    eh_clique_real = validar_e_consumir_token_busca(request.args.get("token_busca"))
+    # NOVO (29/08/2026): botão "🔍 Só mostrar (sem gerar)". Durante o
+    # desenvolvimento é comum passar mais de uma hora investigando um bug
+    # ou uma probabilidade estranha e, no meio disso, querer olhar OUTRA
+    # faixa de odd. Com os dois botões antigos, isso disparava uma
+    # atualização de odds nova (gasta cota da OddsPapi - 41 requisições
+    # por rodada completa) e ainda REGERAVA as recomendações, mudando o
+    # dado que estava sendo investigado no meio da investigação.
+    #
+    # Este caminho não dispara nada: só relê o que já está gravado em
+    # `recomendacoes` e refiltra pela faixa pedida. Tecnicamente ele
+    # reaproveita o caminho passivo que já existia (o do F5, que chega sem
+    # token válido) - a diferença é que agora dá pra pedir isso DE
+    # PROPÓSITO, com uma faixa de odd diferente, em vez de depender de
+    # recarregar a página.
+    #
+    # Como `eh_clique_real` fica False, três coisas deixam de acontecer, e
+    # é exatamente esse o objetivo: (1) `processar_atualizacao_odds` não
+    # roda, (2) as recomendações não são regeradas, (3)
+    # `capturar_candidatas_multiplas` não grava nada - então ficar testando
+    # faixas aqui não polui o ranking de Múltiplas em Destaque do
+    # /historico com combinações que só foram olhadas de passagem.
+    #
+    # ORDEM IMPORTA: a validação do token CONSOME o token (é de uso
+    # único). Por isso ela só é chamada quando NÃO é "só mostrar" - assim
+    # o token continua válido pro próximo clique de verdade, em vez de ser
+    # gasto por uma consulta passiva.
+    apenas_mostrar = request.args.get("apenas_mostrar") == "1"
+    eh_clique_real = (
+        False if apenas_mostrar
+        else validar_e_consumir_token_busca(request.args.get("token_busca"))
+    )
 
     combinacoes = []
     motivo = ""
@@ -7994,7 +8045,17 @@ def index():
                 # ficam só como reserva, pro caso raro de o painel não
                 # aparecer (ex: execução que fechou entre o disparo e essa
                 # consulta).
-                if disparou_agora:
+                if apenas_mostrar:
+                    # NOVO (29/08/2026): no modo "só mostrar" as mensagens
+                    # abaixo não servem - elas explicam uma atualização que
+                    # este caminho deliberadamente NÃO dispara. Dizer "está
+                    # rodando em segundo plano" aqui seria mentira, e
+                    # "faltam odds coletadas" mandaria investigar coleta
+                    # quando o problema pode ser só a faixa de odd pedida.
+                    motivo = ("🔍 Não tem nenhuma odd gerada nessa faixa. Este botão só mostra o que "
+                              "já foi gerado antes - ele não gera nada novo. Use \"Gerar recomendações "
+                              "da rodada\" pra buscar odds e calcular as recomendações.")
+                elif disparou_agora:
                     motivo = ("🔄 A atualização de odds foi disparada agora mesmo e está rodando em segundo "
                                "plano. A página se atualiza sozinha quando terminar.")
                 elif atualizacao_rodando:
