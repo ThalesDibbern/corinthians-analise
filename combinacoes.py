@@ -20,7 +20,30 @@ import hashlib
 import json
 from itertools import combinations
 
-MERCADOS_JOGO_INTEIRO = {"escanteio_total", "cartao_total", "gols_total"}
+MERCADOS_JOGO_INTEIRO = {
+    "escanteio_total", "cartao_total", "gols_total",
+    # NOVO (30/08/2026): os 5 abaixo descrevem um evento do JOGO, não de um
+    # time - mas ficaram de fora quando foram criados, e por isso nunca
+    # deduplicaram. Medido em `historico_recomendacoes`: resultado_final
+    # tinha 72 linhas para 51 jogos (~24 excedentes); dupla_chance_1t 27
+    # para 25; dupla_chance_2t 19 para 19; ambas_marcam_1t 23 para 23;
+    # ambas_marcam_2t 18 para 18.
+    #
+    # O caso que expôs isso: Cruzeiro x Vasco (29/08) arquivou DUAS linhas
+    # de "Resultado Final - Empate", uma por perspectiva, ambas com 39,41%.
+    # O mesmo empate contando duas vezes na tabela de calibração.
+    #
+    # ⚠️ A versão anterior desta docstring dizia que resultado_final ficava
+    # de fora "de propósito", com a justificativa de que mercados de time
+    # são legitimamente diferentes por perspectiva. Isso está certo pro
+    # escanteio_time (escanteio do Fluminense ≠ escanteio do Palmeiras),
+    # mas NÃO pro resultado final: "Vitória do Cruzeiro" e "Derrota do
+    # Vasco" são o MESMO evento, com a mesma `direcao` gravada (relativa
+    # ao mandante real, confirmado na base).
+    "resultado_final",
+    "dupla_chance_1t", "dupla_chance_2t",
+    "ambas_marcam_1t", "ambas_marcam_2t",
+}
 
 # NOVO (correção de bug real): mercados que pertencem a um JOGADOR
 # específico - cartão, falta, chute, chute no gol, desarme, impedimento.
@@ -75,10 +98,26 @@ def deduplicar_recomendacoes(recomendacoes, colunas_a_manter):
       time é "nosso" na linha) - mas a deduplicação continua necessária
       pra não contar a mesma perna 2x numa múltipla.
 
-    Mercados de TIME específico (escanteio_time, resultado_final) NÃO
-    entram nessa deduplicação de propósito - são legitimamente diferentes
-    por perspectiva (escanteio do Fluminense ≠ escanteio do Palmeiras,
-    mesmo jogo real).
+    Mercados de TIME específico (escanteio_time, cartao_time, gols_time,
+    equipe_marca, marca_ambos_tempos, handicap) NÃO entram nessa
+    deduplicação de propósito - são legitimamente diferentes por
+    perspectiva (escanteio do Fluminense ≠ escanteio do Palmeiras, mesmo
+    jogo real).
+
+    ⚠️ CORRIGIDO em 30/08/2026: `resultado_final` estava listado aqui como
+    "mercado de time", o que era um erro de classificação - o resultado é
+    um evento do JOGO, e "vitória do A" é o mesmo evento que "derrota do
+    B". Ele passou pra MERCADOS_JOGO_INTEIRO, junto com os 4 mercados por
+    tempo (dupla chance e ambas marcam), que tinham o mesmo problema.
+
+    ⚠️ LACUNA CONHECIDA: a identidade de jogo inteiro usa `descricao`, e no
+    resultado_final a descrição difere entre perspectivas pro mesmo evento
+    ("Vitória do Cruzeiro" x "Derrota do Vasco"). Então aqui só o EMPATE
+    deduplica de fato; vitória/derrota continuam podendo entrar as duas na
+    mesma múltipla. O arquivamento já usa uma chave estruturada
+    (tipo_padrao, linha, direcao) que não tem esse problema - trocar aqui
+    também é uma mudança maior, que mexeria no que é GERADO e não só no
+    que é arquivado, então ficou como pendência separada.
 
     `colunas_a_manter` é quantas colunas manter no resultado final (a
     última coluna da query sempre precisa ser fixture_id_api, usado só
