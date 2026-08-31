@@ -139,6 +139,27 @@ def barra_navegacao(pagina_atual, banca_atual=None):
     return f'<div class="nav-meta">{meta}</div><div class="nav-principal">{botoes}</div>'
 
 
+def _float_ou_none(texto):
+    """NOVO (30/08/2026): converte o texto de um campo opcional do
+    formulário em float, devolvendo None quando o campo está em branco
+    (= "sem filtro") ou quando o conteúdo não é um número.
+
+    Tolerar lixo em vez de estourar é proposital: esses campos vêm da URL,
+    então qualquer pessoa pode chegar com `?prob_min=abc` - e um
+    ValueError ali derrubaria a página inteira do gerador, não só o
+    filtro. Aceita vírgula como separador decimal porque é o que o teclado
+    brasileiro entrega."""
+    if texto is None:
+        return None
+    texto = str(texto).strip().replace(",", ".")
+    if not texto:
+        return None
+    try:
+        return float(texto)
+    except ValueError:
+        return None
+
+
 def buscar_banca(cur, usuario_id):
     cur.execute("SELECT banca_atual FROM usuarios WHERE id = %s", (usuario_id,))
     row = cur.fetchone()
@@ -833,7 +854,16 @@ PAGINA = """
                 const oddMin = localStorage.getItem('ultima_busca_odd_min');
                 const oddMax = localStorage.getItem('ultima_busca_odd_max');
                 if (oddMin && oddMax) {
-                    window.location.replace('/?odd_min=' + encodeURIComponent(oddMin) + '&odd_max=' + encodeURIComponent(oddMax) + '&auto=1');
+                    // NOVO (30/08/2026): restaura junto a faixa de
+                    // probabilidade, se houver. Os parâmetros são
+                    // adicionados só quando têm valor - assim uma busca
+                    // sem filtro de probabilidade continua sem ele na URL.
+                    const probMin = localStorage.getItem('ultima_busca_prob_min') || '';
+                    const probMax = localStorage.getItem('ultima_busca_prob_max') || '';
+                    let destino = '/?odd_min=' + encodeURIComponent(oddMin) + '&odd_max=' + encodeURIComponent(oddMax);
+                    if (probMin) destino += '&prob_min=' + encodeURIComponent(probMin);
+                    if (probMax) destino += '&prob_max=' + encodeURIComponent(probMax);
+                    window.location.replace(destino + '&auto=1');
                 }
             } catch (e) {}
         }
@@ -865,6 +895,22 @@ PAGINA = """
                     <label for="odd_max">Odd máxima</label>
                     <input type="number" step="0.01" min="1.01" name="odd_max" id="odd_max" value="{{ odd_max }}">
                 </div>
+                <!-- NOVO (30/08/2026): faixa de probabilidade histórica.
+                     `placeholder` em vez de valor padrão de propósito -
+                     campo em branco = sem filtro, então quem não usa não
+                     é afetado. Filtra pela probabilidade COMBINADA da
+                     aposta: uma múltipla com pernas de 95%/60%/88% é
+                     julgada pelos ~50% do conjunto, não perna a perna. -->
+                <div>
+                    <label for="prob_min">Probabilidade mín. (%)</label>
+                    <input type="number" step="0.01" min="0" max="100" name="prob_min" id="prob_min"
+                           value="{{ prob_min }}" placeholder="qualquer">
+                </div>
+                <div>
+                    <label for="prob_max">Probabilidade máx. (%)</label>
+                    <input type="number" step="0.01" min="0" max="100" name="prob_max" id="prob_max"
+                           value="{{ prob_max }}" placeholder="qualquer">
+                </div>
                 <button type="submit">Gerar recomendações da rodada</button>
                 <!-- NOVO (29/08/2026): mesmo formulário, mesmos campos de
                      odd mínima/máxima - a única diferença é que este botão
@@ -883,7 +929,7 @@ PAGINA = """
         {% if ultima_atualizacao_odds %}
         <div class="linha-atualizacao">
             <span>🔄 Última atualização de odds gerada às <b>{{ ultima_atualizacao_odds }}</b></span>
-            <a href="/?odd_min={{ odd_min }}&odd_max={{ odd_max }}&forcar=1&token_busca={{ token_busca }}" class="link-atualizar">Atualizar recomendações</a>
+            <a href="/?odd_min={{ odd_min }}&odd_max={{ odd_max }}&prob_min={{ prob_min }}&prob_max={{ prob_max }}&forcar=1&token_busca={{ token_busca }}" class="link-atualizar">Atualizar recomendações</a>
         </div>
         {% endif %}
     </div>
@@ -918,7 +964,7 @@ PAGINA = """
                 <input type="hidden" name="odd_combinada" value="{{ c.odd_combinada }}">
                 <input type="hidden" name="probabilidade_combinada" value="{{ c.probabilidade_combinada }}">
                 <input type="hidden" name="pernas" value='{{ c.pernas_json }}'>
-                <input type="hidden" name="voltar" value="/?odd_min={{ odd_min }}&odd_max={{ odd_max }}">
+                <input type="hidden" name="voltar" value="/?odd_min={{ odd_min }}&odd_max={{ odd_max }}&prob_min={{ prob_min }}&prob_max={{ prob_max }}">
                 <input type="number" step="0.01" min="0.01" name="valor_apostado" placeholder="Valor (R$)" required>
                 <button type="submit" class="btn-salvar">💾 Salvar</button>
             </form>
@@ -930,6 +976,12 @@ PAGINA = """
             try {
                 localStorage.setItem('ultima_busca_odd_min', '{{ odd_min }}');
                 localStorage.setItem('ultima_busca_odd_max', '{{ odd_max }}');
+                // NOVO (30/08/2026): a faixa de probabilidade também é
+                // lembrada. Guardada mesmo quando vazia, de propósito -
+                // "sem filtro" é uma escolha tão válida quanto uma faixa,
+                // e precisa ser restaurada como tal.
+                localStorage.setItem('ultima_busca_prob_min', '{{ prob_min }}');
+                localStorage.setItem('ultima_busca_prob_max', '{{ prob_max }}');
             } catch (e) {}
         </script>
 
@@ -7923,6 +7975,13 @@ def time_detalhe(time_id):
 def index():
     odd_min = request.args.get("odd_min", "1.5")
     odd_max = request.args.get("odd_max", "5.0")
+    # NOVO (30/08/2026): faixa de PROBABILIDADE HISTÓRICA, em % (ex: 70 a
+    # 83). Diferente da faixa de odd, o padrão é VAZIO = sem filtro, pra
+    # não mudar o comportamento de quem não usa o campo. Filtra pelo valor
+    # COMBINADO da aposta (ver montar_combinacoes), então uma múltipla é
+    # julgada pela probabilidade dela inteira, não perna a perna.
+    prob_min = request.args.get("prob_min", "")
+    prob_max = request.args.get("prob_max", "")
     buscou = "odd_min" in request.args
     forcar_atualizacao = request.args.get("forcar") == "1"
     # NOVO (troca de abordagem, ver comentário perto de
@@ -8015,7 +8074,14 @@ def index():
 
         if buscou:
             recomendacoes = buscar_recomendacoes(cur)
-            combinacoes = montar_combinacoes(recomendacoes, float(odd_min), float(odd_max))
+            # NOVO (30/08/2026): campo em branco vira None = sem limite
+            # daquele lado. `_float_ou_none` também tolera lixo digitado
+            # (texto, vírgula sozinha) devolvendo None, em vez de quebrar
+            # a página inteira com ValueError.
+            combinacoes = montar_combinacoes(
+                recomendacoes, float(odd_min), float(odd_max),
+                prob_min=_float_ou_none(prob_min), prob_max=_float_ou_none(prob_max),
+            )
 
             # NOVO: captura cada múltipla gerada num clique de verdade em
             # `multiplas_candidatas` - abastece o ranking de Múltiplas em
@@ -8125,7 +8191,8 @@ def index():
     token_busca = gerar_e_guardar_token_busca()
 
     return render_template_string(
-        PAGINA, odd_min=odd_min, odd_max=odd_max, buscou=buscou,
+        PAGINA, odd_min=odd_min, odd_max=odd_max,
+        prob_min=prob_min, prob_max=prob_max, buscou=buscou,
         individuais=individuais, multiplas=multiplas, motivo=motivo, banca_atual=round(banca_atual, 2),
         jogos_disponiveis=jogos_disponiveis,
         ultima_atualizacao_odds=ultima_atualizacao_odds, token_busca=token_busca,
