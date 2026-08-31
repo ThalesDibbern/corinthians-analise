@@ -1095,6 +1095,43 @@ def main():
                 # pular direto evita gastar uma chamada de API à toa.
                 cur.execute("SELECT fixture_id_api FROM jogos WHERE id = %s", (jogo_id,))
                 fixture_id_api_do_jogo = cur.fetchone()[0]
+
+                # NOVO (30/08/2026): a lista de jogos vem da OddsPapi, e ela
+                # às vezes continua oferecendo um jogo que JÁ ACONTECEU (data
+                # errada do lado dela). Quando isso acontece, todas as
+                # chamadas seguintes são desperdício garantido: a de lesões
+                # (API-Football) e as de odds (OddsPapi, que vai devolver
+                # "mercados suspensos/vazios").
+                #
+                # Caso real: Cruzeiro x Vasco jogou no sábado 29/08 e no
+                # domingo à noite ainda aparecia aqui, gastando requisição e
+                # voltando vazio - enquanto São Paulo, cujo jogo foi no mesmo
+                # sábado, já tinha sumido da lista da OddsPapi normalmente.
+                #
+                # A checagem usa `jogos_liga.status` (afirmação direta da
+                # API-Football de que o jogo terminou), NÃO o fato de a
+                # OddsPapi devolver lista vazia - mercado vazio também
+                # acontece com jogo EM ANDAMENTO, e tratar isso como "acabou"
+                # seria arriscado.
+                if fixture_id_api_do_jogo and fixture_id_api_do_jogo > 0:
+                    cur.execute(
+                        "SELECT status FROM jogos_liga WHERE fixture_id_api = %s",
+                        (fixture_id_api_do_jogo,),
+                    )
+                    linha_status = cur.fetchone()
+                    if linha_status and linha_status[0] in ("FT", "AET", "PEN"):
+                        print(f"  Jogo já encerrado segundo a API-Football (status "
+                              f"{linha_status[0]}) - pulando, sem gastar requisição. "
+                              f"As odds já salvas desse jogo são mantidas.")
+                        continue
+
+                # NOVO (integração /injuries): só dá pra consultar lesão/
+                # suspensão por fixture da API-Football se esse jogo já tem
+                # um fixture_id_api CONFIRMADO (positivo) - o valor sintético
+                # negativo (fallback de segurança do get_or_create_jogo,
+                # usado quando a API-Football ainda não confirmou o fixture
+                # real) nunca corresponde a um jogo de verdade lá, então
+                # pular direto evita gastar uma chamada de API à toa.
                 if fixture_id_api_do_jogo and fixture_id_api_do_jogo > 0:
                     lesoes = buscar_lesoes_suspensos(fixture_id_api_do_jogo)
                     salvar_lesoes_suspensoes(cur, jogo_id, lesoes)
