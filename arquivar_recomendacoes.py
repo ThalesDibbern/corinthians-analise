@@ -33,6 +33,38 @@ site, mas depois passou a esconder justamente os resultados mais recentes
 jogo já passado é arquivado assim que esse script roda, não importa há
 quanto tempo terminou.
 
+NOVO (30/08/2026 - status da API como critério, não só a data): um jogo
+também é considerado passado quando `jogos_liga.status` diz que ele
+terminou ('FT' = tempo normal, 'AET' = prorrogação, 'PEN' = pênaltis).
+Antes o único critério era a data/hora gravada em `jogos`, e isso falhava
+quando essa data estava errada.
+
+Caso real (30/08/2026): Cruzeiro x Vasco aconteceu no SÁBADO 29/08, mas
+ficou gravado em `jogos` como 30/08 20:00. Resultado: 51 recomendações
+continuaram na tela como se o jogo não tivesse acontecido, mesmo com
+placar (1x3) e estatísticas já coletados - porque `datahora_jogo` ainda
+não tinha "passado".
+
+POR QUE O STATUS E NÃO A DATA: a data se mostrou não confiável nas DUAS
+tabelas, e nos DOIS sentidos. Medido na base: `jogos` e `jogos_liga`
+divergem em vários jogos, às vezes uma adiantada, às vezes a outra
+(Coritiba x Remo: 31/08 contra 30/08; Atlético-MG x Vitória: 29/08 contra
+30/08; Mirassol x Flamengo: 02/09 contra 25/02 - seis meses). Não é
+fuso horário, senão a diferença teria sempre o mesmo sinal. Já o `status`
+é uma afirmação direta da API-Football sobre o jogo ter acabado, e não
+depende de fuso nem de remarcação.
+
+POR QUE NÃO USAR "mercados suspensos/vazios da OddsPapi" COMO SINAL:
+considerado e descartado. Mercado suspenso acontece com jogo terminado,
+mas TAMBÉM com jogo em andamento, suspensão momentânea (gol, VAR, lesão),
+jogo adiado e falha parcial da API. Tratar isso como "acabou" arquivaria
+recomendações no MEIO do jogo, avaliando contra estatística incompleta -
+a mesma família de bug que já aconteceu duas vezes neste projeto.
+
+O `LEFT JOIN` é de propósito: se não existir linha em `jogos_liga` pra
+aquele fixture, o comportamento continua sendo exatamente o de antes (só
+data), sem regressão.
+
 NOVO: também avalia as múltiplas capturadas em `multiplas_candidatas`
 (ver combinacoes.py/capturar_candidatas_multiplas) - pra cada candidata
 já CONGELADA (jogo mais próximo já começou) e ainda não avaliada, confere
@@ -102,8 +134,10 @@ def buscar_recomendacoes_para_arquivar(cur):
                r.direcao, j.data_jogo, j.fixture_id_api
         FROM recomendacoes r
         JOIN jogos j ON j.id = r.jogo_id
+        LEFT JOIN jogos_liga jl ON jl.fixture_id_api = j.fixture_id_api
         WHERE (j.datahora_jogo IS NOT NULL AND j.datahora_jogo < NOW())
            OR (j.datahora_jogo IS NULL AND j.data_jogo < CURRENT_DATE)
+           OR jl.status IN ('FT', 'AET', 'PEN')
         """
     )
     linhas = cur.fetchall()
