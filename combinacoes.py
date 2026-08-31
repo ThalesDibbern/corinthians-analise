@@ -238,12 +238,22 @@ def combo_tem_conflito_de_time_mesma_data(combo):
     return False
 
 
-def montar_combinacoes(recomendacoes, odd_min, odd_max):
+def montar_combinacoes(recomendacoes, odd_min, odd_max, prob_min=None, prob_max=None):
     """Monta odds individuais + múltiplas (1 a 5 pernas, tamanho máximo
     adaptativo conforme o pool) a partir das recomendações ativas, dentro
     da faixa de odd pedida. Retorna uma lista de dicts (1 perna = odd
     individual, 2+ pernas = múltipla), cada um já com `pernas_json`
-    pronto pra gravar em apostas_salvas.pernas se o usuário salvar."""
+    pronto pra gravar em apostas_salvas.pernas se o usuário salvar.
+
+    NOVO (30/08/2026): `prob_min`/`prob_max` filtram pela PROBABILIDADE
+    HISTÓRICA, em porcentagem (ex: 70 e 83), do mesmo jeito que odd_min/
+    odd_max já filtravam pela odd - ou seja, sobre o valor COMBINADO da
+    aposta inteira, não perna a perna. Uma múltipla de 3 pernas com 95%,
+    60% e 88% tem probabilidade combinada de ~50% e é julgada por esse
+    50%, mesmo que nenhuma das pernas individualmente esteja na faixa.
+
+    Ambos são opcionais: `None` significa "sem limite desse lado", que é
+    o comportamento quando o campo é deixado em branco na tela."""
     grupos = {}
     for rec in recomendacoes:
         (jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo,
@@ -402,6 +412,17 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max):
                         prob_combinada *= p["probabilidade"]
 
                 if not (odd_min <= odd_combinada <= odd_max):
+                    continue
+
+                # NOVO (30/08/2026): mesma ideia do filtro de odd acima,
+                # aplicada à probabilidade combinada. `prob_combinada` é
+                # fração (0-1) e os limites vêm em porcentagem (0-100),
+                # por isso o x100 - misturar as duas unidades aqui faria o
+                # filtro rejeitar tudo silenciosamente.
+                prob_combinada_pct = prob_combinada * 100
+                if prob_min is not None and prob_combinada_pct < prob_min:
+                    continue
+                if prob_max is not None and prob_combinada_pct > prob_max:
                     continue
 
                 valor_esperado = round((prob_combinada * odd_combinada) - 1, 3)
