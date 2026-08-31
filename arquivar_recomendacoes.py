@@ -148,7 +148,18 @@ def buscar_recomendacoes_para_arquivar(cur):
          odd, prob, ve, linha, direcao, data_jogo, fixture_id_api) = rec
 
         if tipo_padrao in MERCADOS_JOGO_INTEIRO:
-            chave = ("jogo_inteiro", fixture_id_api, descricao, casa)
+            # NOVO (30/08/2026): identidade ESTRUTURADA, não mais a
+            # `descricao`. O texto não serve como identidade aqui porque
+            # o mesmo evento pode ser descrito de dois jeitos: "Vitória do
+            # Cruzeiro" (perspectiva do Cruzeiro) e "Derrota do Vasco DA
+            # Gama" (perspectiva do Vasco) são a MESMA aposta, com a mesma
+            # `direcao` gravada - `direcao` é relativa ao mandante real,
+            # não ao "nosso time" (confirmado na base). Com a chave por
+            # texto elas nunca se encontravam.
+            #
+            # Vale o princípio já registrado nos aprendizados do projeto:
+            # nunca usar texto de descrição como identidade de uma aposta.
+            chave = ("jogo_inteiro", fixture_id_api, tipo_padrao, linha, direcao, casa)
         elif tipo_padrao in MERCADOS_JOGADOR:
             chave = ("jogador", fixture_id_api, tipo_padrao, jogador_id, linha, direcao, casa)
         else:
@@ -158,9 +169,42 @@ def buscar_recomendacoes_para_arquivar(cur):
 
     resultado = []
     for recs in grupos.values():
-        melhor = max(recs, key=lambda r: r[7])  # maior probabilidade histórica, entre as cópias
-        ids_duplicados = [r[0] for r in recs if r[0] != melhor[0]]
-        resultado.append(melhor[:12] + (ids_duplicados,))
+        # NOVO (30/08/2026): quando as cópias divergem, a probabilidade
+        # arquivada passa a ser a MÉDIA delas, não a MAIOR.
+        #
+        # A regra antiga (`max`) foi escrita quando "duplicata" significava
+        # cópia idêntica - aí tanto fazia qual sobrava. Mas em
+        # resultado_final as duas perspectivas podem dar números
+        # diferentes pro mesmo evento (medido em 30/08: "Vitória do
+        # Cruzeiro" 30,91% e "Derrota do Vasco" 34,50%, por causa da
+        # assimetria de fatores que ainda está aberta). Ficar com a maior
+        # seria seleção adversa embutida no arquivamento, contaminando
+        # justamente a tabela de calibração.
+        #
+        # ⚠️ REPRESENTANTE = a linha de MENOR id, e os campos `jogo_id` e
+        # `descricao` vêm dela JUNTOS, nunca misturados entre cópias.
+        # Isso não é detalhe: `avaliacao.avaliar_resultado` avalia
+        # resultado_final comparando o texto da descrição ("vitória"/
+        # "empate"/"derrota") com o placar lido a partir do `jogo_id`.
+        # Misturar a descrição de uma perspectiva com o jogo_id da outra
+        # INVERTE o resultado silenciosamente - "Derrota do Vasco" avaliada
+        # pela ótica do Cruzeiro daria "acertou" onde foi erro.
+        representante = min(recs, key=lambda r: r[0])
+        ids_duplicados = [r[0] for r in recs if r[0] != representante[0]]
+
+        if len(recs) > 1:
+            prob_media = round(sum(float(r[7]) for r in recs) / len(recs), 2)
+            # o VE precisa continuar coerente com a probabilidade gravada -
+            # senão o histórico fica com prob e VE que não fecham entre si
+            odd = float(representante[6])
+            ve_recalculado = round((prob_media / 100 * odd) - 1, 3)
+            linha_final = (
+                representante[:7] + (prob_media, ve_recalculado) + representante[9:12]
+            )
+        else:
+            linha_final = representante[:12]
+
+        resultado.append(linha_final + (ids_duplicados,))
     return resultado
 
 
