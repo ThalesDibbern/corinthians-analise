@@ -172,6 +172,11 @@ def fase_verificar():
             continue
 
         eventos_api = buscar_eventos(fixture_id)
+        for ev in eventos_api:
+            if ev.get("type") == "Goal":
+                print(f"  [DEBUG] Goal cru: detail={ev.get('detail')!r} "
+                      f"player={(ev.get('player') or {}).get('name')!r} "
+                      f"minuto={(ev.get('time') or {}).get('elapsed')}")
         cartoes_api = sum(1 for ev in eventos_api if ev.get("type") == "Card")
         gols_api = sum(
             1 for ev in eventos_api
