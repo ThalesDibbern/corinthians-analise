@@ -60,6 +60,25 @@ pulado. Isso é o que fazia a cadeia pesada durar cada vez mais ao adicionar
 times - o tempo gasto agora escala com jogos que JÁ ACONTECERAM desde a
 última execução, não com o calendário inteiro da temporada.
 
+NOVO (01/09/2026 - Lacuna 2 da seção 27, "evento nunca é rebuscado"):
+`falta_eventos` era `not jogo_ja_processado(...)` puro - "já tem QUALQUER
+evento salvo" era tratado como definitivo pra sempre. Diagnóstico direto na
+API-Football (script `diagnostico_cartoes_desaparecidos.py`, fora deste
+arquivo) confirmou em 3 jogos reais que ISSO ESTAVA ERRADO: a resposta de
+`/fixtures/events` muda depois do jogo acabar - não só completando cartões
+que faltavam (ex: Bahia x Internacional só tinha 2 de 6 cartões no banco,
+todos os 4 que faltavam são cartões normais de falta, sem nada de especial
+no tipo), como corrigindo atribuição errada (São Paulo x Bragantino tinha
+um cartão de "Pedro Henrique" que não existe mais na resposta atual da API,
+e outro cartão com o minuto errado). Isso aconteceu em jogos processados
+DIAS antes do diagnóstico - bem mais que os 6h usados pra estatística.
+Por isso os eventos agora usam uma janela PRÓPRIA e mais generosa
+(JANELA_ESPERA_EVENTOS_HORAS), com o mesmo padrão de "rebusca e substitui"
+já usado pra estatística. Isso é só a Camada 1 do desenho de 3 camadas já
+proposto na seção 27 - ainda é uma janela fixa por relógio, não por
+estabilidade (Camada 2, ainda em aberto: rebuscar até 2 coletas seguidas
+darem o mesmo resultado, em vez de confiar num prazo fixo).
+
 Variáveis de ambiente necessárias (configuradas no Railway, aba "Variables"):
   - API_FOOTBALL_KEY   -> sua chave da API-Football (api-sports.io)
   - DATABASE_URL       -> a URL de conexão do Postgres (o Railway já cria essa
@@ -118,6 +137,14 @@ STATUS_JOGO_FINALIZADO = {"FT", "AET", "PEN"}
 # acréscimos); 6h dá uma folga generosa pro backend da própria API-Football
 # terminar de fechar o dado do lado deles.
 JANELA_ESPERA_ESTATISTICA_HORAS = 6
+
+# NOVO (01/09/2026): janela própria pra EVENTOS (gols/cartões/substituições),
+# separada da de estatística. Tem que ser bem mais generosa - o diagnóstico
+# que motivou essa mudança encontrou jogo com evento sendo corrigido pela
+# API-Football dias depois do fim, não horas. 72h (3 dias) é conservador o
+# bastante pra pegar a maioria dos casos observados sem rebuscar pra sempre;
+# fica documentado que ainda não é uma garantia (ver Camada 2 acima).
+JANELA_ESPERA_EVENTOS_HORAS = 72
 
 # NOVO (multi-time): os times rastreados vêm da própria tabela `times`
 # (marcados com `rastreado = TRUE`) - adicionar um time novo é: preencher
@@ -228,18 +255,21 @@ def jogo_tem_estatisticas_jogador(cur, fixture_id):
     return cur.fetchone() is not None
 
 
-def dentro_da_janela_de_espera_estatistica(cur, jogo_id):
-    """NOVO (correção estrutural do bug de estatística coletada no meio do
-    jogo): True se o jogo terminou há menos de JANELA_ESPERA_ESTATISTICA_HORAS -
-    nesse caso, `jogo_tem_estatisticas`/`jogo_tem_estatisticas_jogador`
-    retornando True NÃO é motivo suficiente pra pular a busca (ver uso no
-    loop principal). Usa COALESCE com `data_jogo` como fallback pro caso
-    raro de uma linha antiga sem `datahora_jogo` preenchido (campo
-    adicionado depois)."""
+def dentro_da_janela_de_espera(cur, jogo_id, horas):
+    """NOVO (generalizada em 01/09/2026 - antes só existia pra estatística,
+    com o nome `dentro_da_janela_de_espera_estatistica`; agora recebe `horas`
+    porque eventos e estatística usam janelas diferentes, ver
+    JANELA_ESPERA_ESTATISTICA_HORAS vs JANELA_ESPERA_EVENTOS_HORAS).
+
+    True se o jogo terminou há menos de `horas` - nesse caso, já ter dado
+    salva NÃO é motivo suficiente pra pular a busca (ver uso no loop
+    principal). Usa COALESCE com `data_jogo` como fallback pro caso raro de
+    uma linha antiga sem `datahora_jogo` preenchido (campo adicionado
+    depois)."""
     cur.execute(
         "SELECT (NOW() - COALESCE(datahora_jogo, data_jogo::timestamp)) < INTERVAL '%s hours' "
         "FROM jogos WHERE id = %s",
-        (JANELA_ESPERA_ESTATISTICA_HORAS, jogo_id),
+        (horas, jogo_id),
     )
     row = cur.fetchone()
     return bool(row[0]) if row else False
@@ -841,15 +871,19 @@ def main():
                         total_futuros += 1
                         continue
 
-                    falta_eventos = not jogo_ja_processado(cur, jogo_id)
-                    # NOVO (correção estrutural do bug de estatística coletada
-                    # no meio do jogo): dentro da janela de espera, força
-                    # `falta_estatisticas`/`falta_estatisticas_jogador` = True
-                    # mesmo que já exista linha salva - o dado só é tratado
-                    # como definitivo depois que a janela passar.
-                    dentro_da_janela = dentro_da_janela_de_espera_estatistica(cur, jogo_id)
-                    falta_estatisticas = not jogo_tem_estatisticas(cur, jogo_id) or dentro_da_janela
-                    falta_estatisticas_jogador = not jogo_tem_estatisticas_jogador(cur, jogo_id) or dentro_da_janela
+                    # NOVO (correção estrutural do bug de estatística/evento
+                    # coletado antes da hora, e de evento corrigido pela API
+                    # depois do fetch original - seção 27, Lacuna 1 e 2):
+                    # dentro da janela de espera, força a busca de novo mesmo
+                    # que já exista linha salva - o dado só é tratado como
+                    # definitivo depois que a janela passar. Eventos e
+                    # estatística têm janelas DIFERENTES (ver constantes).
+                    dentro_da_janela_eventos = dentro_da_janela_de_espera(cur, jogo_id, JANELA_ESPERA_EVENTOS_HORAS)
+                    dentro_da_janela_estatisticas = dentro_da_janela_de_espera(cur, jogo_id, JANELA_ESPERA_ESTATISTICA_HORAS)
+
+                    falta_eventos = not jogo_ja_processado(cur, jogo_id) or dentro_da_janela_eventos
+                    falta_estatisticas = not jogo_tem_estatisticas(cur, jogo_id) or dentro_da_janela_estatisticas
+                    falta_estatisticas_jogador = not jogo_tem_estatisticas_jogador(cur, jogo_id) or dentro_da_janela_estatisticas
                     falta_escalacao = not jogo_tem_escalacao(cur, jogo_id)
 
                     if not falta_eventos and not falta_estatisticas \
@@ -860,6 +894,22 @@ def main():
                     print(f"\nProcessando jogo {fixture_id} do {time_nome} (temporada {temporada})...")
 
                     if falta_eventos:
+                        if dentro_da_janela_eventos and jogo_ja_processado(cur, jogo_id):
+                            # NOVO (01/09/2026): já tinha evento salvo, mas
+                            # ainda está dentro da janela de espera - apaga
+                            # gols/cartões/substituições antigos antes de
+                            # regravar (senão duplica, já que os INSERTs
+                            # abaixo não têm ON CONFLICT). NÃO mexe em
+                            # `escalacoes` - o minuto de saída ali é
+                            # recalculado só na hora da inserção original;
+                            # se essa rebusca mudar uma substituição depois
+                            # da escalação já ter sido salva, o minuto de
+                            # saída pode ficar desatualizado (limitação
+                            # conhecida, fora do escopo desta correção).
+                            cur.execute("DELETE FROM gols WHERE jogo_id = %s", (jogo_id,))
+                            cur.execute("DELETE FROM cartoes WHERE jogo_id = %s", (jogo_id,))
+                            cur.execute("DELETE FROM substituicoes WHERE jogo_id = %s", (jogo_id,))
+                            print("  (dentro da janela de espera - rebuscando eventos pra ver se a API-Football completou/corrigiu algo)")
                         eventos = buscar_eventos(fixture_id)
                         contagem = salvar_eventos(cur, jogo_id, eventos, time_api_id)
                         print(f"  -> {contagem['gols']} gols, {contagem['cartoes']} cartões, "
@@ -869,7 +919,7 @@ def main():
                         time.sleep(7)  # respeita o limite de ~10 requisições por minuto do plano grátis
 
                     if falta_estatisticas:
-                        if dentro_da_janela and jogo_tem_estatisticas(cur, jogo_id):
+                        if dentro_da_janela_estatisticas and jogo_tem_estatisticas(cur, jogo_id):
                             # NOVO: já tinha estatística salva, mas ainda
                             # está dentro da janela de espera - apaga a
                             # linha antiga antes de regravar (senão duplica,
@@ -883,7 +933,7 @@ def main():
                         time.sleep(7)
 
                     if falta_estatisticas_jogador:
-                        if dentro_da_janela and jogo_tem_estatisticas_jogador(cur, jogo_id):
+                        if dentro_da_janela_estatisticas and jogo_tem_estatisticas_jogador(cur, jogo_id):
                             cur.execute("DELETE FROM jogador_estatisticas_jogo WHERE jogo_id = %s", (jogo_id,))
                             print("  (dentro da janela de espera - rebuscando estatística de jogador pra confirmar se já é definitiva)")
                         stats_jogadores = buscar_estatisticas_jogadores(fixture_id)
