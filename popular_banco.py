@@ -714,6 +714,19 @@ def salvar_eventos(cur, jogo_id, eventos, nosso_time_api_id):
         periodo = "1_tempo" if minuto <= 45 else "2_tempo"
 
         if tipo == "Goal":
+            # NOVO (01/09/2026): a API-Football usa type="Goal" também pra
+            # registrar PÊNALTI PERDIDO (detail="Missed Penalty") - não é
+            # gol de verdade, mas até aqui qualquer tipo=="Goal" virava uma
+            # linha em `gols`, sem checar o detail. Descoberto ao investigar
+            # Mirassol x Palmeiras: API tinha 3 eventos "Goal" pro placar
+            # real de 2 (o 3º era o pênalti anulado do Fernandinho, 83').
+            # Isso não muda o placar exibido (`jogos.placar_*` vem direto
+            # de `fixture["goals"]`, não de contar linhas de `gols`), mas
+            # contaminava qualquer análise que conta `gols` diretamente -
+            # Marca em Ambos os Tempos, Dupla Chance por tempo etc.
+            if ev.get("detail") == "Missed Penalty":
+                contagem["ignorados"] += 1
+                continue
             cur.execute(
                 """INSERT INTO gols (jogo_id, jogador_id, lado, minuto, periodo,
                                       penalti, gol_contra)
