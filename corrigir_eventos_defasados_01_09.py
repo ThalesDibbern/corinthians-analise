@@ -105,6 +105,11 @@ def salvar_eventos(cur, jogo_id, eventos, nosso_time_api_id):
         periodo = "1_tempo" if minuto <= 45 else "2_tempo"
 
         if tipo == "Goal":
+            # ver comentário equivalente em popular_banco.py: pênalti perdido
+            # vem como type="Goal", detail="Missed Penalty" - não é gol.
+            if ev.get("detail") == "Missed Penalty":
+                contagem["ignorados"] += 1
+                continue
             cur.execute(
                 """INSERT INTO gols (jogo_id, jogador_id, lado, minuto, periodo, penalti, gol_contra)
                    VALUES (%s, %s, %s, %s, %s, %s, %s)""",
@@ -168,9 +173,17 @@ def fase_verificar():
 
         eventos_api = buscar_eventos(fixture_id)
         cartoes_api = sum(1 for ev in eventos_api if ev.get("type") == "Card")
-        gols_api = sum(1 for ev in eventos_api if ev.get("type") == "Goal")
+        gols_api = sum(
+            1 for ev in eventos_api
+            if ev.get("type") == "Goal" and ev.get("detail") != "Missed Penalty"
+        )
+        penaltis_perdidos_api = sum(
+            1 for ev in eventos_api
+            if ev.get("type") == "Goal" and ev.get("detail") == "Missed Penalty"
+        )
         subs_api = sum(1 for ev in eventos_api if ev.get("type") == "subst")
-        print(f"  API agora: {gols_api} gols, {cartoes_api} cartões, {subs_api} substituições.")
+        print(f"  API agora: {gols_api} gols, {cartoes_api} cartões, {subs_api} substituições"
+              f"{f' ({penaltis_perdidos_api} pênalti(s) perdido(s), corretamente excluído(s) do gols)' if penaltis_perdidos_api else ''}.")
 
         for jogo_id, nosso_time_id, nosso_time_nome in linhas:
             gols_db, cartoes_db, subs_db = contar_atual(cur, jogo_id)
