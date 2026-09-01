@@ -180,7 +180,9 @@ def fase_verificar():
         cartoes_api = sum(1 for ev in eventos_api if ev.get("type") == "Card")
         gols_api = sum(
             1 for ev in eventos_api
-            if ev.get("type") == "Goal" and ev.get("detail") != "Missed Penalty"
+            if ev.get("type") == "Goal"
+            and ev.get("detail") != "Missed Penalty"
+            and (ev.get("player") or {}).get("name")
         )
         penaltis_perdidos_api = sum(
             1 for ev in eventos_api
