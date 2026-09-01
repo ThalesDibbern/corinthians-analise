@@ -1,13 +1,18 @@
+
 """
-Correção pontual, 2 fases (verificar / aplicar), pros 3 jogos em que o
-diagnóstico de 01/09/2026 confirmou evento defasado no banco (comparado
-direto contra a resposta ATUAL de /fixtures/events da API-Football):
+Correção pontual, 2 fases (verificar / aplicar), pros jogos em que a
+divergência entre o banco e a resposta ATUAL de /fixtures/events da
+API-Football foi confirmada por diagnóstico:
 
   1492352  Bahia 3x2 Internacional      -> banco tinha 2 cartões, API tem 6
   1492356  Mirassol 1x1 Palmeiras       -> banco tinha 4 cartões, API tem 5
   1492358  São Paulo 2x1 RB Bragantino  -> banco tinha 6 cartões (1 errado:
                                             "Pedro Henrique" 83', que não
                                             existe mais na API), API tem 7
+  1492349  Vitória 2x0 Bahia (23/08)    -> banco tinha 5 cartões, API tem 7
+                                            (faltavam Marinho e Ramon, 90' -
+                                            a divergência aberta desde a
+                                            seção 25/auditoria de 22-24/08)
 
 NÃO inclui Corinthians x Santos - nesse jogo o banco já bate 6/6 com a API-
 Football; a diferença pro Sofascore (4 cartões do Corinthians vs 3 da API)
@@ -36,7 +41,7 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 API_BASE = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
-FIXTURES_A_CORRIGIR = [1492352, 1492356, 1492358]
+FIXTURES_A_CORRIGIR = [1492352, 1492356, 1492358, 1492349]
 
 
 def cabecalho(fase):
