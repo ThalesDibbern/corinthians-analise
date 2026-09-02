@@ -1108,11 +1108,21 @@ def buscar_frequencia_forma_recente(cur, resultado, time_id, suavizar=False):
 
 
 def calcular_fator_forma_recente(cur, resultado_cor, time_id):
-    """NOVO (forma recente): retorna o multiplicador a aplicar em cima da
-    probabilidade de resultado final (vinda do confronto direto ou da média
-    geral), com base em quanto o momento atual do time (últimos jogos) se
-    desvia da referência de longo prazo pra esse mesmo resultado. Limitado
-    ao intervalo [FATOR_FORMA_MINIMO, FATOR_FORMA_MAXIMO] - mesma filosofia
+    """⚠️ NÃO É MAIS CHAMADA no fluxo de recomendação (desde 02/09/2026).
+
+    Foi substituída por `calcular_fator_forma_recente_combinado`, que
+    combina as duas perspectivas do jogo em vez de olhar só um lado - ver
+    lá o diagnóstico completo da assimetria que isso corrigiu.
+
+    Mantida no arquivo de propósito: é a versão de UM lado só, e é o que
+    precisa voltar a ser chamado se a mudança de 02/09 for revertida.
+    Nenhum outro módulo a importa (conferido).
+
+    Retorna o multiplicador a aplicar em cima da probabilidade de
+    resultado final (vinda do confronto direto ou da média geral), com
+    base em quanto o momento atual do time (últimos jogos) se desvia da
+    referência de longo prazo pra esse mesmo resultado. Limitado ao
+    intervalo [FATOR_FORMA_MINIMO, FATOR_FORMA_MAXIMO] - mesma filosofia
     do ajuste de árbitro: o momento recente BELISCA a probabilidade, nunca
     domina sobre um dado mais específico (como o confronto direto)."""
     baseline = buscar_frequencia_resultado(cur, "geral", resultado_cor, time_id)
@@ -1122,6 +1132,103 @@ def calcular_fator_forma_recente(cur, resultado_cor, time_id):
 
     fator = recente / baseline
     return max(FATOR_FORMA_MINIMO, min(FATOR_FORMA_MAXIMO, fator))
+
+
+def _fator_forma_com_peso(cur, resultado, time_id):
+    """NOVO (02/09/2026 - simetria do Grupo A no resultado_final): mesma
+    conta de `calcular_fator_forma_recente`, mas devolve `(fator, peso)`
+    em vez de só o fator, pra permitir combinar as duas perspectivas do
+    jogo ponderando por tamanho de amostra.
+
+    O peso é o `jogos_analisados` da linha de `padroes_forma_recente` -
+    o mesmo critério de ponderação já usado em
+    `buscar_frequencia_resultado_combinada` e na Dupla Chance por tempo.
+
+    O clamp individual [FATOR_FORMA_MINIMO, FATOR_FORMA_MAXIMO] é aplicado
+    AQUI, e o combinado aplica de novo por cima do resultado - piso/teto
+    individual + teto combinado, o mesmo princípio de `combinar_fatores`.
+    """
+    if time_id is None:
+        return None
+
+    baseline = buscar_frequencia_resultado(cur, "geral", resultado, time_id)
+    if baseline is None or baseline == 0:
+        return None
+
+    cur.execute(
+        "SELECT frequencia, jogos_analisados FROM padroes_forma_recente "
+        "WHERE resultado = %s AND time_id = %s ORDER BY janela DESC LIMIT 1",
+        (resultado, time_id),
+    )
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+
+    recente = float(row[0])
+    peso = int(row[1]) if len(row) > 1 and row[1] else 0
+    if peso <= 0:
+        return None
+
+    fator = max(FATOR_FORMA_MINIMO, min(FATOR_FORMA_MAXIMO, recente / baseline))
+    return (fator, peso)
+
+
+def calcular_fator_forma_recente_combinado(cur, resultado_nosso_time, nosso_time_id, adversario_id):
+    """NOVO (02/09/2026): fator de forma recente do resultado final,
+    combinando as DUAS perspectivas do jogo.
+
+    O DEFEITO QUE ISSO CORRIGE (medido na rodada 25, 29-31/08/2026): a
+    frequência base já era simétrica desde 28/08 (ver
+    `buscar_frequencia_resultado_combinada`), mas os fatores do Grupo A
+    continuavam sendo calculados só sobre `nosso_time_id` - então o mesmo
+    evento real recebia ajustes diferentes conforme a perspectiva, e o
+    filtro de VE sempre escolhia o lado mais otimista. Exemplo real, jogo
+    Vasco x Cruzeiro (fixture 1492359):
+
+        "Vitória do Cruzeiro"  -> forma recente + zona da tabela, 1.03x
+        "Derrota do Vasco"     -> forma recente,                  1.15x
+
+    Mesmo evento, dois ajustes. É a MESMA armadilha já corrigida no empate
+    em 28/08, aparecendo por outra porta - vitória/derrota nunca tinham
+    sido tratados.
+
+    COMO COMBINA: "o Cruzeiro vem vencendo mais que o normal?" e "o Vasco
+    vem perdendo mais que o normal?" são duas leituras do mesmo fenômeno,
+    ambas legítimas. Em vez de escolher uma (o que deixava a escolha pro
+    filtro de VE), tira a média ponderada por amostra - mesmo desenho já
+    validado na frequência base e na Dupla Chance etapa 1.
+
+    ESCADA: se só um dos lados tiver dado, usa ele sozinho. Se nenhum,
+    devolve None e o fator simplesmente não se aplica (comportamento
+    idêntico ao de antes nesse caso).
+
+    ⚠️ `_RESULTADO_ESPELHADO` não é detalhe: sem a inversão, isso somaria
+    "o Cruzeiro vem vencendo" com "o Vasco vem vencendo" - eventos
+    opostos. Mesma armadilha do campo `lado` com dupla semântica que
+    causou o bug do cartão de time.
+    """
+    if resultado_nosso_time not in _RESULTADO_ESPELHADO:
+        return None
+
+    resultado_adversario = _RESULTADO_ESPELHADO[resultado_nosso_time]
+
+    leituras = [
+        leitura for leitura in (
+            _fator_forma_com_peso(cur, resultado_nosso_time, nosso_time_id),
+            _fator_forma_com_peso(cur, resultado_adversario, adversario_id),
+        ) if leitura is not None
+    ]
+    if not leituras:
+        return None
+
+    peso_total = sum(peso for _fator, peso in leituras)
+    if peso_total <= 0:
+        return None
+
+    combinado = sum(fator * peso for fator, peso in leituras) / peso_total
+    # Teto combinado por cima do produto das pontas já clampadas - mesma
+    # filosofia de `combinar_fatores`.
+    return max(FATOR_FORMA_MINIMO, min(FATOR_FORMA_MAXIMO, combinado))
 
 
 ULTIMOS_JOGOS_PARA_TITULARES = 3
@@ -2452,23 +2559,47 @@ def calcular_recomendacoes(cur):
                     # sempre escolhe a maior das duas, isso era seleção
                     # adversa pura: o fator não estava medindo nada, só
                     # escolhendo qual perspectiva virava recomendação.
+                    # NOVO (02/09/2026 - simetria do Grupo A): o fator de
+                    # forma agora COMBINA as duas perspectivas do jogo, em
+                    # vez de olhar só o `nosso_time_id` daquela linha - ver
+                    # `calcular_fator_forma_recente_combinado` pro
+                    # diagnóstico completo. Antes, "Vitória do Cruzeiro" e
+                    # "Derrota do Vasco" (o MESMO evento real) recebiam
+                    # 1.03x e 1.15x, e o filtro de VE sempre ficava com a
+                    # estimativa mais otimista das duas.
                     fator_forma = None
                     if resultado_cor != "empate":
-                        fator_forma = calcular_fator_forma_recente(cur, resultado_cor, nosso_time_id)
-
-                    fator_zona = None
-                    fator_rodada = None
-                    if resultado_cor == "vitoria":
-                        zona_atual, condicao_momento = buscar_contexto_zona_time(
-                            cur, nosso_time_id, nosso_time_api_id, temporada, rodada_numero
+                        fator_forma = calcular_fator_forma_recente_combinado(
+                            cur, resultado_cor, nosso_time_id, adversario_id
                         )
-                        fator_zona = buscar_fator_zona(cur, nosso_time_id, zona_atual, condicao_momento, "resultado")
-                        fator_rodada = buscar_fator_rodada(cur, nosso_time_id, rodada_numero, "resultado")
 
+                    # NOVO (02/09/2026): Zona da Tabela e Padrão por Rodada
+                    # SAÍRAM do resultado_final. Eles só existem calculados
+                    # como TAXA DE VITÓRIA (`padroes_zona_time.valor` e
+                    # `padroes_rodada_bruto.valor`, sem separação por
+                    # resultado), então só podiam ser aplicados na
+                    # perspectiva "vitória" - e era justamente isso que
+                    # deixava um lado do mesmo evento com 3 fatores e o
+                    # outro com 1.
+                    #
+                    # POR QUE NÃO ESPELHAR do adversário (opção avaliada e
+                    # DESCARTADA): "derrota nossa" não é o mesmo que
+                    # "vitória do adversário" - entre os dois existe o
+                    # empate, ~27% no Brasileirão. Usar a taxa de vitória
+                    # do adversário como proxy pra nossa derrota embutiria
+                    # esse erro de 27 pontos na fórmula. Não é ajuste fino,
+                    # é premissa errada.
+                    #
+                    # Como o dado não sustenta aplicar nos dois lados, e
+                    # aplicar num lado só é a origem da assimetria, a saída
+                    # coerente é não aplicar em nenhum. Isso REMOVE um
+                    # ajuste que nunca tinha sido medido isolado - é
+                    # deliberado, vira informação na próxima rodada.
+                    #
+                    # ⚠️ NÃO afeta `escanteio_time`, que usa zona/rodada com
+                    # tipo_padrao="escanteio" e segue intocado.
                     fator_grupo_a_aplicado, descricoes_grupo_a = combinar_fatores([
                         (fator_forma, "forma recente"),
-                        (fator_zona, "zona da tabela"),
-                        (fator_rodada, "padrão por rodada"),
                     ])
                     if fator_grupo_a_aplicado is not None:
                         frequencia = min(round(frequencia * fator_grupo_a_aplicado, 2), 100.0)
