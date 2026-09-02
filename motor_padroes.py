@@ -2644,6 +2644,80 @@ def salvar_padroes_ambas_marcam_tempo(cur, resultados, time_id):
         print(f"  [{periodo}/{lado}] Ambas Marcam: {jogos_com_ambas}/{jogos_analisados} jogos ({frequencia}%)")
 
 
+def calcular_padroes_time_marca_periodo(cur, time_id):
+    """NOVO (02/09/2026 - decomposição do Ambas Marcam por tempo):
+    frequência de ESTE time marcar pelo menos um gol no período (1T/2T),
+    separada por mandante/visitante.
+
+    POR QUE ISSO EXISTE: `padroes_ambas_marcam_tempo` guarda a frequência
+    CONJUNTA ("ambos marcaram"), que é uma média sobre todos os
+    adversários que o time enfrentou - não diz nada sobre o adversário do
+    próximo jogo. Guardando o COMPONENTE por time, o motor de
+    recomendações passa a montar a estimativa com os dois times REAIS da
+    partida:
+
+        P(ambas marcam no período) = P(mandante marca) x P(visitante marca)
+
+    Medido em 1662 jogos / 5 temporadas: o fator de correlação entre os
+    dois eventos fica entre 0.91 e 1.08 (média 0.99), ou seja, eles são
+    praticamente independentes e o produto puro basta - sem fator de
+    correção pra calibrar e envelhecer. Ver migrar_padroes_time_marca_periodo.py.
+
+    Mesma fonte de dado (`placar_*_intervalo`) e mesmas constantes de
+    janela/mínimo dos outros padrões por tempo - de propósito, pra que a
+    amostra seja comparável com `padroes_ambas_marcam_tempo`, que continua
+    existindo como fallback."""
+    resultados_finais = []
+    for lado_bool, lado_nome in [(True, "mandante"), (False, "visitante")]:
+        cur.execute(
+            """
+            SELECT placar_corinthians, placar_corinthians_intervalo
+            FROM jogos
+            WHERE nosso_time_id = %s AND mandante = %s
+              AND placar_corinthians IS NOT NULL
+              AND placar_corinthians_intervalo IS NOT NULL
+            ORDER BY data_jogo DESC
+            LIMIT %s
+            """,
+            (time_id, lado_bool, JANELA_MAXIMA_DE_JOGOS),
+        )
+        jogos = cur.fetchall()
+        total = len(jogos)
+        if total < JOGOS_MINIMOS_PARA_ANALISAR:
+            continue
+
+        janelas_periodo = [
+            ("1T", lambda placar_final, placar_int: placar_int),
+            ("2T", lambda placar_final, placar_int: placar_final - placar_int),
+        ]
+        for periodo_nome, calc_gols in janelas_periodo:
+            marcou = 0
+            for placar_final, placar_int in jogos:
+                if calc_gols(placar_final, placar_int) > 0:
+                    marcou += 1
+            frequencia = round(100 * marcou / total, 2)
+            resultados_finais.append((periodo_nome, lado_nome, total, marcou, frequencia))
+
+    return resultados_finais
+
+
+def salvar_padroes_time_marca_periodo(cur, resultados, time_id):
+    for periodo, lado, jogos_analisados, jogos_que_marcou, frequencia in resultados:
+        cur.execute(
+            """
+            INSERT INTO padroes_time_marca_periodo (time_id, periodo, lado, jogos_analisados, jogos_que_marcou, frequencia, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (time_id, periodo, lado) DO UPDATE SET
+                jogos_analisados = EXCLUDED.jogos_analisados,
+                jogos_que_marcou = EXCLUDED.jogos_que_marcou,
+                frequencia = EXCLUDED.frequencia,
+                atualizado_em = NOW()
+            """,
+            (time_id, periodo, lado, jogos_analisados, jogos_que_marcou, frequencia),
+        )
+        print(f"  [{periodo}/{lado}] Marca no período: {jogos_que_marcou}/{jogos_analisados} jogos ({frequencia}%)")
+
+
 def calcular_padrao_marca_ambos_tempos(cur, time_id):
     """NOVO (Onda 2 - Marca em Ambos os Tempos): frequência de o time
     marcar no 1º tempo E no 2º tempo, no mesmo jogo - sem separar por
@@ -3180,6 +3254,21 @@ def main():
                 conn.commit()
             else:
                 print(f"  Dados insuficientes ainda para Ambas Marcam por tempo "
+                      f"(mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos por lado, com placar de intervalo salvo).")
+
+            # NOVO (02/09/2026): componente por time do Ambas Marcam - ver
+            # calcular_padroes_time_marca_periodo. Fica DEPOIS do cálculo
+            # conjunto de propósito: `padroes_ambas_marcam_tempo` continua
+            # sendo gravada normalmente, porque segue servindo de fallback
+            # da escada no motor de recomendações e de base de comparação
+            # com o método antigo.
+            print("Calculando padrões de marca por período (componente do Ambas Marcam)...")
+            resultados_marca_periodo = calcular_padroes_time_marca_periodo(cur, time_id)
+            if resultados_marca_periodo:
+                salvar_padroes_time_marca_periodo(cur, resultados_marca_periodo, time_id)
+                conn.commit()
+            else:
+                print(f"  Dados insuficientes ainda para marca por período "
                       f"(mínimo de {JOGOS_MINIMOS_PARA_ANALISAR} jogos por lado, com placar de intervalo salvo).")
 
             print("Calculando padrão de Marca em Ambos os Tempos...")
