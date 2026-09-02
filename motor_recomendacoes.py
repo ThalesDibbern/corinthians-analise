@@ -845,6 +845,63 @@ def buscar_frequencia_ambas_marcam_tempo(cur, time_id, periodo, lado, suavizar=F
     return _frequencia_do_row(cur.fetchone(), suavizar)
 
 
+def buscar_frequencia_marca_periodo(cur, time_id, periodo, lado, suavizar=False):
+    """NOVO (02/09/2026): componente por time do Ambas Marcam - "este time
+    marca pelo menos um gol neste período?", separado por mandante/visitante.
+
+    Ver `buscar_frequencia_ambas_marcam_tempo_decomposta` pro porquê da
+    decomposição."""
+    cur.execute(
+        "SELECT frequencia, jogos_analisados FROM padroes_time_marca_periodo "
+        "WHERE time_id = %s AND periodo = %s AND lado = %s",
+        (time_id, periodo, lado),
+    )
+    return _frequencia_do_row(cur.fetchone(), suavizar)
+
+
+def buscar_frequencia_ambas_marcam_tempo_decomposta(cur, mandante_id, visitante_id, periodo, suavizar=False):
+    """NOVO (02/09/2026): estimativa de "Ambas Marcam no período" montada
+    a partir dos COMPONENTES dos dois times reais da partida, em vez da
+    frequência conjunta histórica.
+
+        P(ambas marcam) = P(mandante marca) x P(visitante marca)
+
+    POR QUE (medido em 1662 jogos, 5 temporadas - ver
+    migrar_padroes_time_marca_periodo.py): o fator de correlação entre os
+    dois eventos fica entre 0.91 e 1.08 (média 0.99). Eles são
+    praticamente independentes, então o produto puro basta - nenhum fator
+    de correção pra manter.
+
+    O QUE ISSO CONSERTA: a frequência conjunta de
+    `padroes_ambas_marcam_tempo` é uma média sobre todos os adversários
+    que o time já enfrentou - ignora QUEM é o adversário do próximo jogo.
+    E como ela depende de qual time é o `nosso_time` da linha, o mesmo
+    evento saía com dois números (divergência média medida: 7,14 pontos no
+    1T, 8,78 no 2T, máximas de 27,6 e 32,0), e o filtro de VE ficava
+    sempre com o mais otimista.
+
+    O sintoma mais claro, no log de 02/09/2026 (Mirassol x Flamengo): o
+    app recomendou "Ambas Marcam 1T - Sim" (23,33%) por uma perspectiva e
+    "Ambas Marcam 1T - Não" (88,00%) pela outra, no mesmo jogo. Se Sim
+    vale 23,33%, Não vale 76,67% - não 88%.
+
+    Aqui o cálculo NÃO depende da perspectiva: recebe mandante e
+    visitante do jogo e devolve o mesmo número seja de que lado se olhe.
+    O defeito some por construção.
+
+    Devolve None se faltar qualquer um dos dois componentes - nesse caso
+    quem chama cai no método antigo (escada de fallback)."""
+    freq_mandante = buscar_frequencia_marca_periodo(cur, mandante_id, periodo, "mandante", suavizar=suavizar)
+    freq_visitante = buscar_frequencia_marca_periodo(cur, visitante_id, periodo, "visitante", suavizar=suavizar)
+
+    if freq_mandante is None or freq_visitante is None:
+        return None
+
+    # As duas vêm em porcentagem (0-100); o produto precisa ser feito em
+    # probabilidade (0-1) e devolvido em porcentagem de novo.
+    return round((freq_mandante / 100.0) * (freq_visitante / 100.0) * 100.0, 2)
+
+
 def buscar_frequencia_marca_ambos_tempos(cur, time_id, suavizar=False):
     """NOVO (Onda 2 - Marca em Ambos os Tempos): frequência binária, um
     valor só por time (sem separação por lado - jogo inteiro, não faz
@@ -2436,14 +2493,31 @@ def calcular_recomendacoes(cur):
             )
 
         elif tipo == "ambas_marcam_1t" and not jogador_id and direcao_normalizada in ("sim", "não", "nao"):
-            # NOVO (Onda 2): Ambas Marcam também é mercado do JOGO (não
-            # depende de qual time está no texto) - mesma lógica.
-            frequencia_bruta = buscar_frequencia_ambas_marcam_tempo(cur, nosso_time_id, "1T", mandante_filtro_atual, suavizar=suavizar)
+            # NOVO (02/09/2026): estimativa DECOMPOSTA - produto dos
+            # componentes dos dois times reais do jogo, em vez da
+            # frequência conjunta histórica do `nosso_time`. Ver
+            # `buscar_frequencia_ambas_marcam_tempo_decomposta`.
+            #
+            # ESCADA: se faltar componente de qualquer lado, cai pro
+            # método antigo - nunca fica sem estimativa.
+            frequencia_bruta = None
+            if mandante_id is not None and visitante_id is not None:
+                frequencia_bruta = buscar_frequencia_ambas_marcam_tempo_decomposta(
+                    cur, mandante_id, visitante_id, "1T", suavizar=suavizar
+                )
+            if frequencia_bruta is None:
+                frequencia_bruta = buscar_frequencia_ambas_marcam_tempo(cur, nosso_time_id, "1T", mandante_filtro_atual, suavizar=suavizar)
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
         elif tipo == "ambas_marcam_2t" and not jogador_id and direcao_normalizada in ("sim", "não", "nao"):
-            frequencia_bruta = buscar_frequencia_ambas_marcam_tempo(cur, nosso_time_id, "2T", mandante_filtro_atual, suavizar=suavizar)
+            frequencia_bruta = None
+            if mandante_id is not None and visitante_id is not None:
+                frequencia_bruta = buscar_frequencia_ambas_marcam_tempo_decomposta(
+                    cur, mandante_id, visitante_id, "2T", suavizar=suavizar
+                )
+            if frequencia_bruta is None:
+                frequencia_bruta = buscar_frequencia_ambas_marcam_tempo(cur, nosso_time_id, "2T", mandante_filtro_atual, suavizar=suavizar)
             if frequencia_bruta is not None:
                 frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
