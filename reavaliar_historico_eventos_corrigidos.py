@@ -37,7 +37,8 @@ from avaliacao import avaliar_resultado
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
-JOGO_IDS = [944, 1492352, 270, 1492356, 1296, 1121, 1492349, 1216]
+JOGO_IDS = [15, 1492120, 31, 1492133, 1196, 1492152, 964, 1492186,
+            966, 1492206, 1207, 1492264, 331, 1492278, 639, 1492286]
 
 
 def cabecalho(fase):
