@@ -395,6 +395,59 @@ JOGOS_MINIMOS_AMOSTRA_CONFIAVEL = 30
 PESO_PRIOR_CONFRONTO_DIRETO = 10
 
 
+# NOVO (01/09/2026 - mercado de EMPATE desativado)
+# ---------------------------------------------------------------------
+# Quando True, `resultado_final` com resultado "empate" NÃO gera
+# recomendação. Vitória e derrota seguem normalmente.
+#
+# POR QUE: 0 acertos em 22 recomendações de empate, medido no histórico
+# INTEIRO (não só numa rodada), com probabilidade média prevista de 34,7%.
+# Se a taxa real de empate é ~27,3% (203 de 743 jogos, 24 meses), a chance
+# de 22 recomendações errarem TODAS por azar é menor que 0,1%.
+#
+# O QUE JÁ FOI DESCARTADO como causa (investigado em 01/09/2026, cada um
+# com consulta própria no banco - "descartar hipótese vale tanto quanto
+# confirmar"):
+#
+#   1. Erro de AVALIAÇÃO -> descartado. Os 22 jogos foram conferidos um a
+#      um contra o placar real de `jogos_liga`: nenhum empatou de verdade.
+#      `avaliacao.py` está certo.
+#
+#   2. FORMA RECENTE aplicada ao empate (o bug corrigido em 28/08) ->
+#      descartado como causa principal. Separando as 22 linhas em antes e
+#      depois da correção: 0 de 13 acertaram ANTES, 0 de 9 DEPOIS. A
+#      correção estava certa em ser feita, mas não move este número.
+#
+#   3. CONFRONTO DIRETO inflando a estimativa -> descartado. Comparando
+#      COM e SEM confronto direto dentro do próprio mercado de empate:
+#      0 de 15 COM (previsto 35,0%), 0 de 7 SEM (previsto 34,1%). Se o
+#      confronto fosse a causa, o grupo SEM estaria melhor. Não está.
+#
+# O QUE SOBRA (hipótese estrutural, sem conserto desenhado): o filtro de
+# VE só deixa passar uma recomendação de empate quando o modelo estima
+# ACIMA do que a odd da casa implica. Empate é um resultado quase
+# simétrico, difícil de ter edge real, e a casa precifica bem - então
+# "modelo discorda da casa pra cima no empate" é, na prática, ruído do
+# modelo, não sinal. É a pendência 28 (o filtro de VE seleciona os
+# maiores erros do próprio modelo) na sua forma mais extrema.
+#
+# POR QUE DESATIVAR em vez de continuar ajustando: três hipóteses de
+# conserto já foram testadas e descartadas com dado real. Manter no ar um
+# mercado com 0% de acerto medido, enquanto a causa-raiz não tem desenho,
+# só contamina a banca e a tabela de calibração. Desativar é reversível
+# numa linha; o prejuízo acumulado, não.
+#
+# COMO REVERTER: trocar para False. As recomendações de empate voltam a
+# ser geradas exatamente como antes - nenhuma outra lógica foi removida,
+# só o ponto de geração é pulado.
+#
+# ESCOPO DELIBERADO: só o empate. Vitória (26,7% observado) e derrota
+# (26,3%) continuam ativas e servem de GRUPO DE CONTROLE - se o problema
+# for do mercado de resultado como um todo, elas vão mostrar isso ao
+# longo das próximas rodadas sem que nada precise ser desfeito aqui.
+GERAR_RECOMENDACAO_DE_EMPATE = False
+
+
 def carregar_total_jogos_por_time(cur):
     """NOVO (suavização): conta quantos jogos JÁ CONCLUÍDOS cada time tem,
     pra decidir quais entram na suavização. Usa o MESMO critério de "jogo
@@ -929,13 +982,17 @@ def buscar_frequencia_confronto(cur, nosso_time_id, adversario_id, mandante_filt
     ⚠️ NOVO (28/08/2026): esta função virou um WRAPPER de
     `buscar_confronto_detalhado`. Ela mantém o comportamento antigo
     (confronto SUBSTITUI o padrão geral, suavizado por Laplace em direção
-    a 50%) e é usada por cartao_total, cartao_time e resultado_final.
-    `escanteio_total` NÃO usa mais esta função - lá o confronto é
-    encolhido em direção ao padrão geral do time (ver
-    PESO_PRIOR_CONFRONTO_DIRETO), porque foi o único mercado onde o
-    defeito da substituição foi medido de verdade. Se/quando o mesmo for
-    medido nos outros 3, é só trocar a chamada deles pela versão
-    detalhada.
+    a 50%) e é usada por cartao_total e cartao_time.
+    `escanteio_total` e `resultado_final` NÃO usam mais esta função - lá o
+    confronto é encolhido em direção ao padrão geral do time (ver
+    PESO_PRIOR_CONFRONTO_DIRETO). Se/quando o mesmo for medido nos outros
+    2, é só trocar a chamada deles pela versão detalhada.
+
+    (Correção de 01/09/2026: este parágrafo dizia que `resultado_final`
+    ainda usava o comportamento antigo, o que deixou de valer quando ele
+    passou a chamar `buscar_confronto_detalhado` direto. Era só a
+    documentação defasada - o código já estava certo - mas comentário
+    errado é armadilha pra quem for mexer aqui depois.)
 
     NOVO (21/08/2026 - suavização SEMPRE ativa aqui): o parâmetro
     `suavizar` recebido é IGNORADO de propósito - confronto direto é
@@ -2328,6 +2385,13 @@ def calcular_recomendacoes(cur):
 
         elif tipo == "resultado_final" and not jogador_id:
             resultado_cor = resultado_do_ponto_de_vista_corinthians(direcao, mandante)
+            # NOVO (01/09/2026): empate desativado - ver
+            # GERAR_RECOMENDACAO_DE_EMPATE pro diagnóstico completo (0
+            # acertos em 22, com 3 hipóteses de causa já testadas e
+            # descartadas). A trava fica ANTES de qualquer consulta: não
+            # adianta calcular uma probabilidade que vai ser descartada.
+            if resultado_cor == "empate" and not GERAR_RECOMENDACAO_DE_EMPATE:
+                continue
             if resultado_cor:
                 # NOVO (28/08/2026): duas mudanças, na ordem em que
                 # importam - ver buscar_frequencia_resultado_combinada e
