@@ -95,6 +95,114 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 
 VALOR_ESPERADO_MINIMO = 0.0  # só guarda recomendações com VE acima disso
 
+# =====================================================================
+# NOVO (03/09/2026) - CORREÇÃO DA SELEÇÃO ADVERSA DO VE (pendência 28)
+# =====================================================================
+#
+# O PROBLEMA: quando a probabilidade que o modelo calcula diverge MUITO
+# da probabilidade que a odd da casa implica, essa divergência quase
+# sempre é o MODELO errando - não uma vantagem real. Medido sobre 939
+# recomendações já avaliadas, controlando pela faixa de probabilidade
+# prevista (o que ISOLA o mecanismo - não é só "a probabilidade está
+# mal calibrada"):
+#
+#   faixa de prob. prevista | gap com VE baixo | gap com VE alto
+#   40-60%                  |       -5,1       |      -23,5
+#   60-80%                  |       -8,6       |      -25,3
+#   80-100%                 |       -9,1       |      -16,8
+#
+# Mesma probabilidade prevista, só muda o quanto o modelo discorda da
+# casa - e o erro dispara. Nas faixas de VE 0,30-0,60 a odd da casa
+# acertou o resultado real quase exato (36,06% implícito vs 35,94%
+# observado) enquanto o modelo errava por 12-15 pontos. A casa é um
+# previsor MELHOR que o modelo justamente onde o VE é alto.
+#
+# A CORREÇÃO: encolher a probabilidade do modelo em direção à implícita
+# na odd, proporcional à divergência. É a MESMA lógica do confronto
+# direto como prior (seção 41), agora aplicada contra o mercado:
+#
+#     p_mercado = 100 / odd
+#     diff      = p_modelo - p_mercado
+#     peso      = 1 / (1 + K * |diff| / 100)
+#     p_final   = p_mercado + diff * peso
+#
+# K=15 escolhido por backtest (03/09/2026): resolve quase todo o gap da
+# faixa mais grave (0,60+: -13,6 -> -1,1) sem super-corrigir a faixa
+# que já estava calibrada (0,10-0,20, que vira só +1,5). K maior segue
+# melhorando as faixas do meio mas PIORA a 0,10-0,20 e a 0,60+ pro
+# outro lado - não existe K que otimize todas, 15 é o equilíbrio.
+#
+# ⚠️ A fórmula sozinha NÃO filtra nada. Como p_final fica sempre ENTRE
+# p_modelo e p_mercado, o VE encolhe mas nunca cruza zero - medido: 0
+# recomendações mudariam de lado do filtro VE>0. Por isso o piso abaixo
+# é parte da correção, não um extra.
+VALOR_K_ENCOLHIMENTO_MERCADO = 15.0
+
+# Piso de VE (já corrigido) pros mercados do escopo.
+#
+# ⚠️ DESLIGADO NESTA ETAPA (0.0 = mesmo comportamento de antes).
+# DELIBERADO, não esquecimento. Só o ENCOLHIMENTO entra agora.
+#
+# POR QUÊ: um piso uniforme é muito mais exigente em odd BAIXA do que em
+# odd alta, porque o VE é percentual (p * odd - 1) - a mesma divergência
+# absoluta rende menos VE quanto menor a odd. Medido, com piso 0,05:
+#
+#   odd 1.20 -> o modelo precisa divergir 11,1 pontos da casa pra passar
+#   odd 2.00 -> 4,0 pontos
+#   odd 5.00 -> 1,2 ponto
+#   odd 10.0 -> 0,6 ponto
+#
+# Isso corta MAIS onde o app erra MENOS: a faixa de VE corrigido
+# 0,00-0,02 (a que o piso mataria primeiro) tinha 58,8% de acerto, odd
+# média 1,94 e ROI de só -4,2%. Já a faixa 0,20+ (odd média 11,45, 12,6%
+# de acerto) passaria folgada. Efeito perverso pro objetivo de "mostrar
+# as melhores" - e atinge em cheio as pernas de múltipla, que vivem na
+# faixa 1.20-1.60.
+#
+# O ROI por faixa que definiria o piso (medido 03/09/2026) também não
+# sustenta uma escolha confiante ainda:
+#
+#   faixa VE corrigido |  n  | ROI     | margem de erro
+#   0,00-0,02          |  97 | -4,2%   | confiável (perde)
+#   0,02-0,05          | 212 | -2,5%   | confiável (perde)
+#   0,05-0,10          | 347 | +1,2%   | ~+-6 pts  -> indistinguível de 0
+#   0,10-0,20          | 188 | +3,7%   | ~+-13 pts -> indistinguível de 0
+#   0,20+              |  95 | +11,8%  | ~+-39 pts -> RUÍDO (só 12 vitórias,
+#                                        cada uma move o ROI em ~12 pts)
+#
+# DECISÃO: medir o encolhimento sozinho na rodada de 05/09/2026 e só
+# então escolher o piso, com dado JÁ produzido pela fórmula nova. Escolher
+# agora seria calibrar sobre um mundo que deixou de existir. Uma etapa
+# por vez é o que torna a próxima medição interpretável - mesma razão
+# pela qual a seção 29 (Dupla Chance) segue em etapas.
+#
+# Pra ligar depois: trocar por 0.05 (ou o valor que a medição indicar).
+VALOR_ESPERADO_MINIMO_CORRIGIDO = 0.0
+
+# ESCOPO da correção. Só os mercados SEM problema de calibração próprio.
+# resultado_final/forma recente e correlação ficam FORA de propósito:
+# eles erram muito MESMO com VE baixo (gaps de -19 a -26 já na faixa
+# 0,00-0,10), ou seja, têm um segundo defeito que esta correção não
+# trata. Aplicar aqui seria empilhar conserto em cima de bug e perder a
+# capacidade de saber qual dos dois resolveu o quê.
+#
+#   - resultado_final: aguarda a medição da rodada de 05/09/2026, que já
+#     tem critério de reversão definido (seção 56). Não dá pra separar
+#     "antes/depois" da correção de simetria hoje - só 1 linha nova.
+#   - correlacao: problema próprio, nunca investigado. Pendência à parte.
+#
+# Esses dois também servem de GRUPO DE CONTROLE: se os mercados do
+# escopo melhorarem e eles não, o mérito é desta correção.
+MERCADOS_CORRECAO_DIVERGENCIA_MERCADO = {
+    "escanteio_time", "escanteio_total",
+    "cartao", "cartao_total",
+    "gols_time", "gols_total",
+    "ambas_marcam_1t", "ambas_marcam_2t",
+    "marca_ambos_tempos",
+    "equipe_marca",
+    "chute_no_gol", "falta_cometida",
+}
+
 # limites do ajuste de árbitro - evita que uma amostra pequena por árbitro
 # distorça demais a probabilidade calculada a partir dos últimos 50 jogos do jogador
 FATOR_ARBITRO_MINIMO = 0.85
@@ -168,6 +276,56 @@ JOGOS_MINIMOS_FATOR_ZONA_MOMENTO = 10
 # time) - só usado quando ainda não temos a escalação confirmada da
 # partida específica (ver jogador_disponivel).
 JOGOS_JANELA_DISPONIBILIDADE = 3
+
+
+def encolher_para_o_mercado(frequencia, valor_odd, tipo_padrao):
+    """Encolhe a probabilidade do modelo em direção à implícita na odd da
+    casa, proporcional ao tamanho da divergência.
+
+    Ver o bloco de constantes no topo (VALOR_K_ENCOLHIMENTO_MERCADO) pro
+    diagnóstico completo e os números que justificam K=15.
+
+    Resumo do mecanismo: divergência PEQUENA passa quase intacta (o
+    modelo e a casa concordam, não há nada a corrigir); divergência
+    GRANDE é puxada com força pra perto da odd, porque foi medido que
+    nesses casos a casa acerta e o modelo não.
+
+    Devolve `(frequencia_final, houve_ajuste)`. Fora do escopo ou sem odd
+    utilizável, devolve a frequência original intacta - nunca levanta.
+
+    ⚠️ p_final fica sempre ENTRE p_modelo e p_mercado, então o VE encolhe
+    mas nunca vira negativo por conta disso. Quem filtra é o piso
+    VALOR_ESPERADO_MINIMO_CORRIGIDO, não esta função.
+    """
+    if tipo_padrao not in MERCADOS_CORRECAO_DIVERGENCIA_MERCADO:
+        return frequencia, False
+
+    try:
+        odd = float(valor_odd)
+    except (TypeError, ValueError):
+        return frequencia, False
+
+    if odd <= 0:
+        return frequencia, False
+
+    p_mercado = 100.0 / odd
+    diff = frequencia - p_mercado
+
+    # Divergência desprezível: não mexe. Evita poluir a descrição na tela
+    # com "(ajustado ...)" quando o ajuste não muda nada de fato.
+    if abs(diff) < 0.01:
+        return frequencia, False
+
+    peso = 1.0 / (1.0 + VALOR_K_ENCOLHIMENTO_MERCADO * abs(diff) / 100.0)
+    p_final = p_mercado + diff * peso
+
+    # Clamp defensivo: a fórmula não pode sair de [0, 100] por
+    # construção (p_final fica entre p_modelo e p_mercado, ambos válidos),
+    # mas uma odd corrompida no banco (< 1.0) faria p_mercado passar de
+    # 100. Barato garantir aqui do que rastrear depois.
+    p_final = max(0.0, min(100.0, p_final))
+
+    return round(p_final, 2), True
 
 
 def identificar_tipo_padrao(mercado):
@@ -2737,6 +2895,20 @@ def calcular_recomendacoes(cur):
         if frequencia is None:
             continue  # não temos padrão calculado pra cruzar com essa odd ainda
 
+        # NOVO (03/09/2026 - pendência 28): encolhe a probabilidade em
+        # direção à implícita na odd da casa quando as duas divergem
+        # muito. Aplicado AQUI, depois de todos os fatores do Grupo A e
+        # antes do VE, porque é a última palavra sobre a probabilidade -
+        # corrige o número que o modelo produziu, seja lá como produziu.
+        #
+        # A frequência corrigida vira a probabilidade usada no VE E na
+        # tela. Manter duas (uma exibida, outra interna) faria os números
+        # da tela não fecharem entre si: o usuário veria "62%, odd 3.00"
+        # com um VE que não bate com 62% * 3.00 - 1.
+        frequencia, houve_encolhimento_mercado = encolher_para_o_mercado(
+            frequencia, valor_odd, tipo
+        )
+
         probabilidade = frequencia / 100
         valor_esperado = round((probabilidade * float(valor_odd)) - 1, 3)
 
@@ -2788,7 +2960,28 @@ def calcular_recomendacoes(cur):
             else:
                 descricao_final += " (confronto direto)"
 
-        if valor_esperado > VALOR_ESPERADO_MINIMO:
+        # NOVO (03/09/2026): marca na descrição quando a probabilidade foi
+        # puxada em direção à odd da casa. Sem essa marca não dá pra
+        # auditar depois se uma recomendação saiu encolhida ou não - a
+        # mesma cegueira que a seção 41 já custou caro ("(confronto
+        # direto: N jogos)" existe pelo mesmo motivo). E a ausência do
+        # sufixo passa a ser diagnóstico: mercado fora do escopo, ou
+        # modelo que já concordava com a casa.
+        if houve_encolhimento_mercado:
+            descricao_final += " (ajustado pela odd da casa)"
+
+        # NOVO (03/09/2026): o filtro passou a usar o piso CORRIGIDO nos
+        # mercados do escopo. Nos demais (resultado_final, correlação, e
+        # qualquer mercado não classificado), segue valendo o
+        # VALOR_ESPERADO_MINIMO de sempre - eles são o grupo de controle
+        # e não podem ter DOIS parâmetros mudando ao mesmo tempo, senão a
+        # próxima medição não distingue o efeito de um do outro.
+        if tipo in MERCADOS_CORRECAO_DIVERGENCIA_MERCADO:
+            piso_ve = VALOR_ESPERADO_MINIMO_CORRIGIDO
+        else:
+            piso_ve = VALOR_ESPERADO_MINIMO
+
+        if valor_esperado > piso_ve:
             recomendacoes.append({
                 "jogo_id": jogo_id,
                 "jogador_id": jogador_id,
