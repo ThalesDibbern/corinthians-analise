@@ -902,6 +902,52 @@ def buscar_frequencia_ambas_marcam_tempo_decomposta(cur, mandante_id, visitante_
     return round((freq_mandante / 100.0) * (freq_visitante / 100.0) * 100.0, 2)
 
 
+def buscar_frequencia_marca_ambos_tempos_decomposta(cur, time_id, lado, suavizar=False):
+    """NOVO (02/09/2026 - Fase 2 da decomposição): estimativa de "este time
+    marca nos DOIS tempos" montada a partir dos componentes por período,
+    em vez da frequência conjunta.
+
+        P(marca nos dois) = P(marca 1T | lado) x P(marca 2T | lado)
+
+    POR QUE (medido em 1662 jogos, 5 temporadas, 02/09/2026):
+
+        ano   jogos  p_marca_1t  p_marca_2t  p_ambos_real  fator
+        2022    324      0.4660      0.5586        0.2654  1.0195
+        2023    368      0.4891      0.5000        0.2609  1.0667
+        2024    359      0.4540      0.5766        0.2535  0.9682
+        2025    368      0.4348      0.5299        0.2582  1.1205
+        2026    243      0.4403      0.4897        0.2058  0.9542
+
+    O fator (real / produto) fica em 1.03 de média, variando 0.95-1.12.
+    A hipótese inicial era que houvesse correlação POSITIVA clara (time
+    que marca no 1T pega o jogo aberto e marca de novo) - a medição
+    mostrou que não: os dois eventos são praticamente independentes,
+    igual ao caso do Ambas Marcam. Os ~3% de desvio sobre 1.0 estão
+    dentro da variação entre temporadas, então não vale introduzir um
+    fator de correção pra manter e envelhecer.
+
+    GANHO EXTRA - separação por mando, de graça:
+        `padroes_marca_ambos_tempos` (o método antigo) tem PRIMARY KEY
+        (time_id) e nenhuma coluna `lado` - mistura casa e fora num número
+        só. Separar por mando tinha sido AVALIADO E DESCARTADO nesta mesma
+        sessão por custo/benefício: a diferença medida foi de 4,5 pontos
+        (34,01% mandante contra 29,51% visitante, ~15% relativo), abaixo
+        do que justificaria uma migração de tabela + backfill só pra isso.
+
+        Como `padroes_time_marca_periodo` já nasceu com `lado`, a
+        decomposição entrega essa separação sem nenhum custo adicional.
+
+    Devolve None se faltar qualquer um dos dois componentes - quem chama
+    cai no método antigo (escada de fallback)."""
+    freq_1t = buscar_frequencia_marca_periodo(cur, time_id, "1T", lado, suavizar=suavizar)
+    freq_2t = buscar_frequencia_marca_periodo(cur, time_id, "2T", lado, suavizar=suavizar)
+
+    if freq_1t is None or freq_2t is None:
+        return None
+
+    return round((freq_1t / 100.0) * (freq_2t / 100.0) * 100.0, 2)
+
+
 def buscar_frequencia_marca_ambos_tempos(cur, time_id, suavizar=False):
     """NOVO (Onda 2 - Marca em Ambos os Tempos): frequência binária, um
     valor só por time (sem separação por lado - jogo inteiro, não faz
@@ -2537,7 +2583,17 @@ def calcular_recomendacoes(cur):
             bate_adversario = any(c and c in mercado_lower for c in candidatos_adversario)
 
             if bate_nosso_time and not bate_adversario:
-                frequencia_bruta = buscar_frequencia_marca_ambos_tempos(cur, nosso_time_id, suavizar=suavizar)
+                # NOVO (02/09/2026 - Fase 2): estimativa DECOMPOSTA, com
+                # separação por mando que o método antigo não tinha. Ver
+                # `buscar_frequencia_marca_ambos_tempos_decomposta`.
+                #
+                # ESCADA: sem componente, cai pro método antigo (que
+                # continua sendo gravado por motor_padroes.py).
+                frequencia_bruta = buscar_frequencia_marca_ambos_tempos_decomposta(
+                    cur, nosso_time_id, mandante_filtro_atual, suavizar=suavizar
+                )
+                if frequencia_bruta is None:
+                    frequencia_bruta = buscar_frequencia_marca_ambos_tempos(cur, nosso_time_id, suavizar=suavizar)
                 if frequencia_bruta is not None:
                     frequencia = frequencia_bruta if direcao_normalizada == "sim" else round(100 - frequencia_bruta, 2)
 
