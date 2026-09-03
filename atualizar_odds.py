@@ -465,10 +465,22 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
         # decidir sozinho qual data está certa (não dá pra saber por
         # código qual das duas fontes está desatualizada - fica pra
         # checagem manual).
+        # ⚠️ CORREÇÃO (03/09/2026): os `%s` precisam de cast explícito pra
+        # `date`. Sem ele, o psycopg2 manda a data como STRING, e o
+        # Postgres tenta resolver `'2026-09-05' - INTERVAL '1 day'`
+        # interpretando a string como INTERVAL (não como date), e estoura
+        # com `invalid input syntax for type interval: "2026-09-05"`.
+        #
+        # Esse defeito estava latente desde que a janela foi escrita
+        # (28/08/2026): esse trecho SÓ roda quando a busca por data exata
+        # falha, que é justamente o caso raro que ele existe pra tratar.
+        # Quebrou pela primeira vez em 03/09/2026 - e, ironicamente, no
+        # RB Bragantino x Bahia, o mesmo confronto que motivou a criação
+        # da janela.
         cur.execute(
             "SELECT id, arbitro, datahora_jogo, data_jogo FROM jogos "
             "WHERE mandante_id = %s AND visitante_id = %s AND nosso_time_id = %s "
-            "AND data_jogo BETWEEN %s - INTERVAL '1 day' AND %s + INTERVAL '1 day'",
+            "AND data_jogo BETWEEN %s::date - INTERVAL '1 day' AND %s::date + INTERVAL '1 day'",
             (mandante_id, visitante_id, nosso_time_id, data_jogo, data_jogo),
         )
         row_proximo = cur.fetchone()
