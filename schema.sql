@@ -1,6 +1,6 @@
 -- ============================================================
 -- SCHEMA DO PROJETO - gerado automaticamente por gerar_schema.py
--- Gerado em: 2026-08-26 02:14 UTC
+-- Gerado em: 2026-09-03 23:50 UTC
 --
 -- Este arquivo descreve o ESTADO do banco, não as mudanças.
 -- Serve pra reconstruir tudo do zero e pra consultar o tipo real
@@ -10,7 +10,7 @@
 -- qualquer migração, pra manter fiel ao banco de verdade.
 -- ============================================================
 
--- 49 tabelas encontradas.
+-- 50 tabelas encontradas.
 
 
 -- ---------- apostas_salvas ----------
@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS apostas_salvas (
     criado_em timestamp without time zone DEFAULT now() NOT NULL,
     resolvido_em timestamp without time zone,
     usuario_id integer,
+    resolvido_manualmente boolean DEFAULT false NOT NULL,
     CONSTRAINT apostas_salvas_pkey PRIMARY KEY (id),
     CONSTRAINT apostas_salvas_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
 );
@@ -160,9 +161,11 @@ CREATE TABLE IF NOT EXISTS historico_multiplas_destaque (
     probabilidade_combinada numeric(6,2) NOT NULL,
     resultado character varying(10) NOT NULL,
     criada_em timestamp without time zone DEFAULT now() NOT NULL,
+    assinatura character varying(64),
     CONSTRAINT historico_multiplas_destaque_pkey PRIMARY KEY (id),
     CONSTRAINT historico_multiplas_destaque_jogo_id_fkey FOREIGN KEY (jogo_id) REFERENCES jogos(id)
 );
+CREATE INDEX idx_historico_multiplas_assinatura ON public.historico_multiplas_destaque USING btree (assinatura);
 CREATE INDEX idx_historico_multiplas_jogo ON public.historico_multiplas_destaque USING btree (jogo_id);
 CREATE INDEX idx_historico_multiplas_rodada ON public.historico_multiplas_destaque USING btree (rodada);
 
@@ -716,6 +719,22 @@ CREATE TABLE IF NOT EXISTS padroes_time_marca (
     CONSTRAINT padroes_time_marca_time_id_key UNIQUE (time_id),
     CONSTRAINT padroes_time_marca_time_id_fkey FOREIGN KEY (time_id) REFERENCES times(id)
 );
+
+-- ---------- padroes_time_marca_periodo ----------
+CREATE TABLE IF NOT EXISTS padroes_time_marca_periodo (
+    id SERIAL,
+    time_id integer NOT NULL,
+    periodo character varying(2) NOT NULL,
+    lado character varying(10) NOT NULL,
+    jogos_analisados integer NOT NULL,
+    jogos_que_marcou integer NOT NULL,
+    frequencia numeric(5,2) NOT NULL,
+    atualizado_em timestamp without time zone DEFAULT now() NOT NULL,
+    CONSTRAINT padroes_time_marca_periodo_pkey PRIMARY KEY (id),
+    CONSTRAINT padroes_time_marca_periodo_unico UNIQUE (time_id, periodo, lado),
+    CONSTRAINT padroes_time_marca_periodo_time_fkey FOREIGN KEY (time_id) REFERENCES times(id)
+);
+CREATE INDEX idx_padroes_time_marca_periodo_leitura ON public.padroes_time_marca_periodo USING btree (time_id, periodo, lado);
 
 -- ---------- padroes_time_resultado ----------
 CREATE TABLE IF NOT EXISTS padroes_time_resultado (
