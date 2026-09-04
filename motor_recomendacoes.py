@@ -180,19 +180,29 @@ VALOR_K_ENCOLHIMENTO_MERCADO = 15.0
 VALOR_ESPERADO_MINIMO_CORRIGIDO = 0.0
 
 # ESCOPO da correção. Só os mercados SEM problema de calibração próprio.
-# resultado_final/forma recente e correlação ficam FORA de propósito:
-# eles erram muito MESMO com VE baixo (gaps de -19 a -26 já na faixa
-# 0,00-0,10), ou seja, têm um segundo defeito que esta correção não
-# trata. Aplicar aqui seria empilhar conserto em cima de bug e perder a
-# capacidade de saber qual dos dois resolveu o quê.
+# resultado_final (e a forma recente, que na prática só existe dentro
+# dele) fica FORA de propósito: erra muito MESMO com VE baixo (gap de
+# -22,0 já na faixa 0,00-0,10), ou seja, tem um segundo defeito que esta
+# correção não trata. Aplicar ali seria empilhar conserto em cima de bug
+# e perder a capacidade de saber qual dos dois resolveu o quê. Além
+# disso, aguarda a medição da rodada de 05/09/2026, que já tem critério
+# de reversão definido (seção 56) - hoje não dá pra separar "antes/
+# depois" da correção de simetria, só existe 1 linha nova no histórico.
 #
-#   - resultado_final: aguarda a medição da rodada de 05/09/2026, que já
-#     tem critério de reversão definido (seção 56). Não dá pra separar
-#     "antes/depois" da correção de simetria hoje - só 1 linha nova.
-#   - correlacao: problema próprio, nunca investigado. Pendência à parte.
+# resultado_final é o ÚNICO grupo de controle desta mudança: se os
+# mercados do escopo melhorarem e ele não, o mérito é desta correção.
 #
-# Esses dois também servem de GRUPO DE CONTROLE: se os mercados do
-# escopo melhorarem e eles não, o mérito é desta correção.
+# ⚠️ CORREÇÃO DE 03/09/2026: uma versão anterior deste comentário
+# listava "correlação" como um segundo mercado fora do escopo. ERRADO -
+# correlação não é um tipo_padrao, é um FATOR do Grupo A (rótulos
+# "correlação faltas/cartões" e "correlação chutes/escanteios") que
+# atua DENTRO de cartao_total, escanteio_total e cartao. Esses três
+# estão no escopo, então as recomendações ajustadas por correlação SÃO
+# encolhidas normalmente. O gap ruim que a correlação aparentava ter na
+# investigação inicial (-23,7) veio de uma consulta com CASE WHEN em
+# cascata, que só classificava como "correlação" as linhas SEM
+# confronto direto e SEM árbitro - subconjunto enviesado. Medida sem
+# esse viés na rodada 25, a correlação deu -7,5 e -11,4.
 MERCADOS_CORRECAO_DIVERGENCIA_MERCADO = {
     "escanteio_time", "escanteio_total",
     "cartao", "cartao_total",
@@ -2971,8 +2981,8 @@ def calcular_recomendacoes(cur):
             descricao_final += " (ajustado pela odd da casa)"
 
         # NOVO (03/09/2026): o filtro passou a usar o piso CORRIGIDO nos
-        # mercados do escopo. Nos demais (resultado_final, correlação, e
-        # qualquer mercado não classificado), segue valendo o
+        # mercados do escopo. Nos demais (resultado_final e qualquer
+        # mercado não classificado), segue valendo o
         # VALOR_ESPERADO_MINIMO de sempre - eles são o grupo de controle
         # e não podem ter DOIS parâmetros mudando ao mesmo tempo, senão a
         # próxima medição não distingue o efeito de um do outro.
