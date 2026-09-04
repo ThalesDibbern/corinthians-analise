@@ -8180,6 +8180,13 @@ def index():
     # (`recomendacoes.gerado_em` ~3h à frente) e fica para depois da
     # medição de 05-06/09, porque mexer em data agora afetaria também o
     # arquivamento no meio da coleta que importa.
+    # ⚠️ Usa `.get()` em vez de `identidade_jogo(j)` de propósito: essa
+    # função assume uma PERNA (que sempre tem `fixture_id_api`), e o dict
+    # de `c["jogos"]` é outro objeto, montado em `montar_combinacoes`. Ele
+    # passou a carregar o campo em 04/09/2026, mas usar `.get()` aqui
+    # garante que uma combinação vinda de um caminho que não o preencha
+    # caia no fallback em vez de derrubar a página inteira com KeyError -
+    # foi exatamente o que aconteceu na primeira versão desta correção.
     LIMITE_ODDS_POR_JOGO = 100
     jogos_agrupados = {}
     for c in individuais:
@@ -8187,7 +8194,7 @@ def index():
             continue
         j = c["jogos"][0]
         dupla = tuple(sorted([j["nosso_time"], j["adversario"]]))
-        chave = identidade_jogo(j)
+        chave = j.get("fixture_id_api") or (j["nosso_time"], j["adversario"], j["data_jogo"])
         if chave not in jogos_agrupados:
             jogos_agrupados[chave] = {
                 "data_jogo": j["data_jogo"],
