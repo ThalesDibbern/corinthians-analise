@@ -8152,6 +8152,34 @@ def index():
     # par de times ORDENADO + a data: as duas perspectivas caem no mesmo
     # balde, e o rótulo exibido é sempre o mesmo (ordem alfabética, já que
     # a lista de recomendação não carrega quem é mandante).
+    # CORRIGIDO (04/09/2026): a chave era `(data_jogo, dupla)`, e isso
+    # quebrava quando as DUAS perspectivas do mesmo jogo real tinham
+    # `datahora_jogo` diferente - o card mostrava o mesmo confronto duas
+    # vezes, e a contagem do cabeçalho ficava maior que a rodada real
+    # (11 jogos numa rodada de 10, em 04/09/2026).
+    #
+    # POR QUE as datas divergem: `popular_banco.py` grava
+    # `fixture["fixture"]["date"]` da API-Football, que traz data
+    # PROVISÓRIA enquanto a CBF não confirma os horários da rodada
+    # (medido: os 10 jogos da rodada 26 vieram todos como "06/09 20:00").
+    # Já `atualizar_odds.py` cria o jogo com o horário real da OddsPapi.
+    # Quando as duas datas caem em dias diferentes, a chave antiga
+    # separava as perspectivas.
+    #
+    # A chave certa é `fixture_id_api`, a identidade canônica do jogo real
+    # em todo o projeto - a mesma razão pela qual `chave_mercado_da_perna`
+    # deixou de usar `jogo_id` em 20/08. `identidade_jogo` já faz isso,
+    # com fallback pro trio (nosso_time, adversario, data_jogo) quando o
+    # fixture não está preenchido (jogos antigos), então é reusada aqui em
+    # vez de repetir a regra.
+    #
+    # ⚠️ NÃO resolve a causa raiz: `datahora_jogo` está gravado em UTC e
+    # exibido como se fosse BRT (confirmado - converter UTC->America/
+    # Sao_Paulo bate com o horário real em 7 de 8 jogos verificáveis da
+    # rodada 26). Isso é a mesma causa da pendência 57
+    # (`recomendacoes.gerado_em` ~3h à frente) e fica para depois da
+    # medição de 05-06/09, porque mexer em data agora afetaria também o
+    # arquivamento no meio da coleta que importa.
     LIMITE_ODDS_POR_JOGO = 100
     jogos_agrupados = {}
     for c in individuais:
@@ -8159,7 +8187,7 @@ def index():
             continue
         j = c["jogos"][0]
         dupla = tuple(sorted([j["nosso_time"], j["adversario"]]))
-        chave = (j["data_jogo"], dupla)
+        chave = identidade_jogo(j)
         if chave not in jogos_agrupados:
             jogos_agrupados[chave] = {
                 "data_jogo": j["data_jogo"],
@@ -8167,6 +8195,17 @@ def index():
                 "rotulo": f"{dupla[0]} x {dupla[1]}",
                 "odds": [],
             }
+        else:
+            # As duas perspectivas caíram no mesmo balde. Quando as datas
+            # divergem, a MENOR é a que veio da OddsPapi com horário real
+            # (a da API-Football é o placeholder da rodada, sempre no
+            # domingo). Escolher explicitamente evita que a ordenação
+            # final da lista dependa de qual perspectiva chegou primeiro.
+            atual = jogos_agrupados[chave]
+            nova_dh = j.get("datahora_jogo")
+            if nova_dh and (not atual["datahora_jogo"] or nova_dh < atual["datahora_jogo"]):
+                atual["datahora_jogo"] = nova_dh
+                atual["data_jogo"] = j["data_jogo"]
         jogos_agrupados[chave]["odds"].append(c)
 
     jogos_disponiveis = []
