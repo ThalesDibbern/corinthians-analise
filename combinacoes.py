@@ -437,10 +437,20 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max, prob_min=None, prob_max=
                 jogos_vistos_chaves = set()
                 jogos_vistos = []
                 for p in combo:
-                    chave_jogo = p["fixture_id_api"] or (p["nosso_time"], p["adversario"], p["data_jogo"])
+                    chave_jogo = identidade_jogo(p)
                     if chave_jogo not in jogos_vistos_chaves:
                         jogos_vistos_chaves.add(chave_jogo)
                         jogos_vistos.append({
+                            # CORRIGIDO (04/09/2026): `fixture_id_api` passou a
+                            # ser carregado aqui. Ele já era usado logo acima
+                            # pra deduplicar, mas era DESCARTADO no dict - e
+                            # quem consome `c["jogos"]` depois (o card "Jogos
+                            # disponíveis" no app) precisava dele pra agrupar as
+                            # duas perspectivas do mesmo jogo real. Sem o campo,
+                            # o agrupamento tinha que cair na data, que diverge
+                            # entre perspectivas quando a API-Football ainda não
+                            # confirmou o horário da rodada.
+                            "fixture_id_api": p["fixture_id_api"],
                             "jogo_id": p["jogo_id"], "nosso_time": p["nosso_time"],
                             "adversario": p["adversario"], "data_jogo": p["data_jogo"],
                             "datahora_jogo": p["datahora_jogo"],
