@@ -2601,8 +2601,8 @@ def exigir_login():
     sem estar logado, redireciona pro login. Exceções: a própria página de
     login, e o proxy de escudo (é só uma imagem pública, sem dado
     pessoal)."""
-    rotas_livres = ("login",)
-    if request.endpoint in rotas_livres or (request.endpoint or "").startswith("escudo"):
+    rotas_livres = ("login", "api_consulta.consultar")
+  if request.endpoint in rotas_livres or (request.endpoint or "").startswith("escudo"):
         return
     if request.endpoint == "static":
         return
