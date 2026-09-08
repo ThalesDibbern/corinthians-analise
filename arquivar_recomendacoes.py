@@ -86,6 +86,43 @@ combinação aparecer 2x na lista de /historico e contar 2x no resumo
 agregado. Precisa da migração migrar_assinatura_multiplas_destaque.py
 rodada ANTES.
 
+NOVO (Fase 2, 08/09/2026 - casamento de perna por estrutura, não texto):
+`buscar_resultado_perna` casava a perna de uma múltipla com o resultado
+já arquivado usando `jogo_id + jogador_id + tipo_padrao + descricao`
+(descrição em TEXTO EXATO). Isso tinha dois problemas latentes:
+
+1) `jogo_id` é específico de uma perspectiva do jogo real. Quando um
+   mercado de jogo inteiro ou de jogador (ver MERCADOS_JOGO_INTEIRO/
+   MERCADOS_JOGADOR em combinacoes.py) é arquivado, `buscar_recomendacoes_
+   para_arquivar` pode DEDUPLICAR duas linhas (uma por perspectiva) em
+   uma só, mantendo como "representante" a de MENOR id - que não é
+   necessariamente a mesma perspectiva usada quando a perna da múltipla
+   foi originalmente montada em combinacoes.py. Se a perna guardou o
+   jogo_id da perspectiva que acabou sendo APAGADA no arquivamento, a
+   busca por esse jogo_id nunca mais encontra nada - a perna fica presa
+   pra sempre em "ainda não avaliada" (congelada=TRUE, avaliada=FALSE).
+
+2) `descricao` muda de texto entre a captura da perna e o resultado
+   arquivado sempre que um sufixo (Grupo A, encolhimento pra odd da casa,
+   confronto direto) aparece, some ou muda de valor entre uma geração e
+   outra - o mesmo princípio já registrado nos aprendizados do projeto:
+   nunca usar texto de descrição como identidade de uma aposta.
+
+CORREÇÃO: pra mercados de jogo inteiro/jogador, o casamento passa a usar
+`fixture_id_api` (estável entre as duas perspectivas, via JOIN com
+`jogos`) em vez de `jogo_id`, e `linha`/`direcao` (o dado estrutural por
+trás da aposta) em vez de `descricao`. Pra mercados de TIME (que não são
+deduplicados no arquivamento, então não sofrem do problema 1), o
+casamento continua por `jogo_id` - `fixture_id_api` sozinho ambiguaria a
+aposta do nosso time com a do adversário. A mesma identidade
+(`_identidade_estavel_perna`) foi usada do lado de combinacoes.py, na
+assinatura de Múltiplas em Destaque - ver a docstring de lá.
+
+Candidatas capturadas ANTES dessa mudança não têm `fixture_id_api` no
+JSONB de `pernas` - `perna.get("fixture_id_api")` devolve None pra essas,
+e o casamento cai de volta no comportamento antigo (por jogo_id), sem
+precisar de migração nem backfill.
+
 Variáveis de ambiente:
   - DATABASE_URL -> a URL de conexão do Postgres (mesma usada nos outros scripts)
 """
@@ -111,7 +148,9 @@ from combinacoes import MERCADOS_JOGO_INTEIRO, MERCADOS_JOGADOR
 # historico_recomendacoes, inflando artificialmente as contagens de
 # acerto/erro do /historico. Reaproveita a mesma classificação de
 # mercados (MERCADOS_JOGO_INTEIRO/MERCADOS_JOGADOR), pra não duplicar
-# essa lógica de novo.
+# essa lógica de novo. NOVO (Fase 2): os dois conjuntos também decidem,
+# em `buscar_resultado_perna`, se o casamento de perna usa fixture_id_api
+# ou jogo_id - ver a docstring da função e o NOVO no topo deste arquivo.
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -276,7 +315,7 @@ def garantir_coluna_resultado_candidatas(cur):
     cur.execute("ALTER TABLE multiplas_candidatas ADD COLUMN IF NOT EXISTS resultado VARCHAR(10)")
 
 
-def buscar_resultado_perna(cur, jogo_id, jogador_id, tipo_padrao, descricao):
+def buscar_resultado_perna(cur, tipo_padrao, jogo_id, fixture_id_api, jogador_id, linha, direcao):
     """Busca o resultado (acertou/errou/pendente) já avaliado dessa perna
     individual em `historico_recomendacoes` - REAPROVEITA a avaliação que
     arquivar() já fez acima, em vez de reavaliar do zero (uma função de
@@ -284,16 +323,59 @@ def buscar_resultado_perna(cur, jogo_id, jogador_id, tipo_padrao, descricao):
     verdade). Se a perna ainda não foi arquivada (jogo dela ainda não
     passou de verdade, mesmo que o PRIMEIRO jogo da múltipla já tenha
     passado - lembra que uma múltipla pode cruzar jogos com datas
-    diferentes), retorna None."""
-    cur.execute(
-        """
-        SELECT resultado FROM historico_recomendacoes
-        WHERE jogo_id = %s AND jogador_id IS NOT DISTINCT FROM %s
-          AND tipo_padrao = %s AND descricao = %s
-        ORDER BY id DESC LIMIT 1
-        """,
-        (jogo_id, jogador_id, tipo_padrao, descricao),
+    diferentes), retorna None.
+
+    CORRIGIDO (Fase 2, 08/09/2026): casamento por ESTRUTURA
+    (tipo_padrao + jogador_id + linha + direcao), não mais por texto de
+    `descricao`. E pra mercados de jogo inteiro/jogador (ver
+    MERCADOS_JOGO_INTEIRO/MERCADOS_JOGADOR), o casamento usa
+    `fixture_id_api` via JOIN com `jogos` em vez de `jogo_id` - porque
+    esses mercados podem ser deduplicados no arquivamento mantendo a
+    linha da OUTRA perspectiva (a de menor id), e aí o `jogo_id` que a
+    perna guardou deixa de existir em `historico_recomendacoes` pra
+    sempre. `fixture_id_api` é o mesmo nas duas perspectivas do jogo real
+    e não sofre desse problema. Mercados de TIME (não deduplicados no
+    arquivamento) continuam usando `jogo_id`, que aqui é seguro e
+    necessário pra não confundir a aposta do nosso time com a do
+    adversário.
+
+    `fixture_id_api` pode vir None (perna capturada antes dessa correção,
+    ou mercado de time) - nesse caso cai automaticamente no casamento por
+    jogo_id, idêntico ao comportamento anterior."""
+    usa_fixture = (
+        fixture_id_api is not None
+        and (tipo_padrao in MERCADOS_JOGO_INTEIRO or tipo_padrao in MERCADOS_JOGADOR)
     )
+
+    if usa_fixture:
+        cur.execute(
+            """
+            SELECT hr.resultado
+            FROM historico_recomendacoes hr
+            JOIN jogos j ON j.id = hr.jogo_id
+            WHERE j.fixture_id_api = %s
+              AND hr.tipo_padrao = %s
+              AND hr.jogador_id IS NOT DISTINCT FROM %s
+              AND hr.linha IS NOT DISTINCT FROM %s
+              AND LOWER(TRIM(hr.direcao)) = LOWER(TRIM(%s))
+            ORDER BY hr.id DESC LIMIT 1
+            """,
+            (fixture_id_api, tipo_padrao, jogador_id, linha, direcao or ""),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT resultado FROM historico_recomendacoes
+            WHERE jogo_id = %s
+              AND tipo_padrao = %s
+              AND jogador_id IS NOT DISTINCT FROM %s
+              AND linha IS NOT DISTINCT FROM %s
+              AND LOWER(TRIM(direcao)) = LOWER(TRIM(%s))
+            ORDER BY id DESC LIMIT 1
+            """,
+            (jogo_id, tipo_padrao, jogador_id, linha, direcao or ""),
+        )
+
     row = cur.fetchone()
     return row[0] if row else None
 
@@ -375,8 +457,18 @@ def avaliar_e_selecionar_top5(cur):
         resultados_pernas = []
         pronto = True
         for perna in pernas:
+            # NOVO (Fase 2, 08/09/2026): passa também `fixture_id_api` (via
+            # .get - candidata antiga não tem essa chave) e `linha`/
+            # `direcao` no lugar de `descricao` - ver a docstring de
+            # buscar_resultado_perna.
             resultado_perna = buscar_resultado_perna(
-                cur, perna["jogo_id"], perna["jogador_id"], perna["tipo_padrao"], perna["descricao"]
+                cur,
+                perna["tipo_padrao"],
+                perna["jogo_id"],
+                perna.get("fixture_id_api"),
+                perna["jogador_id"],
+                perna["linha"],
+                perna["direcao"],
             )
             if resultado_perna is None:
                 pronto = False
