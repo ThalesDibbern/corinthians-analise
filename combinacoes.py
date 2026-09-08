@@ -25,6 +25,16 @@ identidade nova (`_identidade_estavel_perna`) é usada tanto na assinatura
 de Múltiplas em Destaque (`_assinatura_combo`) quanto, do lado de
 arquivar_recomendacoes.py, no casamento de perna pra avaliar múltiplas
 (`buscar_resultado_perna`) - ver a docstring de cada uma pra detalhe.
+
+NOVO (Fase 2.3, 08/09/2026): `chave_mercado_da_perna` passou a agrupar
+`gols_time` (linha 0.5) e `equipe_marca` na mesma chave - são o MESMO
+evento real com `tipo_padrao` diferente (achado 66-C, confirmado por
+contagem exata na seção 71). Sem isso, a trava contra pernas
+contraditórias/redundantes numa múltipla (mesma classe do bug do
+handicap asiático, seção 34) não enxergava esse par. Outros três
+candidatos testados (gols_time/gols_total, cartao/cartao_total,
+cartao_total/escanteio_total) foram investigados e descartados - ver a
+docstring de `chave_mercado_da_perna` pra detalhe.
 """
 
 import hashlib
@@ -226,8 +236,41 @@ def chave_mercado_da_perna(p):
     É a mesma classe de bug da faixa de escanteios ("Menos de 11.5" +
     "Mais de 10.5", que exigia exatamente 11 escanteios cravados) - só
     que ali as duas pernas vinham do mesmo `jogo_id` e a proteção pegava.
+
+    NOVO (Fase 2.3, 08/09/2026): `gols_time` na linha 0.5 e `equipe_marca`
+    são o MESMO evento real ("o time marcou pelo menos 1 gol") descrito
+    por dois `tipo_padrao` diferentes - achado colateral da seção 66-C,
+    confirmado batendo a contagem exata: `equipe_marca` linha 0.0 tem
+    sim=30/não=16, `gols_time` linha 0.5 tem mais=30/menos=16. Mesma
+    aposta, duas fileiras.
+
+    Investigação da Fase 2.3 (seção 71) testou se havia OUTROS pares
+    assim - `gols_time`/`gols_total`, `cartao`/`cartao_total`,
+    `cartao_total`/`escanteio_total` apareceram com probabilidade igual,
+    mas com divergência de odd 15 a 45x maior que este par (0,008) e
+    linha/escopo genuinamente diferentes (time vs jogo, ou estatística
+    diferente). Não são o mesmo evento - coincidência do grid de
+    frequência de 50 jogos, que só admite 51 valores possíveis (0%, 2%,
+    4%, ..., 100%). Só `gols_time`(0.5)/`equipe_marca` sobrevive ao teste.
+
+    Sem agrupar os dois na mesma chave, uma múltipla podia juntar
+    "X Não Marca" (0 gols) com "Gols do Time - X - Mais de 0.5" (≥1 gol)
+    - combinação IMPOSSÍVEL, mas multiplicada como se independente
+    (mesma classe de erro do handicap acima, problema 1). Ou juntar os
+    dois do MESMO lado ("X Marca - Sim" + "Gols do Time - Mais de 0.5"),
+    redundante mas inofensivo. Não precisa tratar os dois casos
+    separado: agrupando por uma chave comum, a lógica que já existe
+    resolve sozinha - "mais" nunca é igual a "sim"/"não" como string,
+    então o par nunca forma {"mais","menos"} nem conta como direção
+    repetida por igualdade exata - cai direto em "não forma par válido"
+    -> combinação REJEITADA nos dois casos (redundante e contraditório).
     """
-    return (identidade_jogo(p), p["tipo_padrao"], p["jogador_id"])
+    tipo_padrao = p["tipo_padrao"]
+    if tipo_padrao == "gols_time" and p["linha"] == 0.5:
+        tipo_padrao = "_evento_time_marca"
+    elif tipo_padrao == "equipe_marca":
+        tipo_padrao = "_evento_time_marca"
+    return (identidade_jogo(p), tipo_padrao, p["jogador_id"])
 
 
 def combo_tem_conflito_de_time_mesma_data(combo):
