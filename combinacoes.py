@@ -14,6 +14,17 @@ automaticamente pros dois consumidores.
 
 Não depende de Flask nem de nada específico de request web - só
 psycopg2 (recebe um cursor já aberto) e a biblioteca padrão.
+
+NOVO (Fase 2, 08/09/2026): a identidade de uma perna passou a levar em
+conta o TIPO de mercado, não só o par (jogo_id, descrição). Mercados de
+JOGO INTEIRO e de JOGADOR descrevem um evento que é o MESMO não importa
+qual das 2 perspectivas do jogo real gerou a recomendação; mercados de
+TIME são apostas diferentes por time e continuam precisando do jogo_id
+específico pra não misturar a aposta de um lado com a do adversário. Essa
+identidade nova (`_identidade_estavel_perna`) é usada tanto na assinatura
+de Múltiplas em Destaque (`_assinatura_combo`) quanto, do lado de
+arquivar_recomendacoes.py, no casamento de perna pra avaliar múltiplas
+(`buscar_resultado_perna`) - ver a docstring de cada uma pra detalhe.
 """
 
 import hashlib
@@ -469,6 +480,22 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max, prob_min=None, prob_max=
                     "pernas": [
                         {
                             "jogo_id": p["jogo_id"],
+                            # NOVO (Fase 2, 08/09/2026): `fixture_id_api`
+                            # passa a ser gravado em CADA perna (não só em
+                            # `jogos`, ver comentário logo acima). É o que
+                            # permite `buscar_resultado_perna`, do lado de
+                            # arquivar_recomendacoes.py, casar a perna com o
+                            # resultado arquivado mesmo quando a linha
+                            # sobrevivente do arquivamento veio da OUTRA
+                            # perspectiva do mesmo jogo real (ver a
+                            # deduplicação por representante em
+                            # `buscar_recomendacoes_para_arquivar`). Uma
+                            # candidata capturada ANTES dessa mudança
+                            # simplesmente não tem essa chave no JSONB - o
+                            # `.get("fixture_id_api")` do lado de lá cai de
+                            # volta no comportamento antigo (por jogo_id),
+                            # sem precisar de migração.
+                            "fixture_id_api": p["fixture_id_api"],
                             "jogador_id": p["jogador_id"],
                             "tipo_padrao": p["tipo_padrao"],
                             "descricao": p["descricao"],
@@ -491,15 +518,59 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max, prob_min=None, prob_max=
     return individuais_final + multiplas_final
 
 
+def _identidade_estavel_perna(p):
+    """NOVO (Fase 2, 08/09/2026): identidade de uma perna que sobrevive à
+    troca de qual das 2 perspectivas do jogo real está "por trás" dela.
+
+    Mercados de JOGO INTEIRO (escanteio total, cartão total, gols total,
+    resultado final, dupla chance/ambas marcam por tempo) e de JOGADOR
+    descrevem um evento que é o MESMO não importa qual perspectiva gerou a
+    recomendação - pra esses, usa `fixture_id_api` (com fallback pro
+    jogo_id se por algum motivo a perna não tiver o campo - candidata
+    antiga, capturada antes dessa mudança).
+
+    Mercados de TIME (escanteio_time, cartao_time, gols_time, equipe_marca,
+    marca_ambos_tempos, handicap) são apostas DIFERENTES por time - pra
+    esses, `fixture_id_api` sozinho AMBIGUARIA as duas pontas (a aposta do
+    nosso time e a do adversário têm o mesmo fixture_id_api), então
+    continua usando `jogo_id`, que é específico da perspectiva/time.
+
+    `linha` e `direcao` entram no lugar da `descricao` de texto - a
+    descrição pode mudar entre a captura da perna e o resultado arquivado
+    (sufixo do Grupo A, do encolhimento pra odd da casa, do confronto
+    direto...), enquanto linha/direção são o dado estrutural por trás da
+    aposta e não mudam. Segue o mesmo princípio já registrado nos
+    aprendizados do projeto: nunca usar texto de descrição como identidade
+    de uma aposta.
+    """
+    if p["tipo_padrao"] in MERCADOS_JOGO_INTEIRO or p["tipo_padrao"] in MERCADOS_JOGADOR:
+        chave_jogo = p.get("fixture_id_api") or p["jogo_id"]
+    else:
+        chave_jogo = p["jogo_id"]
+    return (chave_jogo, p["tipo_padrao"], p["jogador_id"], p["linha"], p["direcao"])
+
+
 def _assinatura_combo(casa_aposta, pernas):
-    """Identidade de uma múltipla pro recurso de Múltiplas em Destaque -
-    SÓ pelas pernas (jogo + tipo + jogador + descrição), NUNCA pela odd
-    nem probabilidade. É isso que garante que a mesma combinação, mesmo
-    aparecendo com odd diferente 4x no mesmo dia (odd oscila, a aposta em
-    si continua sendo "a mesma"), sempre resolve pra a mesma linha no
-    banco em vez de virar registro duplicado."""
+    """Identidade de uma múltipla pro recurso de Múltiplas em Destaque.
+
+    CORRIGIDO (Fase 2, 08/09/2026): antes usava `jogo_id` + `descricao`
+    (texto) de cada perna. As duas são instáveis entre gerações da MESMA
+    combinação real: `jogo_id` muda conforme qual perspectiva do jogo foi
+    usada pra gerar a recomendação naquele momento, e `descricao` muda
+    quando um sufixo do Grupo A/encolhimento/confronto direto aparece ou
+    desaparece. Isso quebrava a promessa da assinatura ("a mesma
+    combinação sempre resolve pra mesma linha no banco") justamente pra
+    resultado_final e pros mercados de jogo inteiro/jogador, que são os
+    que têm 2 perspectivas possíveis - a mesma múltipla real podia gerar 2
+    assinaturas diferentes em execuções diferentes, e cada uma virava uma
+    linha nova em vez de atualizar a existente.
+
+    Agora usa `_identidade_estavel_perna`, que já resolve isso: usa
+    fixture_id_api (estável entre perspectivas) pra jogo inteiro/jogador,
+    jogo_id (necessário pra distinguir o time) pra mercado de time, e
+    linha/direção no lugar do texto da descrição."""
     partes = sorted(
-        f"{p['jogo_id']}|{p['tipo_padrao']}|{p['jogador_id']}|{p['descricao']}"
+        "|".join(str(x) for x in _identidade_estavel_perna(p))
         for p in pernas
     )
     bruto = casa_aposta + "||" + "||".join(partes)
