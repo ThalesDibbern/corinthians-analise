@@ -2602,7 +2602,7 @@ def exigir_login():
     login, e o proxy de escudo (é só uma imagem pública, sem dado
     pessoal)."""
     rotas_livres = ("login", "api_consulta.consultar")
-  if request.endpoint in rotas_livres or (request.endpoint or "").startswith("escudo"):
+    if request.endpoint in rotas_livres or (request.endpoint or "").startswith("escudo"):
         return
     if request.endpoint == "static":
         return
