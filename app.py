@@ -38,6 +38,7 @@ import requests
 import psycopg2
 from flask import Flask, render_template_string, request, redirect, Response, session, url_for, flash, get_flashed_messages, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
+from api_consulta import api_consulta
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -59,6 +60,7 @@ app = Flask(__name__)
 # isso, a sessão de todo mundo seria invalidada (logout forçado) toda vez
 # que o serviço reiniciar/fizer novo deploy.
 app.secret_key = os.environ.get("SECRET_KEY", "troque-essa-chave-numa-variavel-de-ambiente-SECRET_KEY")
+app.register_blueprint(api_consulta)
 
 
 # ---------- Banca (dinheiro fictício, não real) ----------
