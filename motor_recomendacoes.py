@@ -384,6 +384,68 @@ def identificar_tipo_padrao(mercado):
     # colidir com "Hándicap" (marketType diferente, fora de escopo).
     if "handicap asiático" in nome:
         return "handicap_asiatico"
+    # NOVO (08/09/2026 - Fase 4, item 4.1 - BUG CORRIGIDO): handicap de
+    # meia linha (gol) nunca gerava recomendação. A correção de nome de
+    # 20/08/2026 (nome_real_handicap_meia_linha, em atualizar_odds.py)
+    # passou a gravar o nome REAL da Superbet pras três faixas de linha -
+    # "Handicap" (>=1.5), "Dupla Chance" (+0.5) e "Resultado Final"
+    # (-0.5) - mas esta função só reconhecia o texto antigo "handicap
+    # asiático" (checagem logo acima), que a própria correção de nome
+    # tornou IMPOSSÍVEL de aparecer pra linha de meio gol (só sobraria
+    # pra quarto de gol/linha cheia - fora de escopo e nunca coletado,
+    # confirmado: zero linhas com esse nome no banco). Resultado medido:
+    # 782 odds de handicap, zero recomendação, em toda a história do
+    # projeto (seção 69-B/72 da documentação).
+    #
+    # As três formas reais (sempre "<Nome> - <detalhe>", produzidas por
+    # montar_descricao_mercado em cima do nome que
+    # nome_real_handicap_meia_linha decide) são reconhecidas aqui pelo
+    # PREFIXO exato, escolhido pra não colidir com nada que já existe:
+    #   - "handicap - "         não colide com nada (nenhum outro
+    #                            mercado do projeto começa assim)
+    #   - "dupla chance - "     não colide com "dupla chance primeiro
+    #                            tempo - "/"...segundo tempo - " (prefixo
+    #                            diferente, e essas duas são checadas
+    #                            ANTES desta, mais acima)
+    #   - "resultado final - "  não colide com o mercado de resultado
+    #                            1X2 de jogo inteiro: o nome real dele na
+    #                            OddsPapi é "Resultado Tempo Completo"
+    #                            (não "Resultado Final" - ver comentário
+    #                            de PALAVRAS_MERCADO_INTERESSE em
+    #                            atualizar_odds.py), então o check mais
+    #                            abaixo ("resultado" + "tempo completo")
+    #                            nunca seria alcançado por este texto de
+    #                            qualquer forma
+    #
+    # NÃO cobre "Escanteios - Handicap - ..." nem "Cartões - Handicap -
+    # ..." (156 + 8 odds) DE PROPÓSITO: esses nomes vêm direto do
+    # catálogo cru da OddsPapi (não passam por
+    # nome_real_handicap_meia_linha, que só decide o nome pro handicap
+    # de GOL) e não têm padrão calculado - `padroes_time_handicap` é só
+    # de gol (ver calcular_padrao_handicap em motor_padroes.py).
+    # Continuam caindo nos tipos genéricos de baixo (escanteio_time/
+    # cartao) - sem efeito prático (a direção deles, "1"/"2", não bate
+    # com o "mais"/"menos" que esses dois tipos exigem no motor de
+    # recomendações, então nunca geraram recomendação incorreta por
+    # causa disso) - e ficam fora desta correção pra não misturar, no
+    # mesmo deploy, um bug de classificação (este) com uma decisão de
+    # arquitetura nova (dar handicap de escanteio/cartão um padrão
+    # próprio, que não existe hoje).
+    #
+    # ⚠️ Nome interno "handicap_asiatico" mantido de propósito, mesmo
+    # semanticamente defasado agora (cobre handicap de meia linha, não só
+    # o quarto-de-gol/linha-cheia "asiático" de verdade) - trocar o nome
+    # tocaria buscar_frequencia_handicap, montar_descricao_handicap,
+    # MERCADOS_CORRECAO_DIVERGENCIA_MERCADO e a tabela
+    # padroes_time_handicap, ampliando o raio da mudança sem necessidade
+    # pra este conserto. Fica registrado como possível limpeza futura,
+    # separada (uma mudança por deploy).
+    if (
+        nome.startswith("handicap - ")
+        or nome.startswith("dupla chance - ")
+        or nome.startswith("resultado final - ")
+    ):
+        return "handicap_asiatico"
     # NOVO (Mais/Menos gols e Equipe Marca): nomes fixos, sem ambiguidade
     # (ver MARKET_TYPES_GOLS_E_MARCA em atualizar_odds.py) - "gols total
     # do jogo" precisa vir ANTES de "gols do time", mesma lógica do
