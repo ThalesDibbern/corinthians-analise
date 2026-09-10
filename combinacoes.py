@@ -29,12 +29,30 @@ arquivar_recomendacoes.py, no casamento de perna pra avaliar múltiplas
 NOVO (Fase 2.3, 08/09/2026): `chave_mercado_da_perna` passou a agrupar
 `gols_time` (linha 0.5) e `equipe_marca` na mesma chave - são o MESMO
 evento real com `tipo_padrao` diferente (achado 66-C, confirmado por
-contagem exata na seção 71). Sem isso, a trava contra pernas
+contagem exata da margem da casa - ver seção 66-C). ⚠️ CORREÇÃO
+(10/09/2026): a referência original aqui dizia "seção 71", que é sobre
+outro assunto (correlação em cartão/cartao_total na rodada 26) -
+número errado, corrigido. Sem isso, a trava contra pernas
 contraditórias/redundantes numa múltipla (mesma classe do bug do
 handicap asiático, seção 34) não enxergava esse par. Outros três
 candidatos testados (gols_time/gols_total, cartao/cartao_total,
 cartao_total/escanteio_total) foram investigados e descartados - ver a
 docstring de `chave_mercado_da_perna` pra detalhe.
+
+CORRIGIDO (10/09/2026): `chave_mercado_da_perna` usava `identidade_jogo`
+(= `fixture_id_api`) pra TODO mercado, sem distinguir TIME de JOGO
+INTEIRO/JOGADOR - diferente de `_identidade_estavel_perna`, que já fazia
+essa distinção desde que foi escrita (mesmo dia, 08/09). Como as duas
+perspectivas do mesmo jogo real compartilham `fixture_id_api`, isso
+fazia `escanteio_time`/`cartao_time`/`gols_time`/`marca_ambos_tempos`/
+`handicap`/`_evento_time_marca` do NOSSO time e do ADVERSÁRIO caírem na
+MESMA chave de mercado - rejeitando combos válidos entre os dois times
+do mesmo jogo, e em alguns casos aceitando como "faixa" uma soma de
+probabilidades de duas variáveis diferentes. Ver a docstring de
+`chave_mercado_da_perna` pra detalhe completo. Achado e corrigido numa
+auditoria de linha a linha do arquivo, sem gatilho de bug reportado -
+`escanteio_time` era o maior mercado da rodada 26 (70 recomendações),
+o mais exposto ao defeito.
 """
 
 import hashlib
@@ -244,7 +262,11 @@ def chave_mercado_da_perna(p):
     sim=30/não=16, `gols_time` linha 0.5 tem mais=30/menos=16. Mesma
     aposta, duas fileiras.
 
-    Investigação da Fase 2.3 (seção 71) testou se havia OUTROS pares
+    Investigação da Fase 2.3 (08/09/2026, mesma sessão que implementou
+    este agrupamento - ⚠️ CORRIGIDO em 10/09: a referência original aqui
+    dizia "seção 71", que documenta outro assunto no projeto - o bug de
+    correlação em cartão/cartao_total da rodada 26, sem relação com esta
+    investigação. Número errado, removido) testou se havia OUTROS pares
     assim - `gols_time`/`gols_total`, `cartao`/`cartao_total`,
     `cartao_total`/`escanteio_total` apareceram com probabilidade igual,
     mas com divergência de odd 15 a 45x maior que este par (0,008) e
@@ -264,13 +286,58 @@ def chave_mercado_da_perna(p):
     então o par nunca forma {"mais","menos"} nem conta como direção
     repetida por igualdade exata - cai direto em "não forma par válido"
     -> combinação REJEITADA nos dois casos (redundante e contraditório).
+
+    CORRIGIDO (10/09/2026): a chave usava `identidade_jogo(p)`
+    (`fixture_id_api`) pra TODO tipo de mercado, sem exceção - inclusive os
+    de TIME (`escanteio_time`, `cartao_time`, `gols_time` fora da linha 0.5,
+    `marca_ambos_tempos`, `handicap`, e o `_evento_time_marca` fundido
+    acima). Como as duas perspectivas do MESMO jogo real compartilham o
+    MESMO `fixture_id_api`, isso fazia a aposta do NOSSO time e a aposta do
+    ADVERSÁRIO caírem na MESMA chave de mercado - dois times DIFERENTES
+    tratados como se fossem a mesma variável.
+
+    Dois efeitos práticos, os dois silenciosos:
+
+    1) COMBO VÁLIDO REJEITADO: "Fluminense Mais de 5.5 escanteios" +
+       "Vasco Mais de 3.5 escanteios" (mesmo jogo real, duas apostas de
+       times diferentes, perfeitamente combináveis) - as duas pernas
+       caem na mesma chave, mesma direção "mais" -> `a["direcao"] ==
+       b["direcao"]` -> `valido = False`. A múltipla nunca se forma,
+       mesmo sendo uma combinação legítima.
+
+    2) COMBO SEM SENTIDO ACEITO COMO FAIXA REAL: se por coincidência a
+       linha "mais" de um time for menor que a linha "menos" do outro
+       (ex: Vasco "mais de 3.5" e Fluminense "menos de 6.5"), a checagem
+       de largura passava, e o código calculava `P(faixa) = P(Vasco
+       mais 3.5) + P(Fluminense menos 6.5) - 1` como se fosse recorte da
+       MESMA distribuição - não é, é a soma de duas variáveis de times
+       diferentes. A probabilidade fabricada virava recomendação real de
+       múltipla, com VE calculado em cima de número sem sentido.
+
+    A função irmã `_identidade_estavel_perna` (também escrita em 08/09,
+    na mesma Fase 2) já tinha a distinção certa: `fixture_id_api` só pra
+    JOGO_INTEIRO/JOGADOR, `jogo_id` pra mercado de TIME (ela precisa
+    disso porque a aposta do nosso time e a do adversário têm o mesmo
+    `fixture_id_api`, e só `jogo_id` distingue qual é qual). Esta função
+    nunca recebeu o mesmo branch - consertado aqui replicando a mesma
+    regra.
     """
-    tipo_padrao = p["tipo_padrao"]
+    tipo_padrao_original = p["tipo_padrao"]
+    tipo_padrao = tipo_padrao_original
     if tipo_padrao == "gols_time" and p["linha"] == 0.5:
         tipo_padrao = "_evento_time_marca"
     elif tipo_padrao == "equipe_marca":
         tipo_padrao = "_evento_time_marca"
-    return (identidade_jogo(p), tipo_padrao, p["jogador_id"])
+
+    if tipo_padrao_original in MERCADOS_JOGO_INTEIRO or tipo_padrao_original in MERCADOS_JOGADOR:
+        chave_jogo = identidade_jogo(p)
+    else:
+        # mercado de TIME (inclui o `_evento_time_marca` fundido acima):
+        # `jogo_id` distingue qual dos dois times da partida é o dono da
+        # aposta - `fixture_id_api` sozinho ambiguaria as duas pontas.
+        chave_jogo = p["jogo_id"]
+
+    return (chave_jogo, tipo_padrao, p["jogador_id"])
 
 
 def combo_tem_conflito_de_time_mesma_data(combo):
