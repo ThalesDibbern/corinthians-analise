@@ -53,9 +53,62 @@ probabilidades de duas variáveis diferentes. Ver a docstring de
 auditoria de linha a linha do arquivo, sem gatilho de bug reportado -
 `escanteio_time` era o maior mercado da rodada 26 (70 recomendações),
 o mais exposto ao defeito.
+
+⚠️ CORRIGIDO (13/09/2026) - ESTOURO DE MEMÓRIA EM `montar_combinacoes`:
+o cron `refreshing-freedom` passou a morrer SEM mensagem de erro, sempre
+no mesmo ponto ("Montando combinações..."), ~44s depois de começar -
+assinatura de SIGKILL pelo OOM killer do container, não de exceção
+Python (exceção imprimiria traceback).
+
+CAUSA RAIZ (estrutural, não era o `chave_mercado_da_perna`): a função
+acumulava TODAS as combinações válidas numa lista `resultado`, e só
+aplicava `MAX_MULTIPLAS_RESULTADO` no FIM, depois de ordenar. O teto
+protegia o que é EXIBIDO, nunca o que é ALOCADO.
+
+Isso só não explodia antes porque ninguém tinha medido quantas
+combinações de fato sobrevivem aos filtros. Medido em bancada com as
+517 recomendações REAIS da rodada de 13/09 (10 jogos, 20 times,
+extraídas do log de produção):
+
+    pool de pernas ............. 308  -> tamanho máximo de combo 3
+    combinações possíveis ...... 4.870.076
+    rejeitadas por mercado ..... 0,5%
+    rejeitadas por VE <= 0 ..... 0,0015%
+    ACEITAS .................... ~98,3%  (~4,79 milhões de dicts)
+    custo medido ............... ~2,2 KB por item  ->  ~10,5 GB
+
+⚠️ O filtro `valor_esperado <= 0` NÃO filtra praticamente nada, e isso é
+matemático, não acidental: `motor_recomendacoes` só grava perna com
+VE >= 0, ou seja `p_i * odd_i >= 1` pra toda perna. Como a múltipla
+multiplica os dois lados, `prod(p_i) * prod(odd_i) = prod(p_i * odd_i)`
+é sempre >= 1 - logo VE combinado >= 0 SEMPRE. Toda combinação de
+pernas de VE positivo tem VE positivo. O filtro existe, roda, e deixa
+passar tudo (6 a 15 rejeições em 400 mil na medição).
+
+CORREÇÃO APLICADA: as múltiplas (2+ pernas) passam a ser mantidas num
+HEAP LIMITADO a `MAX_MULTIPLAS_RESULTADO` em vez de numa lista sem
+teto. A memória vira O(300) em vez de O(combinações). A saída é
+BIT A BIT IDÊNTICA à de antes - inclusive o desempate: a chave de
+ordenação é `(probabilidade_combinada, -sequencia)`, o que reproduz
+exatamente o comportamento do `sort` estável seguido de `[:300]` que
+existia antes (empate -> vence a gerada primeiro). Verificado em
+bancada nas faixas 1.5-2.5, 3.0-6.0, 8.0-40.0 e 1.01-1000: mesma
+quantidade de itens, mesma ordem, mesmos valores. De quebra o tempo
+caiu ~2x, porque some a ordenação de milhões de elementos.
+
+⚠️ O QUE ESTA CORREÇÃO **NÃO** RESOLVE (pendência separada, de decisão):
+o LOOP continua percorrendo as ~4,87 milhões de combinações - só não
+guarda mais todas. Isso é ~1 a 2 minutos de CPU por execução com a
+faixa larga (1.01-1000) que o `motor_combinacoes` usa. Não derruba
+nada, mas é desperdício: 4,87 milhões de combos são geradas pra 300
+sobreviverem. Reduzir de verdade exige decidir o corte (baixar o teto
+adaptativo de pernas, ou filtrar candidatas antes de combinar), e isso
+MUDA o que é gerado - então fica fora deste deploy, que é
+deliberadamente neutro em comportamento.
 """
 
 import hashlib
+import heapq
 import json
 from itertools import combinations
 
@@ -107,6 +160,13 @@ LARGURA_MINIMA_FAIXA = 3.0
 # 2-3 milhões de combinações testadas por tamanho, mesmo no pior caso.
 # C(50,5) ≈ 2.1 milhões, C(90,4) ≈ 2.55 milhões, C(200,3) ≈ 1.3 milhão -
 # todos dentro da margem.
+#
+# ⚠️ MEDIDO EM 13/09/2026: numa rodada cheia (10 jogos, os 20 times
+# rastreados jogando, 442 recomendações ativas após dedup) o pool chega a
+# 308 pernas - bem acima dos 200 que a conta acima usou como pior caso.
+# C(308,3) = 4.87 milhões, quase 4x o previsto. O teto adaptativo funciona
+# (cai pra 3 pernas), mas o volume continua alto. Ver a nota de pendência
+# no fim da docstring do módulo.
 LIMITE_POOL_PARA_5_PERNAS = 50
 LIMITE_POOL_PARA_4_PERNAS = 90
 
@@ -114,6 +174,11 @@ LIMITE_POOL_PARA_4_PERNAS = 90
 # com pool pequeno - protege contra faixa de odd muito larga (ex: 10 a
 # 1000) gerando dezenas de milhares de combinações válidas. Sempre mantém
 # as de maior probabilidade histórica.
+#
+# ⚠️ CORRIGIDO (13/09/2026): até aqui este teto era aplicado só NO FIM,
+# depois de montar a lista inteira - protegia a EXIBIÇÃO, não a memória.
+# Agora ele limita o heap durante a geração (ver `montar_combinacoes`),
+# que é o que impede o OOM. Mesmo número, papel diferente.
 MAX_MULTIPLAS_RESULTADO = 300
 
 
@@ -321,6 +386,17 @@ def chave_mercado_da_perna(p):
     `fixture_id_api`, e só `jogo_id` distingue qual é qual). Esta função
     nunca recebeu o mesmo branch - consertado aqui replicando a mesma
     regra.
+
+    ⚠️ EFEITO COLATERAL MEDIDO (13/09/2026): essa correção AUMENTA o
+    número de chaves de mercado distintas, porque separa em duas o que
+    antes era uma. Medido na rodada de 13/09 com as recomendações reais:
+    156 chaves -> 191 chaves, e o pool de pernas pra múltipla foi de 258
+    -> 308. Como o pool entra em `C(pool, 3)`, isso levou as combinações
+    possíveis de 2,86 milhões pra 4,87 milhões (+70%). Não é defeito
+    desta função - ela está certa - mas foi o que empurrou
+    `montar_combinacoes` por cima do teto de memória do container. A
+    causa raiz (lista sem teto) está corrigida lá; registrado aqui pra
+    quem for mexer na chave saber que ela move o custo da combinação.
     """
     tipo_padrao_original = p["tipo_padrao"]
     tipo_padrao = tipo_padrao_original
@@ -346,11 +422,21 @@ def combo_tem_conflito_de_time_mesma_data(combo):
     pelas 2 perspectivas) que envolvam o MESMO time na MESMA data - isso é
     fisicamente impossível (um time não pode disputar duas partidas reais
     no mesmo dia), então a combinação nunca poderia ter acontecido de
-    verdade."""
+    verdade.
+
+    OTIMIZADO (13/09/2026): passou a ler `p["_identidade_jogo"]`, que
+    `montar_combinacoes` pré-calcula uma vez por perna, em vez de chamar
+    `identidade_jogo(p)` de novo pra cada par de cada combinação. Com
+    ~4,9 milhões de combinações de 3 pernas isso eram ~29 milhões de
+    chamadas redundantes por execução. Cai de volta na função quando a
+    chave não existe (perna montada por outro caminho), então continua
+    funcionando pra qualquer chamador."""
     for i in range(len(combo)):
         for j in range(i + 1, len(combo)):
             a, b = combo[i], combo[j]
-            if identidade_jogo(a) == identidade_jogo(b):
+            ida = a.get("_identidade_jogo") or identidade_jogo(a)
+            idb = b.get("_identidade_jogo") or identidade_jogo(b)
+            if ida == idb:
                 continue  # mesmo jogo real (só perspectivas diferentes) - ok
             if a["data_jogo"] == b["data_jogo"] and (
                 {a["nosso_time"], a["adversario"]} & {b["nosso_time"], b["adversario"]}
@@ -374,7 +460,29 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max, prob_min=None, prob_max=
     50%, mesmo que nenhuma das pernas individualmente esteja na faixa.
 
     Ambos são opcionais: `None` significa "sem limite desse lado", que é
-    o comportamento quando o campo é deixado em branco na tela."""
+    o comportamento quando o campo é deixado em branco na tela.
+
+    ⚠️ CORRIGIDO (13/09/2026) - OOM: as múltiplas agora vivem num heap
+    limitado a `MAX_MULTIPLAS_RESULTADO`, não numa lista sem teto. Ver a
+    docstring do MÓDULO pro diagnóstico completo, os números medidos e o
+    que continua em aberto. Resumo do mecanismo:
+
+      - `individuais` (1 perna) continua lista normal: são poucas
+        (uma por recomendação ativa, ~440 na rodada cheia) e a tela
+        mostra todas.
+      - múltiplas (2+ pernas) vão pra um MIN-heap de no máximo 300
+        entradas, chaveado por `(probabilidade_combinada, -sequencia)`.
+        Quando enche, cada nova entra por `heappushpop`, que descarta a
+        MENOR - ou seja, a de menor probabilidade, e em caso de empate
+        a gerada MAIS TARDE.
+      - no fim o heap é ordenado por essa mesma chave, decrescente.
+
+    Isso reproduz EXATAMENTE o que o código antigo fazia (montar tudo,
+    `sort` estável por probabilidade decrescente, cortar em 300),
+    inclusive o desempate - é por isso que a chave carrega `-sequencia`.
+    Verificado em bancada com as 517 recomendações reais da rodada de
+    13/09, nas faixas 1.5-2.5, 3.0-6.0, 8.0-40.0 e 1.01-1000: saída
+    idêntica item a item, e ~2x mais rápido."""
     grupos = {}
     for rec in recomendacoes:
         (jogo_id, jogador_id, descricao, casa, odd, prob, adversario, data_jogo,
@@ -405,8 +513,25 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max, prob_min=None, prob_max=
             "fixture_id_api": fixture_id_api,
         })
 
-    resultado = []
+    # `individuais` é lista comum (poucas, todas exibidas); múltiplas vão
+    # pro heap limitado logo abaixo. `sequencia` preserva a ordem de
+    # geração pro desempate - ver docstring.
+    individuais = []
+    heap = []
+    sequencia = 0
+
     for casa, pernas in grupos.items():
+
+        # NOVO (13/09/2026): a chave de mercado e a identidade de jogo de
+        # cada perna são calculadas UMA vez aqui e guardadas no próprio
+        # dict. Antes eram recalculadas dentro do loop de combinações -
+        # 3 chamadas por combo na checagem de repetição, mais 3 no cálculo
+        # da probabilidade, mais 3 na montagem de `jogos_vistos`, vezes
+        # ~4,9 milhões de combos. Puro desperdício de CPU, sem efeito
+        # nenhum no resultado (a chave é função pura da perna).
+        for p in pernas:
+            p["_chave_mercado"] = chave_mercado_da_perna(p)
+            p["_identidade_jogo"] = identidade_jogo(p)
 
         # pra cada mercado (JOGO + tipo_padrao + jogador_id), se a casa
         # oferece mais de uma linha "mais" e/ou "menos" pro mesmo mercado,
@@ -416,8 +541,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max, prob_min=None, prob_max=
         faixa_permitida_por_mercado = {}
         pernas_por_mercado = {}
         for p in pernas:
-            chave_mercado = chave_mercado_da_perna(p)
-            pernas_por_mercado.setdefault(chave_mercado, []).append(p)
+            pernas_por_mercado.setdefault(p["_chave_mercado"], []).append(p)
 
         for chave_mercado, legs in pernas_por_mercado.items():
             candidatos_mais = [p for p in legs if p["direcao"] == "mais" and p["linha"] is not None]
@@ -471,8 +595,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max, prob_min=None, prob_max=
                 # maior) - 1.
                 contagem_mercado = {}
                 for p in combo:
-                    chave_mercado = chave_mercado_da_perna(p)
-                    contagem_mercado.setdefault(chave_mercado, []).append(p)
+                    contagem_mercado.setdefault(p["_chave_mercado"], []).append(p)
 
                 valido = True
                 faixa_chave = None
@@ -524,8 +647,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max, prob_min=None, prob_max=
                 faixa_ja_contabilizada = False
                 for p in combo:
                     odd_combinada *= p["odd"]
-                    chave_mercado = chave_mercado_da_perna(p)
-                    if faixa_chave is not None and chave_mercado == faixa_chave:
+                    if faixa_chave is not None and p["_chave_mercado"] == faixa_chave:
                         if not faixa_ja_contabilizada:
                             prob_combinada *= faixa_probabilidade
                             faixa_ja_contabilizada = True
@@ -548,6 +670,16 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max, prob_min=None, prob_max=
 
                 valor_esperado = round((prob_combinada * odd_combinada) - 1, 3)
 
+                # ⚠️ MEDIDO (13/09/2026): este filtro é praticamente um
+                # no-op pra múltiplas, e por motivo matemático, não por
+                # acidente. `motor_recomendacoes` só grava perna com
+                # VE >= 0, isto é `p_i * odd_i >= 1`. Como
+                # prod(p_i) * prod(odd_i) = prod(p_i * odd_i), o produto
+                # é sempre >= 1 -> VE combinado >= 0 SEMPRE. Medido: 6 a
+                # 15 rejeições em 400 mil combos testados. Fica aqui
+                # porque protege o caso de 1 perna e o dia em que o piso
+                # de VE das recomendações voltar a ser negativo - mas não
+                # conte com ele pra reduzir volume.
                 if valor_esperado <= 0:
                     continue
 
@@ -558,7 +690,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max, prob_min=None, prob_max=
                 jogos_vistos_chaves = set()
                 jogos_vistos = []
                 for p in combo:
-                    chave_jogo = identidade_jogo(p)
+                    chave_jogo = p["_identidade_jogo"]
                     if chave_jogo not in jogos_vistos_chaves:
                         jogos_vistos_chaves.add(chave_jogo)
                         jogos_vistos.append({
@@ -577,7 +709,7 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max, prob_min=None, prob_max=
                             "datahora_jogo": p["datahora_jogo"],
                         })
 
-                resultado.append({
+                item = {
                     "casa_aposta": casa,
                     "descricao": descricao_final,
                     "odd_combinada": round(odd_combinada, 2),
@@ -614,18 +746,33 @@ def montar_combinacoes(recomendacoes, odd_min, odd_max, prob_min=None, prob_max=
                         }
                         for p in combo
                     ],
-                })
+                }
+
+                if tamanho == 1:
+                    individuais.append(item)
+                else:
+                    # ⚠️ É AQUI que o OOM foi resolvido. `sequencia` é
+                    # estritamente crescente, então `chave_ordem` nunca
+                    # empata - o heap jamais precisa comparar os dicts
+                    # (o que levantaria TypeError).
+                    sequencia += 1
+                    chave_ordem = (item["probabilidade_combinada"], -sequencia)
+                    if len(heap) < MAX_MULTIPLAS_RESULTADO:
+                        heapq.heappush(heap, (chave_ordem, item))
+                    else:
+                        heapq.heappushpop(heap, (chave_ordem, item))
+
+    # ordena por probabilidade histórica (maior primeiro). As múltiplas
+    # saem do heap já limitadas ao teto; as individuais saem todas.
+    multiplas_final = [item for _, item in sorted(heap, key=lambda x: x[0], reverse=True)]
+    individuais_final = sorted(
+        individuais, key=lambda c: c["probabilidade_combinada"], reverse=True
+    )
+
+    resultado = individuais_final + multiplas_final
     for c in resultado:
         c["pernas_json"] = json.dumps(c["pernas"], ensure_ascii=False)
-
-    # ordena por probabilidade histórica (maior primeiro)
-    resultado.sort(key=lambda c: c["probabilidade_combinada"], reverse=True)
-
-    # teto de múltiplas exibidas (protege contra faixa de odd muito larga
-    # gerando resultados demais) - individuais continuam sem teto.
-    individuais_final = [c for c in resultado if len(c["pernas"]) == 1]
-    multiplas_final = [c for c in resultado if len(c["pernas"]) > 1][:MAX_MULTIPLAS_RESULTADO]
-    return individuais_final + multiplas_final
+    return resultado
 
 
 def _identidade_estavel_perna(p):
