@@ -220,18 +220,23 @@ def verificar(conn):
 
 
 def aplicar(conn, confirmado=False):
-    estado = verificar(conn)
+    # ⚠️ NAO chamar esta variavel de `estado`: existe uma FUNCAO `estado(conn)`
+    # no escopo do modulo, usada no fim desta funcao para imprimir o relatorio.
+    # Uma variavel local com o mesmo nome a sombreia, e a chamada final quebra
+    # com `TypeError: 'str' object is not callable` - DEPOIS do commit, o que
+    # e pior: o dado grava e o script parece ter falhado. Aconteceu em 15/09.
+    veredito = verificar(conn)
 
-    if estado == "precisa_confirmacao" and not confirmado:
+    if veredito == "precisa_confirmacao" and not confirmado:
         print("ABORTADO: rode de novo com --confirmo-historico se concorda")
         print("com a leitura acima.")
         return
 
-    if estado is False:
+    if veredito is False:
         print("Abortado pela fase verificar.")
         return
 
-    if estado == "precisa_confirmacao":
+    if veredito == "precisa_confirmacao":
         print(">>> CONFIRMACAO EXPLICITA RECEBIDA - aplicando o CASO A. <<<")
         print()
 
