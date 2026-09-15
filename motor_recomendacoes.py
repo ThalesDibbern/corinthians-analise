@@ -192,6 +192,58 @@ VALOR_ESPERADO_MINIMO_CORRIGIDO = 0.0
 # resultado_final é o ÚNICO grupo de controle desta mudança: se os
 # mercados do escopo melhorarem e ele não, o mérito é desta correção.
 #
+# ⚠️ ATUALIZAÇÃO DE 15/09/2026 - handicap_asiatico ENTRA no escopo.
+# Desenho completo em `arquitetura_handicap_encolhimento.md`.
+#
+# O handicap estava fora por OMISSÃO, não por decisão: quando este
+# escopo foi definido (03/09) ele ainda não gerava recomendação nenhuma
+# - o bug de classificação só foi corrigido em 08/09. Nunca houve a
+# pergunta "ele deve entrar?".
+#
+# Medido nas rodadas 24-27, deduplicado [medido, 15/09]:
+#
+#   mercado            N    modelo  odd implica  observado  gap vs CASA
+#   escanteio_time    274    55,0      50,5        44,9        -5,6
+#   cartao_total      126    56,1      49,5        45,2        -4,2
+#   escanteio_total   229    61,8      56,5        52,8        -3,6
+#   handicap_asiatico  36    60,2      53,5        50,0        -3,5
+#   gols_total        179    56,0      52,0        50,3        -1,8
+#
+# A leitura que decide: contra a CASA o handicap está entre os melhores
+# do sistema (-3,5, dentro da margem de ~8% da Superbet). Contra o
+# MODELO ele está em -10,2. O dado do mercado não é ruim - o modelo é
+# otimista demais sobre ele (prevê 60,2 onde a casa precifica 53,5).
+# Esse é exatamente o defeito que esta correção trata, e é por isso que
+# a resposta é encolhimento e não um filtro de odd ou de VE.
+#
+# Reforço medido na rodada 27 (Q15 do protocolo): divergência média
+# modelo-menos-casa de 6,7 no handicap contra 2,8 nos mercados já
+# encolhidos - 2,4x maior. E o observado dele (50,0) ficou mais perto
+# do implícito na odd (53,5) que do previsto pelo modelo (60,2). As
+# duas condições pré-registradas como confirmação foram satisfeitas.
+#
+# Backtest das 36 recomendações [bancada, 15/09]: gap -10,2 -> -6,1,
+# VE médio 0,210 -> 0,089, e ZERO recomendações deixariam de existir
+# (p_final fica sempre entre p_modelo e p_mercado, então o VE encolhe
+# mas não cruza o piso 0,0). Isto é: a mudança corrige o número e a
+# calibração, NÃO muda o que é apostado. O ROI só se move quando um
+# piso entrar - ver o aviso em `piso_ve`, no fim de calcular_recomendacoes.
+#
+# resultado_final CONTINUA FORA, agora por decisão medida e não por
+# herança. Números limpos das rodadas 24-27, SÓ vitória/derrota (o
+# empate saiu em 01/09 e estava contaminando o agregado com 19 linhas
+# de 0 acertos) [medido, 15/09]:
+#
+#   N=40, 34 jogos, 9 vitórias, modelo 41,5, casa 30,2, observado 22,5
+#   gap vs modelo -19,0 | gap vs casa -7,7 | ROI -23,7%
+#
+# O encolhimento levaria o gap de -19,0 para -11,4 - ajuda, mas não
+# resolve, e o mercado segue precisando de investigação própria. Mantê-lo
+# fora AGORA tem um segundo motivo, operacional: com o handicap entrando,
+# resultado_final passa a ser o único espelho sem encolhimento com
+# volume, e é o que permite julgar esta mudança na rodada 28. Duas
+# mudanças de fórmula no mesmo deploy tornariam a medição ilegível.
+#
 # ⚠️ CORREÇÃO DE 03/09/2026: uma versão anterior deste comentário
 # listava "correlação" como um segundo mercado fora do escopo. ERRADO -
 # correlação não é um tipo_padrao, é um FATOR do Grupo A (rótulos
@@ -211,6 +263,7 @@ MERCADOS_CORRECAO_DIVERGENCIA_MERCADO = {
     "marca_ambos_tempos",
     "equipe_marca",
     "chute_no_gol", "falta_cometida",
+    "handicap_asiatico",   # NOVO (15/09/2026) - ver bloco acima
 }
 
 # limites do ajuste de árbitro - evita que uma amostra pequena por árbitro
@@ -3048,6 +3101,39 @@ def calcular_recomendacoes(cur):
         # VALOR_ESPERADO_MINIMO de sempre - eles são o grupo de controle
         # e não podem ter DOIS parâmetros mudando ao mesmo tempo, senão a
         # próxima medição não distingue o efeito de um do outro.
+        #
+        # ⚠️ ARMADILHA REGISTRADA EM 15/09/2026 - LEIA ANTES DE LIGAR O PISO.
+        #
+        # MERCADOS_CORRECAO_DIVERGENCIA_MERCADO decide DUAS coisas ao mesmo
+        # tempo: se o mercado é encolhido (lá em cima) e qual piso de VE
+        # vale (aqui). Entrar no conjunto liga as duas de uma vez.
+        #
+        # Hoje isso é inócuo - VALOR_ESPERADO_MINIMO e
+        # VALOR_ESPERADO_MINIMO_CORRIGIDO valem 0.0 os dois. Mas a decisão
+        # do piso (item 1.8 da fila) está aberta, e no dia em que ela for
+        # tomada o handicap - que entrou no conjunto em 15/09 só pelo
+        # encolhimento - herdaria o piso novo SEM que ninguém tenha
+        # decidido isso.
+        #
+        # E o backtest diz que herdar seria ruim [bancada, 15/09]. Handicap
+        # por faixa de VE JÁ ENCOLHIDO, rodadas 24-27:
+        #
+        #   VE novo        N   vitórias   ROI
+        #   < 0,05        16      15     +23,3%
+        #   0,05 - 0,15   14       3     -65,7%
+        #   0,15+          6       0    -100,0%
+        #
+        # Gradiente monotônico, e INVERTIDO em relação ao que um piso
+        # pressupõe: neste mercado quem ganha é o VE BAIXO. Um piso de 0,05
+        # cortaria 16 recomendações, e nelas estão 15 das 18 vitórias do
+        # mercado - cortaria exatamente as boas.
+        #
+        # (N de 6 a 16 por célula: o gradiente é alerta, não veredito. Serve
+        # para NÃO herdar o piso sem medir, não para criar um piso invertido.)
+        #
+        # PORTANTO: ao ligar o piso corrigido, separar este `if` do conjunto
+        # de encolhimento - um conjunto para cada decisão - em vez de
+        # reaproveitar o mesmo.
         if tipo in MERCADOS_CORRECAO_DIVERGENCIA_MERCADO:
             piso_ve = VALOR_ESPERADO_MINIMO_CORRIGIDO
         else:
