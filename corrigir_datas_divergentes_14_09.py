@@ -95,7 +95,19 @@ CASO_A = {
 }
 
 # CASO B: fixture -> data correta em `jogos`, a ser copiada para jogos_liga.
-# Apenas os dois ainda NAO disputados.
+#
+# ATUALIZADO 15/09 [medido, 15/09]: quando este script foi escrito, os dois
+# estavam por disputar. Hoje so o 1492311 ainda nao jogou.
+#
+#   1492371  Bahia x Remo       jogos 14/09  liga 13/09   FT  - virou higiene
+#   1492311  Botafogo x Gremio  jogos 16/09  liga 29/07   NS  - o que importa
+#
+# O 1492311 tem 35 recomendacoes ATIVAS e joga em 16/09 22:30 UTC. O atraso
+# do jogos_liga e de quase dois meses (o jogo foi remarcado de 29/07).
+#
+# ATENCAO: alinhar jogos_liga NAO protege contra o arquivamento prematuro
+# (Fase 6.7). Ele le `jl.status`, nao `jl.data_jogo`, e o status esta NS.
+# Conferir as 35 ativas depois do cron de 16/09 12:00 UTC.
 CASO_B = {
     1492371: "2026-09-14",
     1492311: "2026-09-16",
@@ -173,27 +185,55 @@ def verificar(conn):
     print()
 
     if bloqueios:
-        print("!! BLOQUEIO - NAO APLICAR SEM DECIDIR !!")
+        print("!! ATENCAO - LINHAS JA ARQUIVADAS COM A DATA ERRADA !!")
         print()
         for b in bloqueios:
             print("   " + b)
         print()
-        print("A recomendacao ja foi arquivada com a data errada. Corrigir")
-        print("`jogos` nao reabre `historico_recomendacoes`: mercado avaliado")
-        print("contra PLACAR congela veredito (1_ESSENCIAL 5.8). Decidir se")
-        print("entra tambem uma reavaliacao antes de rodar aplicar.")
+        print("POR QUE ISSO NAO IMPEDE A CORRECAO [analisado 15/09]:")
         print()
-        return False
+        print("  1. O erro e de UM DIA (05/09 contra 06/09), e os dois jogos")
+        print("     JA TINHAM SIDO DISPUTADOS quando o arquivamento rodou")
+        print("     (06-07/09). Nao houve varredura prematura aqui.")
+        print("  2. `avaliacao.py` decide por PLACAR e ESTATISTICA do jogo_id,")
+        print("     nunca pela data. Os vereditos dessas linhas estao certos.")
+        print("  3. `historico_recomendacoes.data_jogo` e coluna PROPRIA,")
+        print("     congelada no arquivamento. Corrigir `jogos` nao a altera")
+        print("     e nao reabre nada.")
+        print()
+        print("O QUE A CORRECAO GANHA: consulta de auditoria que filtra por")
+        print("`j.data_jogo` passa a enxergar as duas perspectivas na mesma")
+        print("data. Hoje um recorte por semana perde as linhas da perspectiva")
+        print("atrasada sem avisar.")
+        print()
+        print("Para aplicar mesmo assim, rode com a confirmacao explicita:")
+        print()
+        print("    python corrigir_datas_divergentes_14_09.py aplicar --confirmo-historico")
+        print()
+        print("A confirmacao fica registrada no ARGV impresso no cabecalho.")
+        print()
+        return "precisa_confirmacao"
 
     print("Sem bloqueio. Seguro aplicar.")
     print()
     return True
 
 
-def aplicar(conn):
-    if not verificar(conn):
+def aplicar(conn, confirmado=False):
+    estado = verificar(conn)
+
+    if estado == "precisa_confirmacao" and not confirmado:
+        print("ABORTADO: rode de novo com --confirmo-historico se concorda")
+        print("com a leitura acima.")
+        return
+
+    if estado is False:
         print("Abortado pela fase verificar.")
         return
+
+    if estado == "precisa_confirmacao":
+        print(">>> CONFIRMACAO EXPLICITA RECEBIDA - aplicando o CASO A. <<<")
+        print()
 
     with conn.cursor() as cur:
         for fx, data in CASO_A.items():
@@ -227,8 +267,10 @@ def aplicar(conn):
 def main():
     fase = sys.argv[1] if len(sys.argv) > 1 else ""
     if fase not in ("verificar", "aplicar"):
-        print("uso: python corrigir_datas_divergentes_14_09.py verificar|aplicar")
+        print("uso: python corrigir_datas_divergentes_14_09.py verificar|aplicar [--confirmo-historico]")
         sys.exit(1)
+
+    confirmado = "--confirmo-historico" in sys.argv
 
     cabecalho(fase)
     conn = conectar()
@@ -236,7 +278,7 @@ def main():
         if fase == "verificar":
             verificar(conn)
         else:
-            aplicar(conn)
+            aplicar(conn, confirmado=confirmado)
     finally:
         conn.close()
 
