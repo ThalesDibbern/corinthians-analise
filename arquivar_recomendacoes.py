@@ -123,12 +123,81 @@ JSONB de `pernas` - `perna.get("fixture_id_api")` devolve None pra essas,
 e o casamento cai de volta no comportamento antigo (por jogo_id), sem
 precisar de migração nem backfill.
 
+NOVO (16/09/2026 - TRAVA CONTRA ARQUIVAMENTO ANTES DO APITO):
+
+Medido na rodada 27: 273 recomendações foram arquivadas ANTES do jogo
+começar. O caso mais grave, fixture 1492374, foi arquivado 31h48 antes.
+Isso não é cosmético - `historico_recomendacoes` CONGELA o veredito, e
+mercado avaliado contra PLACAR nunca se cura. Pior: cada arquivamento
+prematuro deixa a recomendação ser regerada (o jogo ainda é futuro, então
+o motor age corretamente), criando uma CÓPIA no histórico. As cópias têm
+a mesma odd e o mesmo veredito, mas probabilidade diferente - porque
+`motor_padroes` regravou a janela de 50 jogos e o PRÓPRIO JOGO entrou
+nela. Medido sobre 305 grupos: 93,2% das divergências apontam na direção
+do resultado. Isso é look-ahead, e ele sempre melhora o gap
+artificialmente. A dedup de 15/09 limpou 337 linhas do acervo; enquanto
+este arquivo não mudar, volta a acontecer na próxima rodada.
+
+O QUE FOI DESCARTADO POR MEDIÇÃO (16/09) - não vale re-testar:
+
+  - "datahora_jogo era NULL, caiu no ramo da data" -> ZERO jogos de 2026
+    têm datahora nula.
+  - "datahora_jogo discordava de data_jogo na mesma linha" -> ZERO linhas
+    com essa divergência interna.
+  - "o LEFT JOIN multiplicou linhas" -> jogos_liga é 1:1 (1.900 linhas /
+    1.900 fixtures distintos).
+  - "o jogo já tinha passado mesmo" -> as 9 fixtures de 13/09 têm
+    datahora 13/09 20:00 e foram arquivadas 13/09 12:12.
+
+O QUE SOBROU - duas hipóteses, as duas sobre um valor SOBRESCRITO todo
+dia, e por isso nenhuma testável depois do fato:
+
+  (A) `jogos_liga.status` disse 'FT' antes do jogo acontecer. É o único
+      ramo do WHERE que pode ser verdadeiro com as duas datas no futuro.
+  (B) `jogos.datahora_jogo` esteve temporariamente adiantada na hora do
+      cron e foi corrigida depois. `popular_banco` roda ANTES deste
+      script no MESMO cron e reescreve essa coluna; e a API-Football
+      reescreve dado retroativamente (já registrado neste projeto).
+
+Como não dá pra escolher entre A e B com o dado que sobrevive, a correção
+faz as DUAS coisas:
+
+  1. TRAVA: nada é arquivado enquanto `datahora_jogo` não tiver chegado.
+     Nem por status, nem por nada. O `status` continua valendo para o
+     caso que o criou (data errada PARA TRÁS - Cruzeiro x Vasco, 30/08),
+     porque ali a datahora já passou.
+
+     Custo no caso normal: ZERO. O cron roda 12:00 UTC e os jogos
+     terminam entre 23:00 e 01:00 UTC - no cron seguinte a datahora já
+     passou e o ramo 1 arquiva normalmente. A trava só morde o caso
+     patológico.
+
+     Assimetria que decide: arquivar TARDE é cosmético e se cura sozinho
+     no próximo cron. Arquivar CEDO corrompe o histórico de forma
+     permanente e injeta look-ahead. Na dúvida, atrasa.
+
+  2. PROVA: para cada linha, imprime QUAL ramo do WHERE a tornou
+     elegível, e imprime por inteiro as que foram bloqueadas (datahora,
+     data_jogo das duas tabelas, status, placar, relógio e fuso da
+     sessão). Na próxima vez que acontecer, o log NOMEIA a causa em vez
+     de me obrigar a deduzir por eliminação três dias depois.
+
+     Não fere a regra "aviso no log não é proteção": a proteção é a
+     recusa do item 1; o log é só o diagnóstico do evento raro.
+
+  3. MODO DIAGNÓSTICO: `python arquivar_recomendacoes.py --diagnostico`
+     roda a consulta, classifica, imprime tudo e faz ROLLBACK. Não
+     escreve nada.
+
 Variáveis de ambiente:
   - DATABASE_URL -> a URL de conexão do Postgres (mesma usada nos outros scripts)
 """
 
 import json
 import os
+import sys
+from datetime import datetime
+
 import psycopg2
 
 from avaliacao import avaliar_resultado
@@ -154,6 +223,97 @@ from combinacoes import MERCADOS_JOGO_INTEIRO, MERCADOS_JOGADOR
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
+# NOVO (16/09/2026): os três ramos do WHERE ganham NOME, pra que o log
+# possa dizer qual deles tornou cada linha elegível. Sem isso, quando o
+# arquivamento prematuro acontece, a única saída é deduzir por eliminação
+# dias depois - foi exatamente o que custou a investigação de 15-16/09.
+RAMO_DATAHORA = "datahora_jogo ja passou"
+RAMO_DATA_SEM_HORA = "data_jogo ja passou (datahora nula)"
+RAMO_STATUS = "status da liga diz encerrado"
+
+STATUS_ENCERRADOS = ("FT", "AET", "PEN")
+
+
+def _classificar_ramos(datahora_jogo, data_jogo, status, agora, hoje):
+    """Diz QUAIS ramos do WHERE são verdadeiros para esta linha.
+
+    Repete em Python a mesma lógica do SQL, de propósito - é o preço de
+    poder nomear a causa no log. Para que a repetição não divirja, os
+    dois lados comparam contra os MESMOS valores: `agora` vem de
+    LOCALTIMESTAMP (timestamp sem fuso, igual a `datahora_jogo`) e `hoje`
+    de CURRENT_DATE, ambos lidos na MESMA consulta que trouxe as linhas.
+
+    Por que LOCALTIMESTAMP e não NOW(): `datahora_jogo` é `timestamp
+    without time zone` e NOW() é `timestamptz`. O Postgres resolve essa
+    comparação convertendo a naive com o fuso da SESSÃO. LOCALTIMESTAMP é
+    NOW() já convertido com esse mesmo fuso - então comparar em Python
+    contra ele dá exatamente o resultado que o SQL deu, qualquer que seja
+    o fuso configurado. (Se um dia o fuso da sessão deixar de ser UTC,
+    isto continua correto, e o cabeçalho do log mostra qual é.)"""
+    ramos = []
+    if datahora_jogo is not None and datahora_jogo < agora:
+        ramos.append(RAMO_DATAHORA)
+    if datahora_jogo is None and data_jogo is not None and data_jogo < hoje:
+        ramos.append(RAMO_DATA_SEM_HORA)
+    if status in STATUS_ENCERRADOS:
+        ramos.append(RAMO_STATUS)
+    return ramos
+
+
+def _jogo_ainda_nao_comecou(datahora_jogo, data_liga, agora, hoje):
+    """A TRAVA. Ver o item 1 do NOVO de 16/09 no topo do arquivo.
+
+    São DUAS condições, uma para cada hipótese sobrevivente. A bancada de
+    16/09 mostrou que a primeira sozinha não cobria a hipótese B - foi
+    escrita achando que cobria, e o teste derrubou isso antes do deploy.
+
+    (1) contra a hipótese A - `jogos.datahora_jogo` ainda não chegou.
+        Um status 'FT' vindo cedo demais não passa por aqui.
+
+        Deliberadamente NÃO abre exceção para status encerrado nem para
+        presença de placar: as duas hipóteses produzem justamente um
+        status/placar que aparece cedo demais, então usá-los para liberar
+        a trava seria confiar no dado sob suspeita.
+
+    (2) contra a hipótese B - `jogos_liga.data_jogo` (a SEGUNDA fonte de
+        data, escrita por outro caminho do `popular_banco`) diz que o
+        jogo é de uma data futura. Se `jogos.datahora_jogo` estiver
+        temporariamente adiantada para trás, a condição (1) não pega,
+        porque do ponto de vista dela o jogo já começou. A segunda fonte
+        pega.
+
+        É a regra do projeto "quando duas fontes divergem, a terceira
+        desempata - e costuma ser barata": aqui a terceira fonte já
+        estava no mesmo SELECT, de graça.
+
+        `data_liga` nula (fixture sem linha em `jogos_liga`) não bloqueia
+        - mantém o comportamento antigo para esse caso, sem regressão,
+        igual ao motivo pelo qual o JOIN é LEFT.
+
+    `datahora_jogo` nula cai fora de (1) - aí o único critério possível é
+    a data, e o ramo correspondente já exige `data_jogo < CURRENT_DATE`,
+    conservador por construção. (Medido em 16/09: zero jogos de 2026 com
+    datahora nula, então esse caminho hoje não é alcançado.)"""
+    if datahora_jogo is not None and datahora_jogo > agora:
+        return True
+    if data_liga is not None and data_liga > hoje:
+        return True
+    return False
+
+
+def _descrever_linha_bloqueada(rec):
+    """Uma linha de log com TUDO que decidiria entre as hipóteses A e B,
+    lido no instante da decisão - antes que o próximo cron sobrescreva."""
+    (rec_id, jogo_id, _jogador_id, tipo_padrao, _descricao, _casa,
+     _odd, _prob, _ve, _linha, _direcao, data_jogo, fixture_id_api,
+     datahora_jogo, status_liga, data_liga, placar_m, placar_v) = rec[:18]
+    return (
+        f"  rec_id={rec_id} fixture={fixture_id_api} jogo_id={jogo_id} "
+        f"mercado={tipo_padrao} | jogos.datahora={datahora_jogo} "
+        f"jogos.data={data_jogo} | jogos_liga.data={data_liga} "
+        f"status={status_liga} placar={placar_m}x{placar_v}"
+    )
+
 
 def buscar_recomendacoes_para_arquivar(cur):
     """NOVO: arquiva TODO jogo já passado, sem exceção de "últimas rodadas
@@ -165,12 +325,26 @@ def buscar_recomendacoes_para_arquivar(cur):
     perspectivas de um jogo entre times rastreados), só a de maior
     probabilidade histórica vira uma entrada em historico_recomendacoes;
     a(s) outra(s) ainda são apagadas de `recomendacoes` (não ficam presas
-    lá pra sempre), só não geram um registro duplicado no histórico."""
+    lá pra sempre), só não geram um registro duplicado no histórico.
+
+    NOVO (16/09/2026): a consulta passa a trazer também as colunas que
+    DECIDEM a elegibilidade (`j.datahora_jogo`, `jl.status`,
+    `jl.data_jogo`, os placares) e o relógio/data da própria sessão. Elas
+    não entram no arquivamento - servem para classificar o ramo, aplicar
+    a trava e imprimir a prova. Ficam DEPOIS do índice 12, então todo o
+    fatiamento posterior (`representante[:12]`, `r[7]`,
+    `representante[9:12]`) continua apontando para os mesmos campos de
+    antes. Ver o NOVO no topo do arquivo.
+
+    Devolve `(a_arquivar, bloqueadas, contagem_por_ramo, relogio)`."""
     cur.execute(
         """
         SELECT r.id, r.jogo_id, r.jogador_id, r.tipo_padrao, r.descricao, r.casa_aposta,
                r.odd_oferecida, r.probabilidade_historica, r.valor_esperado, r.linha,
-               r.direcao, j.data_jogo, j.fixture_id_api
+               r.direcao, j.data_jogo, j.fixture_id_api,
+               j.datahora_jogo, jl.status, jl.data_jogo, jl.placar_mandante,
+               jl.placar_visitante, LOCALTIMESTAMP, CURRENT_DATE,
+               current_setting('TimeZone')
         FROM recomendacoes r
         JOIN jogos j ON j.id = r.jogo_id
         LEFT JOIN jogos_liga jl ON jl.fixture_id_api = j.fixture_id_api
@@ -181,10 +355,34 @@ def buscar_recomendacoes_para_arquivar(cur):
     )
     linhas = cur.fetchall()
 
-    grupos = {}
+    if not linhas:
+        cur.execute("SELECT LOCALTIMESTAMP, CURRENT_DATE, current_setting('TimeZone')")
+        agora, hoje, fuso = cur.fetchone()
+        return [], [], {}, (agora, hoje, fuso)
+
+    agora, hoje, fuso = linhas[0][18], linhas[0][19], linhas[0][20]
+    relogio = (agora, hoje, fuso)
+
+    bloqueadas = []
+    contagem_ramos = {}
+    elegiveis = []
+
     for rec in linhas:
+        datahora_jogo, status_liga = rec[13], rec[14]
+        ramos = _classificar_ramos(datahora_jogo, rec[11], status_liga, agora, hoje)
+        chave_ramo = " + ".join(ramos) if ramos else "NENHUM (impossivel - investigar)"
+        contagem_ramos[chave_ramo] = contagem_ramos.get(chave_ramo, 0) + 1
+
+        if _jogo_ainda_nao_comecou(datahora_jogo, rec[15], agora, hoje):
+            bloqueadas.append((rec, chave_ramo))
+            continue
+
+        elegiveis.append(rec)
+
+    grupos = {}
+    for rec in elegiveis:
         (rec_id, jogo_id, jogador_id, tipo_padrao, descricao, casa,
-         odd, prob, ve, linha, direcao, data_jogo, fixture_id_api) = rec
+         odd, prob, ve, linha, direcao, data_jogo, fixture_id_api) = rec[:13]
 
         if tipo_padrao in MERCADOS_JOGO_INTEIRO:
             # NOVO (30/08/2026): identidade ESTRUTURADA, não mais a
@@ -244,7 +442,50 @@ def buscar_recomendacoes_para_arquivar(cur):
             linha_final = representante[:12]
 
         resultado.append(linha_final + (ids_duplicados,))
-    return resultado
+    return resultado, bloqueadas, contagem_ramos, relogio
+
+
+def imprimir_diagnostico(a_arquivar, bloqueadas, contagem_ramos, relogio):
+    """Imprime a PROVA - ver o item 2 do NOVO de 16/09 no topo do arquivo.
+
+    Roda sempre, no cron e no modo diagnóstico. É barato (algumas dezenas
+    de linhas) e é a única chance de capturar o estado no instante da
+    decisão: `jogos_liga.atualizado_em` e `jogos.datahora_jogo` são
+    reescritos pelo `popular_banco` no cron seguinte."""
+    agora, hoje, fuso = relogio
+    print("=" * 72)
+    print("ARQUIVAMENTO - diagnostico de elegibilidade")
+    print(f"  relogio da sessao : {agora}  (CURRENT_DATE={hoje}, TimeZone={fuso})")
+    print(f"  argv              : {sys.argv}")
+    print(f"  relogio do processo: {datetime.now().isoformat(timespec='seconds')}")
+    print("-" * 72)
+
+    if contagem_ramos:
+        print("  Ramo do WHERE que tornou cada linha elegivel:")
+        for ramo, quantas in sorted(contagem_ramos.items(), key=lambda p: -p[1]):
+            print(f"    {quantas:5d}  {ramo}")
+    else:
+        print("  Nenhuma linha candidata.")
+
+    if bloqueadas:
+        print("-" * 72)
+        print(f"  ⚠️  {len(bloqueadas)} linha(s) BLOQUEADAS pela trava de 16/09:")
+        print("      o jogo delas ainda NAO COMECOU segundo jogos.datahora_jogo.")
+        print("      Isto e o bug 6.7 acontecendo. As linhas continuam vivas em")
+        print("      `recomendacoes` e serao arquivadas quando a datahora passar.")
+        print("      O que decide entre as hipoteses A e B esta abaixo:")
+        fixtures_afetados = set()
+        for rec, chave_ramo in bloqueadas:
+            fixtures_afetados.add(rec[12])
+            print(f"    [{chave_ramo}]")
+            print(_descrever_linha_bloqueada(rec))
+        print(f"      fixtures afetados: {sorted(f for f in fixtures_afetados if f is not None)}")
+    else:
+        print("  Trava de 16/09: nenhuma linha bloqueada (nada tentou arquivar cedo).")
+
+    print("-" * 72)
+    print(f"  A arquivar agora: {len(a_arquivar)} aposta(s) apos deduplicacao.")
+    print("=" * 72)
 
 
 def arquivar(cur, recomendacoes):
@@ -512,12 +753,26 @@ def resumo_geral(cur):
 
 
 def main():
+    # NOVO (16/09/2026): modo diagnóstico. Roda a mesma consulta e a mesma
+    # classificação, imprime tudo e faz ROLLBACK - não escreve nada. É a
+    # fase `verificar` que toda mudança que toca dado precisa ter neste
+    # projeto, aplicada a um script que antes só tinha a fase `aplicar`.
+    somente_diagnostico = "--diagnostico" in sys.argv
+
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = False
     cur = conn.cursor()
 
     try:
-        recomendacoes = buscar_recomendacoes_para_arquivar(cur)
+        recomendacoes, bloqueadas, contagem_ramos, relogio = (
+            buscar_recomendacoes_para_arquivar(cur)
+        )
+        imprimir_diagnostico(recomendacoes, bloqueadas, contagem_ramos, relogio)
+
+        if somente_diagnostico:
+            conn.rollback()
+            print("\nMODO DIAGNOSTICO: rollback feito, nada foi escrito.")
+            return
 
         if not recomendacoes:
             print("Nada para arquivar no momento (nenhum jogo passado com recomendação pendente).")
