@@ -364,15 +364,44 @@ def aplicar_correcoes(cur, div_jogos, div_liga):
     return alterados_jogos, alterados_liga
 
 
+def filtrar_somente_futuros(div_jogos, div_liga, hoje):
+    """NOVO (17/09/2026): escopa a correção aos jogos que AINDA NÃO
+    ACONTECERAM, pela data que a API diz.
+
+    POR QUE ISSO EXISTE — e é a diferença entre 6.8 e 6.9:
+
+    `motor_padroes` ordena a janela de 50 jogos POR DATA. Corrigir a data de
+    um jogo JÁ DISPUTADO reordena essa janela e, portanto, muda o padrão
+    gerado na próxima execução. A regra do projeto é clara: correção que
+    muda o gerado não sobe no meio de medição, e a medição do handicap
+    (item 1.20) está aberta na rodada 28.
+
+    O caso extremo medido em 17/09: o fixture 1492145 está gravado como
+    2026-02-25 e a API diz 2026-09-02 — **seis meses**. É o Mirassol x
+    Flamengo que a docstring do `arquivar_recomendacoes` já registrava.
+    Mover esse jogo reordena a janela de vários times de uma vez.
+
+    Já os jogos FUTUROS não estão em nenhuma janela de padrão ainda (a
+    janela só tem jogo disputado), então corrigi-los é neutro para o
+    gerado — e é exatamente o que impede a duplicação da rodada que vem.
+
+    Escopar assim preserva a comparabilidade da medição em curso, que é
+    outra regra escrita deste projeto."""
+    fj = [d for d in div_jogos if d["data_api_iso"][:10] >= str(hoje)]
+    fl = [d for d in div_liga if d["data_api_iso"][:10] >= str(hoje)]
+    return fj, fl
+
+
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("verificar", "aplicar"):
         print(__doc__)
-        print("Uso: python sincronizar_datas_jogos.py verificar|aplicar [--confirmo-massa] "
-              "[--temporadas 2025,2026]")
+        print("Uso: python sincronizar_datas_jogos.py verificar|aplicar "
+              "[--somente-futuros] [--confirmo-massa] [--temporadas 2025,2026]")
         sys.exit(1)
 
     fase = sys.argv[1]
     confirmo_massa = "--confirmo-massa" in sys.argv
+    somente_futuros = "--somente-futuros" in sys.argv
 
     temporadas = TEMPORADAS_PADRAO
     if "--temporadas" in sys.argv:
@@ -385,8 +414,14 @@ def main():
     cur = conn.cursor()
 
     try:
-        relogio_do_banco(cur)
+        _agora, hoje = relogio_do_banco(cur)
         print(f"temporadas: {temporadas}")
+        print(f"escopo: {'SOMENTE JOGOS FUTUROS (>= ' + str(hoje) + ')' if somente_futuros else 'TODOS os jogos'}")
+        if not somente_futuros:
+            print("  ⚠️  Sem --somente-futuros, jogo JÁ DISPUTADO também é corrigido, e isso")
+            print("      REORDENA a janela de 50 do motor_padroes — muda o gerado. Ver a")
+            print("      docstring de filtrar_somente_futuros antes de rodar assim durante")
+            print("      uma medição aberta.")
 
         total_jogos = total_liga = 0
 
@@ -398,6 +433,11 @@ def main():
                 continue
 
             div_jogos, div_liga = levantar_divergencias(cur, fixtures)
+            if somente_futuros:
+                antes_j, antes_l = len(div_jogos), len(div_liga)
+                div_jogos, div_liga = filtrar_somente_futuros(div_jogos, div_liga, hoje)
+                print(f"  escopo futuro: {len(div_jogos)}/{antes_j} linha(s) de `jogos` e "
+                      f"{len(div_liga)}/{antes_l} de `jogos_liga` — o resto fica para o item 6.9")
             rodadas = {d["rodada"] for d in div_jogos if d["rodada"] is not None}
             horarios_antes = horarios_por_rodada(cur, rodadas)
             pct = imprimir_relatorio(div_jogos, div_liga, len(fixtures), horarios_antes)
