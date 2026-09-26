@@ -272,6 +272,27 @@ def simular(cur, tipo_padrao, total_jogos, rotulo):
     detalhes_somem = []
     por_direcao = {"mais": [0, 0], "menos": [0, 0]}   # [sobrevive, some]
 
+    # NOVO — o dado que o critério de volume NÃO captura.
+    # "Cortar 46%" só é ruim se o corte for indiscriminado. Estes dois
+    # acumuladores respondem a pergunta que decide: o que sobrevive é
+    # melhor do que o que some?
+    #
+    # ⚠️ Isto NÃO substitui o critério de falseamento travado na
+    # arquitetura (§8). É medição adicional. Trocar o critério depois de
+    # ver o número é o que o protocolo proíbe.
+    grupos = {
+        "sobrevive": {"n": 0, "acertos": 0, "retorno": 0.0, "prev": 0.0},
+        "some":      {"n": 0, "acertos": 0, "retorno": 0.0, "prev": 0.0},
+    }
+
+    def registrar(grupo, resultado, odd, prob_gravada):
+        g = grupos[grupo]
+        g["n"] += 1
+        g["prev"] += prob_gravada
+        if resultado == "acertou":
+            g["acertos"] += 1
+            g["retorno"] += odd
+
     for (jogo_id, linha, direcao, resultado, odd, prob_gravada,
          fixture, nosso_time_id, mandante_id, visitante_id) in linhas:
 
@@ -304,9 +325,11 @@ def simular(cur, tipo_padrao, total_jogos, rotulo):
         if p_final > implicita_casa:
             sobrevivem += 1
             por_direcao[direcao][0] += 1
+            registrar("sobrevive", resultado, odd, prob_gravada)
         else:
             somem += 1
             por_direcao[direcao][1] += 1
+            registrar("some", resultado, odd, prob_gravada)
             detalhes_somem.append(
                 (fixture, linha, direcao, prob_gravada, p_final, implicita_casa, resultado)
             )
@@ -331,10 +354,14 @@ def simular(cur, tipo_padrao, total_jogos, rotulo):
         print(f"    diferença média |recalculado - gravado|: {deriva_media:.2f} pontos")
         print(f"    diferença máxima:                        {deriva_max:.2f} pontos")
         if deriva_media > LIMIAR_DERIVA_ACEITAVEL:
-            print(f"    🔴 ACIMA DE {LIMIAR_DERIVA_ACEITAVEL} — padroes_gols_total mudou desde a geração.")
+            print(f"    🔴 ACIMA DE {LIMIAR_DERIVA_ACEITAVEL} — a tabela de padrão de"
+                  f" `{tipo_padrao}` mudou desde a geração.")
             print(f"       O número de eliminação abaixo NÃO é confiável.")
         else:
             print(f"    ✅ dentro de {LIMIAR_DERIVA_ACEITAVEL} — snapshot compatível.")
+        if deriva_max > 3 * LIMIAR_DERIVA_ACEITAVEL:
+            print(f"    ⚠️ a MÁXIMA ({deriva_max:.1f}) é alta mesmo com a média baixa:")
+            print(f"       algumas linhas derivaram muito. A média esconde a cauda.")
 
     if not avaliadas:
         print("\n  (nada avaliável — sem conclusão)")
@@ -353,13 +380,38 @@ def simular(cur, tipo_padrao, total_jogos, rotulo):
         if tot:
             print(f"      {d:<6} sobrevivem {viv:>4} | somem {mor:>4}  ({100.0*mor/tot:.1f}% eliminadas)")
 
-    if detalhes_somem:
-        acertos_entre_as_que_somem = sum(1 for d in detalhes_somem if d[6] == "acertou")
+    # ---- O QUE O CRITÉRIO DE VOLUME NÃO VÊ ----
+    # Cortar 46% é ruim se o corte for cego, e é exatamente o que se quer
+    # se o que sai for pior do que o que fica.
+    print()
+    print("    QUALIDADE DO CORTE — o que sai vs o que fica")
+    print(f"      {'grupo':<11} {'N':>5} {'obs%':>7} {'prev%':>7} {'gap':>7} {'ROI%':>8}")
+    for nome in ("sobrevive", "some"):
+        g = grupos[nome]
+        if not g["n"]:
+            continue
+        obs = 100.0 * g["acertos"] / g["n"]
+        prev = g["prev"] / g["n"]
+        roi = 100.0 * (g["retorno"] - g["n"]) / g["n"]
+        print(f"      {nome:<11} {g['n']:>5} {obs:>7.1f} {prev:>7.1f} {obs-prev:>7.1f} {roi:>8.1f}")
+
+    g_viv, g_mor = grupos["sobrevive"], grupos["some"]
+    if g_viv["n"] and g_mor["n"]:
+        roi_viv = 100.0 * (g_viv["retorno"] - g_viv["n"]) / g_viv["n"]
+        roi_mor = 100.0 * (g_mor["retorno"] - g_mor["n"]) / g_mor["n"]
+        roi_total = 100.0 * ((g_viv["retorno"] + g_mor["retorno"]) - (g_viv["n"] + g_mor["n"])) \
+                    / (g_viv["n"] + g_mor["n"])
         print()
-        print(f"    das {somem} que sumiriam, {acertos_entre_as_que_somem} tinham ACERTADO"
-              f" ({100.0*acertos_entre_as_que_somem/somem:.1f}%)")
-        print(f"    ⚠️ esse número sozinho NÃO condena a mudança: metade dos pares")
-        print(f"       contraditórios acerta por construção. Ver o ROI no relatório.")
+        print(f"      ROI de hoje (tudo junto):        {roi_total:>7.1f}%")
+        print(f"      ROI se a mudança subisse:        {roi_viv:>7.1f}%   (só o que sobrevive)")
+        print(f"      diferença:                       {roi_viv - roi_total:>+7.1f} pontos")
+        if roi_viv > roi_total:
+            print("      ✅ o corte MELHORA o ROI — está tirando as piores")
+        else:
+            print("      🔴 o corte PIORA o ROI — está tirando as boas junto")
+        print()
+        print("      ⚠️ Isto é medição, NÃO é o critério de aceite. O critério")
+        print("         travado na arquitetura é o de volume, e ele vale como está.")
 
     return pct_some
 
