@@ -11,7 +11,8 @@ tempo humano.
 
 TRÊS TRAVAS INDEPENDENTES
 -------------------------
-1. TOKEN     - sem o token certo, 401. Nada além disso é avaliado.
+1. ACESSO    - token certo OU sessão logada no site. Sem nenhum dos
+               dois, 401. Nada além disso é avaliado.
 2. VALIDAÇÃO - só passa UMA instrução, começando em SELECT ou WITH, sem
                ponto e vírgula e sem nenhuma palavra de escrita.
 3. PERMISSÃO - a conexão usa o papel `claude_leitura`, que tem apenas
@@ -21,14 +22,28 @@ Precisa das três falharem ao mesmo tempo pra virar problema. E a conexão
 ainda abre em modo read-only com timeout, então nem consulta pesada
 segura o banco.
 
+DOIS JEITOS DE PASSAR PELA TRAVA 1 (29/09/2026)
+-----------------------------------------------
+- TOKEN na URL (`?token=...`): o caminho original, pra uso manual.
+- SESSÃO do site: quem fez login em /login (cookie de sessão do Flask,
+  `session["usuario_id"]`) consulta sem token. Existe porque o Claude,
+  pelo navegador, não pode mais colocar credencial em URL; com a sessão,
+  ele consulta sem nunca manusear o token. Também desacopla a rotação do
+  token (item 9.10b) do acesso do Claude ao banco.
+
+A rota continua fora do `exigir_login` do app (rotas_livres) de
+propósito: sem isso, uma chamada só com token seria redirecionada pro
+login. A checagem de sessão é feita AQUI, dentro da rota.
+
 ⚠️ NÃO USA A URL DE ADMIN. Se `DATABASE_URL_LEITURA` não estiver
 configurada, a rota se recusa a funcionar em vez de cair pra
 `DATABASE_URL` — cair pro admin seria transformar uma rota de leitura
 numa porta de escrita sem ninguém perceber.
 
-VARIÁVEIS DE AMBIENTE NECESSÁRIAS (Railway → serviço do site → Variables)
-------------------------------------------------------------------------
-  TOKEN_CONSULTA_LEITURA -> string secreta longa
+VARIÁVEIS DE AMBIENTE (Railway → serviço do site → Variables)
+------------------------------------------------------------
+  TOKEN_CONSULTA_LEITURA -> string secreta longa (opcional desde 29/09:
+                            sem ela, só o caminho por sessão funciona)
   DATABASE_URL_LEITURA   -> postgresql://claude_leitura:SENHA@postgres.railway.internal:5432/railway
 
 O host é o INTERNO. Não precisa de Public Networking ligado.
@@ -40,18 +55,20 @@ COMO LIGAR NO APP (2 linhas em app.py)
 
 USO
 ---
-    GET /api/consulta?token=XXX&sql=SELECT%20...
-    GET /api/consulta?token=XXX&sql=...&formato=json
+    GET /api/consulta?token=XXX&sql=SELECT%20...          (com token)
+    GET /api/consulta?sql=SELECT%20...                    (logado no site)
+    GET /api/consulta?sql=...&formato=json
 
 Sem `formato`, devolve tabela em texto (mais fiel de ler). Com
 `formato=json`, devolve JSON.
 """
 
+import hmac
 import os
 import re
 
 import psycopg2
-from flask import Blueprint, request, Response, jsonify
+from flask import Blueprint, request, Response, jsonify, session
 
 api_consulta = Blueprint("api_consulta", __name__)
 
@@ -80,6 +97,32 @@ PALAVRAS_PROIBIDAS = {
     "pg_read_binary_file", "pg_ls_dir", "lo_import", "lo_export",
     "dblink", "postgres_fdw",
 }
+
+
+def _acesso_autorizado():
+    """Devolve True se a requisição passou pela trava 1.
+
+    Dois caminhos, qualquer um basta:
+    - sessão logada no site (`session["usuario_id"]`, gravada pelo /login);
+    - token igual a TOKEN_CONSULTA_LEITURA, SE a variável existir.
+
+    Sem a variável de ambiente, o caminho por token fica DESLIGADO (não
+    aberto): um deploy sem a variável não deixa a porta escancarada, só
+    restringe a rota a quem está logado.
+
+    `hmac.compare_digest` compara em tempo constante — evita que o tempo
+    de resposta vaze quantos caracteres do token estavam certos.
+    """
+    if "usuario_id" in session:
+        return True
+
+    token_esperado = os.environ.get("TOKEN_CONSULTA_LEITURA")
+    token_recebido = request.args.get("token")
+    if token_esperado and token_recebido:
+        return hmac.compare_digest(
+            token_recebido.encode("utf-8"), token_esperado.encode("utf-8")
+        )
+    return False
 
 
 def _validar_sql(sql):
@@ -170,16 +213,9 @@ def _tabela_texto(colunas, linhas, truncado):
 
 @api_consulta.route("/api/consulta")
 def consultar():
-    token_esperado = os.environ.get("TOKEN_CONSULTA_LEITURA")
-
-    # Sem token configurado no ambiente, a rota fica DESLIGADA. Evita
-    # que um deploy sem a variável deixe a porta aberta.
-    if not token_esperado:
-        return Response("rota desativada (sem TOKEN_CONSULTA_LEITURA)\n",
-                        status=503, mimetype="text/plain")
-
-    if request.args.get("token") != token_esperado:
-        return Response("nao autorizado\n", status=401, mimetype="text/plain")
+    if not _acesso_autorizado():
+        return Response("nao autorizado (faca login no site ou envie o token)\n",
+                        status=401, mimetype="text/plain")
 
     sql = request.args.get("sql", "")
     ok, motivo = _validar_sql(sql)
