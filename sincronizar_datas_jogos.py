@@ -482,7 +482,13 @@ def main():
 
         print("\n" + "=" * 78)
         if fase == "verificar":
-            print("FASE VERIFICAR — nada foi escrito.")
+            # Item 9.20 (29/09/2026): a mensagem antiga dizia "nada foi
+            # escrito", e não era verdade — `buscar_calendario` commita
+            # +1 em `controle_api_uso` a cada temporada consultada, em
+            # QUALQUER fase. O dado de jogo é que não é tocado.
+            print("FASE VERIFICAR — `jogos` e `jogos_liga` NÃO foram tocadas.")
+            print(f"  (`controle_api_uso` recebeu +{len(temporadas)} requisição(ões) — "
+                  f"1 por temporada consultada, igual em qualquer fase.)")
         else:
             print(f"APLICADO: {total_jogos} linha(s) de `jogos` e {total_liga} de `jogos_liga`.")
             if total_jogos == 0 and total_liga == 0:
