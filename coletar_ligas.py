@@ -84,7 +84,11 @@ import sys
 import time
 from datetime import datetime
 
+import functools
+import types
+
 import psycopg2
+import requests
 
 # Import das funções REAIS de gravação. Exige DATABASE_URL e API_FOOTBALL_KEY
 # no ambiente (o popular_banco lê as duas na importação).
@@ -129,8 +133,34 @@ TABELAS_PUBLIC_VIGIADAS = ["jogos", "gols", "cartoes", "substituicoes", "estatis
                            "jogador_estatisticas_jogo", "escalacoes", "times", "jogadores"]
 
 
+# FALHA PASSAGEIRA DA API (01/10): a 1ª execução real morreu com um
+# `502 Bad Gateway` no jogo 473, depois de ~1.900 chamadas certas. O
+# `chamar_api` do popular_banco só tenta de novo no 429; qualquer 5xx ou
+# queda de conexão derrubava a execução inteira. Aqui: tenta de novo com
+# espera crescente; se o jogo continuar falhando, ANOTA e segue para o
+# próximo (a execução seguinte completa o que faltou — o jogo fica com o que
+# já foi gravado e o `o_que_falta` busca só o resto). Muitas falhas SEGUIDAS
+# = API fora do ar: para, sem gastar cota à toa.
+ESPERAS_RETENTATIVA_SEGUNDOS = (30, 90, 180)
+FALHAS_SEGUIDAS_PARA_PARAR = 5
+
+# `requests.get` sem timeout pode ficar pendurado para sempre e travar o
+# cron. O timeout vale SÓ dentro deste processo: troca o `requests` que o
+# módulo popular_banco enxerga aqui, sem alterar o arquivo dele (os crons do
+# Brasileirão rodam em outro processo e não são afetados).
+TIMEOUT_API_SEGUNDOS = 60
+
+
 class IsolamentoQuebrado(Exception):
     """Alguma tabela de dado não resolve para o schema `ligas`."""
+
+
+class FalhaPassageiraPersistente(Exception):
+    """A API continuou com 5xx / sem conexão depois de todas as retentativas."""
+
+
+class ApiForaDoAr(Exception):
+    """Vários jogos seguidos falharam — parar a execução."""
 
 
 # ---------------------------------------------------------------------------
@@ -331,9 +361,45 @@ def pausa():
     time.sleep(PAUSA_ENTRE_CHAMADAS)
 
 
-def buscar_calendario(liga_api_id, temporada):
+def _e_passageiro(erro):
+    """5xx, queda de conexão ou timeout = passageiro. 4xx NÃO (chave
+    errada, parâmetro errado) — esse tem que estourar na hora."""
+    if isinstance(erro, (requests.ConnectionError, requests.Timeout)):
+        return True
+    if isinstance(erro, requests.HTTPError):
+        resposta = getattr(erro, "response", None)
+        return resposta is not None and resposta.status_code >= 500
+    return False
+
+
+def com_retentativa(conn, funcao, *args):
+    """Chama uma função de busca do popular_banco; em falha passageira,
+    espera e tenta de novo. Cada tentativa CONTA na cota (o `chamar_api`
+    soma antes de olhar o status) — por isso são poucas.
+
+    Antes de esperar, faz commit: neste ponto a única coisa pendente na
+    transação é o incremento do contador de cota (as buscas acontecem
+    ANTES das gravações de cada etapa, e cada etapa anterior já foi
+    commitada). Assim o contador não se perde se a execução cair depois."""
+    for tentativa, espera in enumerate(ESPERAS_RETENTATIVA_SEGUNDOS + (None,), start=1):
+        try:
+            return funcao(*args)
+        except Exception as erro:  # LimiteDiarioAtingido e 4xx passam direto
+            if not _e_passageiro(erro):
+                raise
+            conn.commit()
+            if espera is None:
+                raise FalhaPassageiraPersistente(
+                    f"{erro} — desisti depois de {tentativa} tentativas") from erro
+            print(f"  ⚠️ falha passageira da API ({erro}). "
+                  f"Tentativa {tentativa}/{len(ESPERAS_RETENTATIVA_SEGUNDOS) + 1}; "
+                  f"esperando {espera}s.")
+            time.sleep(espera)
+
+
+def buscar_calendario(conn, liga_api_id, temporada):
     """1 chamada: todos os jogos da liga na temporada."""
-    dados = pb.chamar_api("fixtures", {"league": liga_api_id, "season": temporada})
+    dados = com_retentativa(conn, pb.chamar_api, "fixtures", {"league": liga_api_id, "season": temporada})
     pausa()
     if dados.get("errors"):
         print(f"  ⚠️ aviso da API ({temporada}): {dados['errors']}")
@@ -392,7 +458,7 @@ def processar_fixture(conn, cur, fixture, liga_api_id, nome_liga, temporada, con
     # EVENTOS: 1 chamada, gravada por perspectiva (o `lado` de gols/cartões
     # é relativo ao NOSSO time — por isso salvar_eventos recebe o api_id).
     if any(f["eventos"] for _, _, f in faltas):
-        eventos = pb.buscar_eventos(fixture_id)
+        eventos = com_retentativa(conn, pb.buscar_eventos, fixture_id)
         pausa()
         for jogo_id, api_id, f in faltas:
             if not f["eventos"]:
@@ -406,7 +472,7 @@ def processar_fixture(conn, cur, fixture, liga_api_id, nome_liga, temporada, con
     # ESTATÍSTICAS DE TIME: `lado` é o mando REAL (home_team_id), igual
     # nas duas perspectivas.
     if any(f["estatisticas"] for _, _, f in faltas):
-        estatisticas = pb.buscar_estatisticas(fixture_id)
+        estatisticas = com_retentativa(conn, pb.buscar_estatisticas, fixture_id)
         pausa()
         for jogo_id, _api_id, f in faltas:
             if not f["estatisticas"]:
@@ -417,7 +483,7 @@ def processar_fixture(conn, cur, fixture, liga_api_id, nome_liga, temporada, con
         conn.commit()
 
     if any(f["jogadores"] for _, _, f in faltas):
-        jogadores = pb.buscar_estatisticas_jogadores(fixture_id)
+        jogadores = com_retentativa(conn, pb.buscar_estatisticas_jogadores, fixture_id)
         pausa()
         for jogo_id, _api_id, f in faltas:
             if not f["jogadores"]:
@@ -429,7 +495,7 @@ def processar_fixture(conn, cur, fixture, liga_api_id, nome_liga, temporada, con
 
     # ESCALAÇÃO por último: cruza com `substituicoes` já gravada.
     if any(f["escalacao"] for _, _, f in faltas):
-        lineups = pb.buscar_escalacao(fixture_id)
+        lineups = com_retentativa(conn, pb.buscar_escalacao, fixture_id)
         pausa()
         for jogo_id, _api_id, f in faltas:
             if f["escalacao"]:
@@ -487,6 +553,7 @@ def fase_aplicar(liga_chave, teto, temporadas):
     cur = conn.cursor()
     cur_contador = conn.cursor()
     contagem = {"processados": 0, "pulados": 0, "futuros": 0}
+    falhados = []
     publico_antes = None
     try:
         publico_antes = contagens_public(cur)
@@ -494,6 +561,10 @@ def fase_aplicar(liga_chave, teto, temporadas):
         criar_estrutura(cur)
         garantir_isolamento(cur)   # 🔴 antes de QUALQUER gravação de dado
         conn.commit()
+
+        # Timeout só neste processo (ver TIMEOUT_API_SEGUNDOS).
+        pb.requests = types.SimpleNamespace(
+            get=functools.partial(requests.get, timeout=TIMEOUT_API_SEGUNDOS))
 
         # Cota: mesmo contador do Brasileirão, teto próprio.
         pb.LIMITE_REQUISICOES_DIA = teto
@@ -507,11 +578,28 @@ def fase_aplicar(liga_chave, teto, temporadas):
 
         for temporada in temporadas:
             print(f"\n---------- {nome_liga} · temporada {temporada} ----------")
-            fixtures = buscar_calendario(liga_api_id, temporada)
+            try:
+                fixtures = buscar_calendario(conn, liga_api_id, temporada)
+            except FalhaPassageiraPersistente as erro:
+                raise ApiForaDoAr(f"calendário da temporada {temporada} não veio ({erro}).") from erro
             print(f"  {len(fixtures)} jogos no calendário da API")
             antes = dict(contagem)
+            falhas_seguidas = 0
             for fixture in fixtures:
-                processar_fixture(conn, cur, fixture, liga_api_id, nome_liga, temporada, contagem)
+                try:
+                    processar_fixture(conn, cur, fixture, liga_api_id, nome_liga, temporada, contagem)
+                    falhas_seguidas = 0
+                except FalhaPassageiraPersistente as erro:
+                    conn.commit()  # só o contador está pendente (ver com_retentativa)
+                    fid = fixture["fixture"]["id"]
+                    falhados.append(fid)
+                    falhas_seguidas += 1
+                    print(f"  ⏭️ jogo {fid} pulado por falha da API ({erro}). "
+                          f"A próxima execução completa o que faltou.")
+                    if falhas_seguidas >= FALHAS_SEGUIDAS_PARA_PARAR:
+                        raise ApiForaDoAr(
+                            f"{falhas_seguidas} jogos seguidos falharam — a API parece fora do ar. "
+                            "Parando para não gastar cota; a próxima execução continua.")
             print(f"  temporada {temporada}: +{contagem['processados'] - antes['processados']} processados, "
                   f"+{contagem['pulados'] - antes['pulados']} já completos, "
                   f"+{contagem['futuros'] - antes['futuros']} ainda não jogados. "
@@ -523,6 +611,10 @@ def fase_aplicar(liga_chave, teto, temporadas):
         conn.commit()
         print(f"\n⏸️ {e}")
         print("   (parada normal — a próxima execução continua de onde parou)")
+
+    except ApiForaDoAr as e:
+        conn.commit()
+        print(f"\n⏸️ {e}")
 
     except IsolamentoQuebrado as e:
         conn.rollback()
@@ -539,6 +631,9 @@ def fase_aplicar(liga_chave, teto, temporadas):
             conn.rollback()
             print(f"\nresumo: {contagem['processados']} jogos processados, {contagem['pulados']} já completos, "
                   f"{contagem['futuros']} ainda não jogados · cota usada no dia: {pb.requisicoes_usadas}")
+            if falhados:
+                print(f"⚠️ {len(falhados)} jogo(s) pulado(s) por falha da API — completados na próxima execução: "
+                      f"{falhados}")
             relatorio_liga(cur, liga_api_id, nome_liga)
             if publico_antes is not None:
                 publico_depois = contagens_public(cur)
