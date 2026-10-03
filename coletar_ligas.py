@@ -1,6 +1,12 @@
 """
-coletar_ligas.py — coleta de ligas EXTRAS (Premier League etc.) num schema
-SEPARADO do banco, sem tocar no Brasileirão e sem gerar recomendação.
+coletar_ligas.py — coleta de ligas EXTRAS (Premier League etc.), cada uma no
+SEU schema do banco (`liga_premier`, `liga_laliga`, ...), sem tocar no
+Brasileirão e sem gerar recomendação.
+
+⚠️ 02/10 (Fase 1 da `claude/arquitetura_ligas_extras.md`): até aqui tudo ia
+para um schema único `ligas`. Agora é um schema POR LIGA. Liga que ainda tem
+dado em `ligas` precisa ser migrada antes (`migrar_ligas_por_schema.py`); o
+`aplicar` recusa enquanto isso não acontecer.
 
 Duas fases, como todo script que toca dado neste projeto:
 
@@ -94,7 +100,28 @@ import requests
 # no ambiente (o popular_banco lê as duas na importação).
 import popular_banco as pb
 
-SCHEMA = "ligas"
+# FASE 1 da `claude/arquitetura_ligas_extras.md` (02/10): UM SCHEMA POR LIGA.
+# `liga_premier`, `liga_laliga`, ... Assim a "liga inteira" que o
+# motor_padroes enxerga é a liga certa, sem filtro no código (§1 da arquitetura).
+# O schema único `ligas` (30/09-02/10) é o LEGADO: os dados dele são copiados
+# por `migrar_ligas_por_schema.py`, e este script se RECUSA a coletar uma liga
+# que ainda tem dado lá sem ter sido migrada (ver `checar_migracao`).
+SCHEMA_LEGADO = "ligas"
+SCHEMA = None  # definido por definir_liga(chave) antes de qualquer acesso ao banco
+
+
+def schema_da_liga(chave):
+    return f"liga_{chave}"
+
+
+def definir_liga(chave):
+    """Aponta TODO o módulo para o schema da liga. Chamado uma vez, no main
+    (ou por quem importa este módulo, como o migrar_ligas_por_schema)."""
+    global SCHEMA
+    if chave not in LIGAS:
+        raise ValueError(f"liga desconhecida: {chave}")
+    SCHEMA = schema_da_liga(chave)
+    return SCHEMA
 
 LIGAS = {
     # chave: (id da liga na API-Football, nome gravado em jogos.competicao)
@@ -152,7 +179,20 @@ TIMEOUT_API_SEGUNDOS = 60
 
 
 class IsolamentoQuebrado(Exception):
-    """Alguma tabela de dado não resolve para o schema `ligas`."""
+    """Alguma tabela de dado não resolve para o schema da liga."""
+
+
+class MigracaoPendente(Exception):
+    """A liga tem dado no schema legado `ligas` que ainda não foi copiado."""
+
+
+# Tabelas de evento: o motor_padroes busca por `jogo_id` nelas. Sem índice,
+# uma consulta de auditoria estourou os 15s da /api/consulta em 02/10 com 2
+# ligas no schema. Índice só nos schemas das ligas — `public` não é tocado.
+TABELAS_COM_INDICE_JOGO = [
+    "gols", "cartoes", "substituicoes", "estatisticas_jogo",
+    "jogador_estatisticas_jogo", "escalacoes",
+]
 
 
 class FalhaPassageiraPersistente(Exception):
@@ -179,16 +219,39 @@ def cabecalho(fase, liga_chave, teto, temporadas):
 
 
 def conectar():
-    """Conexão com `search_path = ligas, public`. Tabela que existe em
-    `ligas` resolve para lá; o resto (controle_api_uso) para `public`."""
+    """Conexão com `search_path = liga_<chave>, public`. Tabela que existe no
+    schema da liga resolve para lá; o resto (controle_api_uso) para `public`."""
+    if SCHEMA is None:
+        raise RuntimeError("definir_liga() não foi chamado — sem schema de destino.")
     conn = psycopg2.connect(pb.DATABASE_URL, options=f"-c search_path={SCHEMA},public")
     conn.autocommit = False
     return conn
 
 
-def schema_existe(cur):
-    cur.execute("SELECT 1 FROM pg_namespace WHERE nspname = %s", (SCHEMA,))
+def schema_existe(cur, schema=None):
+    cur.execute("SELECT 1 FROM pg_namespace WHERE nspname = %s", (schema or SCHEMA,))
     return cur.fetchone() is not None
+
+
+def jogos_da_liga(cur, schema, liga_api_id):
+    """Quantas linhas de `jogos` dessa liga existem no schema (0 se não existe)."""
+    if not tabela_existe(cur, schema, "jogos"):
+        return 0
+    cur.execute(f"SELECT COUNT(*) FROM {schema}.jogos WHERE liga_api_id = %s", (liga_api_id,))
+    return cur.fetchone()[0]
+
+
+def checar_migracao(cur, liga_api_id):
+    """🔴 Recusa coletar uma liga que ainda tem dado no schema legado sem ter
+    sido migrada. Sem isso, a coleta recomeçaria do zero no schema novo
+    (~6.400 chamadas jogadas fora) e o legado ficaria divergente."""
+    legado = jogos_da_liga(cur, SCHEMA_LEGADO, liga_api_id)
+    novo = jogos_da_liga(cur, SCHEMA, liga_api_id)
+    if legado and novo < legado:
+        raise MigracaoPendente(
+            f"`{SCHEMA_LEGADO}` tem {legado} linha(s) de jogos dessa liga e `{SCHEMA}` tem {novo}. "
+            f"Rode antes: python migrar_ligas_por_schema.py aplicar --liga <chave>. Nada foi gravado.")
+    return legado, novo
 
 
 def tabela_existe(cur, schema, tabela):
@@ -302,6 +365,9 @@ def criar_estrutura(cur):
     cur.execute(f"ALTER TABLE {SCHEMA}.jogos ADD COLUMN IF NOT EXISTS liga_api_id INTEGER")
     cur.execute(f"ALTER TABLE {SCHEMA}.jogos ADD COLUMN IF NOT EXISTS temporada INTEGER")
     cur.execute(f"ALTER TABLE {SCHEMA}.times ADD COLUMN IF NOT EXISTS liga_api_id INTEGER")
+
+    for tabela in TABELAS_COM_INDICE_JOGO:
+        cur.execute(f"CREATE INDEX IF NOT EXISTS {tabela}_jogo_id_idx ON {SCHEMA}.{tabela} (jogo_id)")
 
     # Leitura para a auditoria pelo /api/consulta (papel claude_leitura).
     cur.execute("SELECT 1 FROM pg_roles WHERE rolname = 'claude_leitura'")
@@ -520,6 +586,13 @@ def fase_verificar(liga_chave, teto, temporadas):
 
         existe = schema_existe(cur)
         print(f"schema `{SCHEMA}` existe: {'sim' if existe else 'NÃO (será criado no aplicar)'}")
+        legado = jogos_da_liga(cur, SCHEMA_LEGADO, liga_api_id)
+        novo = jogos_da_liga(cur, SCHEMA, liga_api_id) if existe else 0
+        if legado and novo < legado:
+            print(f"⚠️ MIGRAÇÃO PENDENTE: `{SCHEMA_LEGADO}` tem {legado} linha(s) de jogos dessa liga, "
+                  f"`{SCHEMA}` tem {novo}. O aplicar vai RECUSAR até migrar.")
+        elif legado:
+            print(f"migração: ok (`{SCHEMA_LEGADO}` {legado} · `{SCHEMA}` {novo} linhas de jogos dessa liga)")
         if existe:
             faltando = [t for t in TABELAS_COPIADAS if not tabela_existe(cur, SCHEMA, t)]
             print(f"tabelas faltando em `{SCHEMA}`: {faltando or 'nenhuma'}")
@@ -558,6 +631,7 @@ def fase_aplicar(liga_chave, teto, temporadas):
     try:
         publico_antes = contagens_public(cur)
 
+        checar_migracao(cur, liga_api_id)   # 🔴 antes de criar qualquer coisa
         criar_estrutura(cur)
         garantir_isolamento(cur)   # 🔴 antes de QUALQUER gravação de dado
         conn.commit()
@@ -615,6 +689,11 @@ def fase_aplicar(liga_chave, teto, temporadas):
     except ApiForaDoAr as e:
         conn.commit()
         print(f"\n⏸️ {e}")
+
+    except MigracaoPendente as e:
+        conn.rollback()
+        print(f"\n🔴 MIGRAÇÃO PENDENTE — {e}")
+        raise
 
     except IsolamentoQuebrado as e:
         conn.rollback()
@@ -677,6 +756,7 @@ def ler_argumentos(argv):
 
 def main():
     fase, liga, teto, temporadas = ler_argumentos(sys.argv)
+    definir_liga(liga)
     cabecalho(fase, liga, teto, temporadas)
     if fase == "verificar":
         fase_verificar(liga, teto, temporadas)
