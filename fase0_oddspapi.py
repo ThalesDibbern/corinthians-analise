@@ -213,6 +213,7 @@ def analisar_odds(jogo, catalogo):
     casas = dados.get("bookmakerOdds", {}) or {}
     brutos = sum(len((info or {}).get("markets", {}) or {}) for info in casas.values())
     utilizavel = ao.existem_odds_utilizaveis(dados)
+    suspensas = [c for c, info in casas.items() if (info or {}).get("suspended")]
 
     cur = CursorFalso()
     if utilizavel:
@@ -238,6 +239,7 @@ def analisar_odds(jogo, catalogo):
         "casas": list(casas.keys()),
         "mercados_brutos": brutos,
         "utilizavel": utilizavel,
+        "suspensas": suspensas,
         "odds_que_seriam_gravadas": len(cur.odds),
         "de_jogador": sum(1 for o in cur.odds if o["jogador_id"] is not None),
         "por_tipo": por_tipo,
@@ -249,7 +251,8 @@ def imprimir_analise(nome, a, referencia=None):
     print(f"\n  {nome}: {a['jogo']} | início {a['inicio']} | fixtureId {a['fixtureId']} "
           f"| {a['custo']} requisição(ões)")
     print(f"    casas na resposta: {a['casas'] or 'nenhuma'} · mercados brutos: {a['mercados_brutos']} "
-          f"· utilizável: {'sim' if a['utilizavel'] else 'NÃO'}")
+          f"· utilizável: {'sim' if a['utilizavel'] else 'NÃO'} "
+          f"· casa marcada como SUSPENSA: {a['suspensas'] or 'nenhuma'}")
     print(f"    odds que o atualizar_odds gravaria: {a['odds_que_seriam_gravadas']} "
           f"(de jogador: {a['de_jogador']})")
     tipos = sorted(set(a["por_tipo"]) | set((referencia or {}).get("por_tipo", {})))
