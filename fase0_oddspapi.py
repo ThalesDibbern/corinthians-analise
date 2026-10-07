@@ -27,8 +27,35 @@ importação — a conexão em si é bloqueada):
 
 Custo esperado: ~14 requisições da OddsPapi (1 torneios + 1 catálogo +
 6 calendários + até 6 folhas de odds). Nenhuma da API-Football.
+
+--------------------------------------------------------------------------
+MODO `casas` (v3, 06/10) — que mercados cada CASA tem no Brasileirão
+--------------------------------------------------------------------------
+
+Motivo: a MP de 25/09 tirou a Superbet BR do ar em 06/10. Antes de trocar a
+casa do projeto, medir — num jogo real e próximo — o que cada casa oferece,
+passando tudo pelo MESMO filtro e classificador de produção.
+
+    python fase0_oddspapi.py casas
+    python fase0_oddspapi.py casas --casas superbet,bet365,pinnacle --jogos 2 --horas 36
+
+  --casas   palavras (ou slugs exatos) separadas por vírgula. Cada palavra
+            casa com TODO slug da lista /bookmakers que a contém. Padrão:
+            superbet, bet365, betmgm, pinnacle, betfair, williamhill,
+            unibet, betano, sbobet, 1xbet.
+  --jogos   quantos jogos do Brasileirão analisar (padrão 2).
+  --horas   só jogos que começam dentro destas horas (padrão 36).
+  --max-casas  teto de slugs (padrão 30) — protege a cota.
+
+Chave: usa `ODDSPAPI_KEY_TESTE` (conta grátis, todas as casas) se existir;
+senão a `ODDSPAPI_KEY` do plano pago (que só libera a Superbet BR). As duas
+são mascaradas em qualquer texto de erro.
+
+Custo: 1 (/bookmakers) + 1 (catálogo) + 1 (calendário) + jogos × lotes de
+10 casas. Com o padrão, ~7-9 requisições.
 """
 
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -92,11 +119,22 @@ def cabecalho():
     print("=" * 78)
 
 
+_CHAVES_PARA_MASCARAR = {ao.API_KEY}
+
+
+def mascarar(texto):
+    texto = str(texto)
+    for chave in _CHAVES_PARA_MASCARAR:
+        if chave:
+            texto = texto.replace(chave, "***")
+    return texto
+
+
 def get_json(caminho, params):
     params = dict(params, apiKey=ao.API_KEY)
     resp = ao.get_com_retry_429(f"{ao.API_BASE}/{caminho}", params=params)
     if resp.status_code != 200:
-        corpo = resp.text[:300].replace(ao.API_KEY, "***")
+        corpo = mascarar(resp.text[:300])
         raise RuntimeError(f"/{caminho} respondeu {resp.status_code}: {corpo}")
     return resp.json()
 
@@ -247,6 +285,21 @@ def analisar_odds(jogo, catalogo):
     }
 
 
+def classificar_casa(dados_casa, catalogo, nome_mand, nome_vis):
+    """Uma casa só: o mesmo caminho de produção de `analisar_odds`."""
+    cur = CursorFalso()
+    if ao.existem_odds_utilizaveis(dados_casa):
+        ao.salvar_odds_do_jogo(cur, jogo_id=0, dados_odds=dados_casa, catalogo_mercados=catalogo,
+                               mandante=True, adversario=nome_vis, nosso_nome=nome_mand,
+                               fixture_id_api=None)
+    por_tipo = {}
+    for o in cur.odds:
+        tipo = mr.identificar_tipo_padrao(o["mercado"])
+        if tipo:
+            por_tipo[tipo] = por_tipo.get(tipo, 0) + 1
+    return cur.odds, por_tipo
+
+
 def imprimir_analise(nome, a, referencia=None):
     print(f"\n  {nome}: {a['jogo']} | início {a['inicio']} | fixtureId {a['fixtureId']} "
           f"| {a['custo']} requisição(ões)")
@@ -329,5 +382,189 @@ def main():
     print("=" * 78)
 
 
+# ---------------------------------------------------------------------------
+# MODO `casas` (v3)
+# ---------------------------------------------------------------------------
+CASAS_PADRAO = ["superbet", "bet365", "betmgm", "pinnacle", "betfair", "williamhill",
+                "unibet", "betano", "sbobet", "1xbet"]
+LOTE_CASAS = 10
+
+
+def ler_opcoes(argv):
+    opcoes = {"casas": CASAS_PADRAO, "jogos": 2, "horas": 36.0, "max_casas": 30}
+    i = 2
+    while i < len(argv):
+        nome = argv[i]
+        valor = argv[i + 1] if i + 1 < len(argv) else None
+        if valor is None:
+            raise SystemExit(f"opção {nome} sem valor")
+        if nome == "--casas":
+            opcoes["casas"] = [c.strip().lower() for c in valor.split(",") if c.strip()]
+        elif nome == "--jogos":
+            opcoes["jogos"] = int(valor)
+        elif nome == "--horas":
+            opcoes["horas"] = float(valor)
+        elif nome == "--max-casas":
+            opcoes["max_casas"] = int(valor)
+        else:
+            raise SystemExit(f"opção desconhecida: {nome}")
+        i += 2
+    return opcoes
+
+
+def slug_de(item):
+    if isinstance(item, str):
+        return item
+    return campo(item, "slug", "bookmaker", "bookmakerSlug", "id", "name")
+
+
+def escolher_slugs(lista, palavras, teto):
+    slugs = sorted({str(slug_de(b)) for b in lista if slug_de(b)})
+    escolhidos, por_palavra = [], {}
+    for p in palavras:
+        achados = [s for s in slugs if p == s.lower() or p in s.lower()]
+        por_palavra[p] = achados
+        for s in achados:
+            if s not in escolhidos:
+                escolhidos.append(s)
+    cortados = escolhidos[teto:]
+    return escolhidos[:teto], por_palavra, cortados, len(slugs)
+
+
+def buscar_odds_lote(fixture_id, slugs):
+    """Odds de várias casas, em lotes. Lote que falha é refeito casa a casa,
+    para uma casa problemática não esconder as outras."""
+    juntas, falhas = {}, {}
+    for i in range(0, len(slugs), LOTE_CASAS):
+        lote = slugs[i:i + LOTE_CASAS]
+        try:
+            dados = ao.buscar_odds(fixture_id, bookmakers=lote)
+            juntas.update(dados.get("bookmakerOdds", {}) or {})
+        except Exception as e:
+            print(f"    ⚠️ lote {lote} falhou ({mascarar(e)[:160]}) — tentando casa a casa")
+            for s in lote:
+                try:
+                    dados = ao.buscar_odds(fixture_id, bookmakers=[s])
+                    juntas.update(dados.get("bookmakerOdds", {}) or {})
+                except Exception as e2:
+                    falhas[s] = mascarar(e2)[:160]
+    return juntas, falhas
+
+
+def modo_casas(argv):
+    opcoes = ler_opcoes(argv)
+    chave_teste = os.environ.get("ODDSPAPI_KEY_TESTE")
+    if chave_teste:
+        _CHAVES_PARA_MASCARAR.add(chave_teste)
+        ao.API_KEY = chave_teste
+        origem = "ODDSPAPI_KEY_TESTE (conta grátis)"
+    else:
+        origem = "ODDSPAPI_KEY (plano pago — outras casas devem voltar RESTRITAS)"
+
+    print("=" * 78)
+    print("fase0_oddspapi.py casas | SÓ LEITURA (conexão com o banco bloqueada)")
+    print(f"argv: {sys.argv}")
+    print(f"relógio do processo: {datetime.now(timezone.utc).isoformat(timespec='seconds')}")
+    print(f"chave: {origem} · palavras: {opcoes['casas']} · jogos: {opcoes['jogos']} "
+          f"· janela: {opcoes['horas']}h · teto: {opcoes['max_casas']} casas")
+    print("=" * 78)
+
+    print("\n## 1. CASAS DISPONÍVEIS (/bookmakers)")
+    lista = get_json("bookmakers", {})
+    if isinstance(lista, dict):
+        lista = campo(lista, "bookmakers", "data", "results") or list(lista.values())
+    slugs, por_palavra, cortados, total = escolher_slugs(lista, opcoes["casas"], opcoes["max_casas"])
+    print(f"  {total} casas na lista")
+    for p, achados in por_palavra.items():
+        print(f"  '{p}': {', '.join(achados) if achados else '⚠️ nenhuma'}")
+    if cortados:
+        print(f"  ⚠️ {len(cortados)} cortada(s) pelo teto: {', '.join(cortados)}")
+    if not slugs:
+        print("  nenhuma casa escolhida — nada a fazer.")
+        return
+
+    print("\n## 2. CATÁLOGO DE MERCADOS")
+    catalogo = ao.buscar_catalogo_mercados()
+    print(f"  {len(catalogo)} mercados")
+
+    print(f"\n## 3. JOGOS DO BRASILEIRÃO NAS PRÓXIMAS {opcoes['horas']:.0f}h")
+    _, futuros, _ = proximos_jogos(ID_BRASILEIRAO)
+    agora = datetime.now(timezone.utc)
+    janela = [(q, j) for q, j in futuros if (q - agora).total_seconds() <= opcoes["horas"] * 3600]
+    print(f"  {len(futuros)} futuros no calendário, {len(janela)} na janela")
+    escolhidos = janela[:opcoes["jogos"]]
+    if not escolhidos:
+        print("  ⚠️ nenhum jogo na janela — aumente --horas.")
+        return
+
+    resumo = {s: {"jogos": 0, "presente": 0, "suspensa": 0, "brutos": 0, "odds": 0,
+                  "jogador": 0, "tipos": {}} for s in slugs}
+    todas_falhas = {}
+    for quando, jogo in escolhidos:
+        mand = campo(jogo, "participant1Name") or "?"
+        vis = campo(jogo, "participant2Name") or "?"
+        print(f"\n  ### {mand} x {vis} — {quando:%d/%m %H:%M}Z (fixtureId {jogo['fixtureId']})")
+        antes = requisicoes["total"]
+        juntas, falhas = buscar_odds_lote(jogo["fixtureId"], slugs)
+        todas_falhas.update(falhas)
+        print(f"    {requisicoes['total'] - antes} requisição(ões) · {len(juntas)} casa(s) na resposta")
+        print(f"    {'casa':<26} {'mercados':>8} {'suspensa':>8} {'odds úteis':>10} {'jogador':>8} {'tipos':>6}")
+        for s in slugs:
+            r = resumo[s]
+            r["jogos"] += 1
+            info = juntas.get(s)
+            if info is None:
+                print(f"    {s:<26} {'—':>8}   ausente na resposta" +
+                      (" (restrita no plano)" if s in ao._bookmakers_restritos_conhecidos else "") +
+                      (f" (erro: {falhas[s]})" if s in falhas else ""))
+                continue
+            r["presente"] += 1
+            brutos = len((info or {}).get("markets", {}) or {})
+            r["brutos"] += brutos
+            suspensa = bool((info or {}).get("suspended"))
+            r["suspensa"] += int(suspensa)
+            odds, por_tipo = classificar_casa({"bookmakerOdds": {s: info}}, catalogo, mand, vis)
+            jog = sum(1 for o in odds if o["jogador_id"] is not None)
+            r["odds"] += len(odds)
+            r["jogador"] += jog
+            for t, n in por_tipo.items():
+                r["tipos"][t] = r["tipos"].get(t, 0) + n
+            print(f"    {s:<26} {brutos:>8} {('SIM' if suspensa else 'não'):>8} {len(odds):>10} "
+                  f"{jog:>8} {len(por_tipo):>6}")
+        time.sleep(1)
+
+    print("\n## 4. RESUMO POR CASA (soma dos jogos)")
+    todos_tipos = sorted({t for r in resumo.values() for t in r["tipos"]})
+    ordem = sorted(slugs, key=lambda s: (-len(resumo[s]["tipos"]), -resumo[s]["odds"]))
+    print(f"  {'casa':<26} {'presente':>8} {'odds úteis':>10} {'jogador':>8} {'tipos':>6}")
+    for s in ordem:
+        r = resumo[s]
+        print(f"  {s:<26} {r['presente']:>3}/{r['jogos']:<4} {r['odds']:>10} {r['jogador']:>8} "
+              f"{len(r['tipos']):>6}")
+
+    if todos_tipos:
+        com_odds = [s for s in ordem if resumo[s]["odds"]]
+        print("\n## 5. TIPO DE MERCADO × CASA (odds úteis; só casas com alguma)")
+        for s in com_odds:
+            print(f"  {s}:")
+            faltam = [t for t in todos_tipos if t not in resumo[s]["tipos"]]
+            tem = ", ".join(f"{t} {resumo[s]['tipos'][t]}" for t in todos_tipos if t in resumo[s]["tipos"])
+            print(f"    tem   → {tem}")
+            print(f"    falta → {', '.join(faltam) if faltam else 'nada (cobre todos os tipos vistos)'}")
+        print(f"\n  tipos vistos em alguma casa ({len(todos_tipos)}): {', '.join(todos_tipos)}")
+
+    if todas_falhas:
+        print("\n  casas com erro:")
+        for s, e in todas_falhas.items():
+            print(f"    {s}: {e}")
+    print(f"\n  Requisições da OddsPapi gastas por este script: {requisicoes['total']}")
+    print("\n" + "=" * 78)
+    print("FIM — SÓ LEITURA: nenhuma conexão com o banco foi aberta; nada foi gravado.")
+    print("=" * 78)
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "casas":
+        modo_casas(sys.argv)
+    else:
+        main()
