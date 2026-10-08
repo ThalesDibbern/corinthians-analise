@@ -210,6 +210,7 @@ from avaliacao import avaliar_resultado
 # essa é a ÚNICA fonte de verdade.
 
 from combinacoes import MERCADOS_JOGO_INTEIRO, MERCADOS_JOGADOR
+
 # NOVO (correção de bug real, encontrado via consulta direta no banco): a
 # mesma duplicata multi-time já corrigida em combinacoes.py (jogo entre 2
 # times rastreados gera 2 linhas em `jogos`, duplicando odds/recomendações
@@ -225,6 +226,29 @@ from combinacoes import MERCADOS_JOGO_INTEIRO, MERCADOS_JOGADOR
 # ou jogo_id - ver a docstring da função e o NOVO no topo deste arquivo.
 
 DATABASE_URL = os.environ["DATABASE_URL"]
+
+
+def e_aposta_de_jogador(tipo_padrao, jogador_id):
+    """NOVO (07/10/2026 - cartão de TIME fundido entre os dois times):
+    `cartao` está em MERCADOS_JOGADOR, mas tem DOIS formatos (ver
+    avaliacao.py): de JOGADOR (jogador_id preenchido) e de TIME ("Cartões -
+    Mais/Menos <time>", jogador_id vazio). Só o primeiro é a mesma aposta
+    nas duas perspectivas.
+
+    Antes, o cartão de TIME era tratado como de jogador nos dois lugares
+    abaixo, com jogador_id NULL na chave:
+      - no arquivamento, "Mais de 2.5 cartões do Palmeiras" e "Mais de 2.5
+        cartões do São Paulo" (mesmo fixture, mesma linha e direção) viravam
+        UMA linha só, com a probabilidade das duas misturada - a aposta
+        descartada sumia do histórico;
+      - no casamento de perna, a perna de um time podia receber o veredito
+        do OUTRO. Caso real: múltipla 31636 (Palmeiras x São Paulo, 13/09)
+        marcada `acertou` com a perna do São Paulo (2 cartões) avaliada pela
+        linha do Palmeiras (4 cartões) - deveria ser `errou`.
+    Agora o cartão de TIME cai no ramo de mercado de TIME (identidade por
+    `jogo_id`), como escanteio_time e gols_time. Nenhum outro tipo de
+    MERCADOS_JOGADOR existe sem jogador_id, então para eles nada muda."""
+    return tipo_padrao in MERCADOS_JOGADOR and jogador_id is not None
 
 # NOVO (16/09/2026): os três ramos do WHERE ganham NOME, pra que o log
 # possa dizer qual deles tornou cada linha elegível. Sem isso, quando o
@@ -392,7 +416,7 @@ def buscar_recomendacoes_para_arquivar(cur):
             # Vale o princípio já registrado nos aprendizados do projeto:
             # nunca usar texto de descrição como identidade de uma aposta.
             chave = ("jogo_inteiro", fixture_id_api, tipo_padrao, linha, direcao, casa)
-        elif tipo_padrao in MERCADOS_JOGADOR:
+        elif e_aposta_de_jogador(tipo_padrao, jogador_id):  # NOVO (07/10): cartão de TIME fica de fora
             chave = ("jogador", fixture_id_api, tipo_padrao, jogador_id, linha, direcao, casa)
         else:
             chave = ("unico", rec_id)  # mercado sem risco de duplicata - grupo de 1, comportamento inalterado
@@ -583,8 +607,8 @@ def buscar_resultado_perna(cur, tipo_padrao, jogo_id, fixture_id_api, jogador_id
     jogo_id, idêntico ao comportamento anterior."""
     usa_fixture = (
         fixture_id_api is not None
-        and (tipo_padrao in MERCADOS_JOGO_INTEIRO or tipo_padrao in MERCADOS_JOGADOR)
-    )
+        and (tipo_padrao in MERCADOS_JOGO_INTEIRO or e_aposta_de_jogador(tipo_padrao, jogador_id))
+    )  # NOVO (07/10): cartão de TIME casa por jogo_id - ver e_aposta_de_jogador
 
     if usa_fixture:
         cur.execute(
