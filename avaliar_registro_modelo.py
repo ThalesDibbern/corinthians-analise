@@ -45,6 +45,19 @@ O QUE ELE FAZ (nada é reescrito — tudo é importado)
          BR: M4 e M5 não se comparam número a número com as rodadas 24-28.
 
 Contar JOGOS, não linhas: toda tabela traz `fixtures` ao lado do N.
+
+⚠️ PARES COMPLEMENTARES (R7, corrigido em 12/10): "Mais X" e "Menos X" da
+mesma unidade somam 100 e um sempre acerta. Somados num agregado, dão
+previsto 50 / observado 50 POR CONSTRUÇÃO — o TOTAL do M1, as linhas "por
+mercado" e o M4 da versão de 07/10 eram tautológicos (pego no 1º uso, 11/10).
+Agora M1, M2 por mercado, M3 e M4 saem SEPARADOS POR LADO:
+  - lado "mais"  = direção mais ou sim
+  - lado "menos" = direção menos ou não
+  - lado "outra" = resultado final, dupla chance, handicap (sem complemento
+    de dois lados)
+Dentro de um lado não existe par complementar, então o agregado mede algo.
+O M5 (subconjunto filtrado) continua somando tudo: lá cada linha é uma
+aposta que o sistema faria, e quantos pares passam no filtro é informado.
 """
 
 import os
@@ -115,6 +128,31 @@ def grupo_direcao(direcao):
     if d in ("sim", "não", "nao"):
         return "sim/não"
     return "outra"
+
+
+LADOS = ("mais", "menos", "outra")
+
+
+def lado(direcao):
+    """Lado do par complementar. Dentro de um lado não há par (R7)."""
+    d = (direcao or "").strip().lower()
+    if d in ("mais", "sim"):
+        return "mais"
+    if d in ("menos", "não", "nao"):
+        return "menos"
+    return "outra"
+
+
+def contar_pares(itens):
+    """Quantas unidades têm o lado oposto da MESMA unidade no conjunto."""
+    chaves = {}
+    for u in itens:
+        if lado(u["direcao"]) == "outra":
+            continue
+        base = (u["classe"], u["fixture_id_api"] if u["classe"] != "TIME" else u["jogo_id"],
+                u["tipo_padrao"], u["jogador_id"], u["linha"])
+        chaves.setdefault(base, set()).add(lado(u["direcao"]))
+    return sum(1 for lados in chaves.values() if len(lados) == 2)
 
 
 def passa_no_filtro(f):
@@ -209,9 +247,22 @@ def por_faixa(itens, campo_p="p", com_casa=False, com_roi=False):
     linha_tabela("TOTAL", itens, campo_p, com_casa, com_roi)
 
 
+def por_lado(itens, rotulo_bloco, funcao):
+    """Chama `funcao(sel)` para cada lado que tem unidade (R7)."""
+    for l in LADOS:
+        sel = [u for u in itens if lado(u["direcao"]) == l]
+        if sel:
+            print(f"  -- {rotulo_bloco} · lado {l} --")
+            funcao(sel)
+
+
 def imprimir_medidas(avaliadas):
-    print("\n## M1 — CALIBRAÇÃO POR FAIXA (todas as unidades avaliadas)")
-    por_faixa(avaliadas)
+    pares = contar_pares(avaliadas)
+    print(f"\npares mais/menos completos entre as avaliadas: {pares} "
+          f"(por isso as tabelas abaixo saem por LADO — um par somado dá 50/50 por construção)")
+
+    print("\n## M1 — CALIBRAÇÃO POR FAIXA (todas as unidades avaliadas), por lado")
+    por_lado(avaliadas, "M1", lambda sel: por_faixa(sel))
 
     print("\n## M2 — POR CLASSE × DIREÇÃO")
     cabecalho_tabela()
@@ -220,14 +271,16 @@ def imprimir_medidas(avaliadas):
             sel = [u for u in avaliadas if u["classe"] == classe and grupo_direcao(u["direcao"]) == d]
             if sel:
                 linha_tabela(f"{classe} · {d}", sel)
-    print("\n## M2 — POR MERCADO")
+    print("\n## M2 — POR MERCADO × LADO")
     cabecalho_tabela()
     for tipo in sorted({u["tipo_padrao"] for u in avaliadas}):
         for classe in ("JOGADOR", "TIME", "JOGO INTEIRO"):
-            sel = [u for u in avaliadas if u["tipo_padrao"] == tipo and u["classe"] == classe]
-            if sel:
-                rotulo = tipo if tipo != "cartao" else f"cartao ({classe.lower()})"
-                linha_tabela(rotulo, sel)
+            for l in LADOS:
+                sel = [u for u in avaliadas if u["tipo_padrao"] == tipo and u["classe"] == classe
+                       and lado(u["direcao"]) == l]
+                if sel:
+                    nome = tipo if tipo != "cartao" else f"cartao ({classe.lower()})"
+                    linha_tabela(f"{nome} · {l}", sel)
 
     print(f"\n## M3 — COERÊNCIA ENTRE PERSPECTIVAS (jogo inteiro, tolerância {TOLERANCIA_COERENCIA} ponto)")
     jogo = [u for u in avaliadas if u["classe"] == "JOGO INTEIRO"]
@@ -239,20 +292,24 @@ def imprimir_medidas(avaliadas):
         divs = sorted(u["divergencia"] for u in duas)
         print(f"  |P_A − P_B|: mediana {divs[len(divs) // 2]:.1f} · p90 {divs[int(0.9 * (len(divs) - 1))]:.1f}"
               f" · máx {divs[-1]:.1f}")
-    print("  M1 COM as discordantes:")
-    cabecalho_tabela()
-    linha_tabela("TOTAL", avaliadas)
-    print("  M1 SEM as discordantes:")
     ids_contra = {id(u) for u in contra}
+    sem_contra = [u for u in avaliadas if id(u) not in ids_contra]
+    print("  M1 COM e SEM as discordantes, por lado:")
     cabecalho_tabela()
-    linha_tabela("TOTAL", [u for u in avaliadas if id(u) not in ids_contra])
+    for l in LADOS:
+        com = [u for u in avaliadas if lado(u["direcao"]) == l]
+        sem = [u for u in sem_contra if lado(u["direcao"]) == l]
+        if com:
+            linha_tabela(f"{l} · com", com)
+            linha_tabela(f"{l} · sem", sem)
 
-    print("\n## M4 — CONTRA A CASA DE REFERÊNCIA (100/odd_ref, com margem), por faixa de p_modelo")
-    por_faixa(avaliadas, com_casa=True)
+    print("\n## M4 — CONTRA A CASA DE REFERÊNCIA (100/odd_ref, com margem), por faixa de p_modelo e lado")
+    por_lado(avaliadas, "M4", lambda sel: por_faixa(sel, com_casa=True))
 
     print("\n## M5 — O QUE O SISTEMA TERIA RECOMENDADO (encolhido contra odd_ref, VE > piso)")
     filtradas = [u for u in avaliadas if u["passou_filtro"]]
-    print(f"  {len(filtradas)} de {len(avaliadas)} unidades passariam no filtro. "
+    print(f"  {len(filtradas)} de {len(avaliadas)} unidades passariam no filtro "
+          f"({contar_pares(filtradas)} par(es) com os DOIS lados passando). "
           f"Previsto = probabilidade JÁ encolhida.")
     por_faixa(filtradas, campo_p="p_filtro", com_casa=True, com_roi=True)
     print("  por classe × direção:")
