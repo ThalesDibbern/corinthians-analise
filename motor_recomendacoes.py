@@ -2283,7 +2283,9 @@ def jogador_disponivel(cur, jogador_id, jogo_id):
     sido capturada (jogo_tem_escalacao), essa é a fonte mais confiável -
     usa ela e ignora qualquer outra coisa.
 
-    Prioridade 2 - fallback pros últimos 3 jogos: se ainda não temos a
+    Prioridade 2 - fallback pros últimos 3 jogos DE CADA TIME DO JOGO
+    (corrigido em 12/10/2026 - antes eram os 3 últimos da tabela inteira):
+    se ainda não temos a
     escalação confirmada dessa partida específica, olha se o jogador
     apareceu (titular OU reserva, não precisa ter entrado em campo) em pelo
     menos 1 dos últimos 3 jogos concluídos. Se sumiu das 3 escalações
@@ -2311,32 +2313,85 @@ def jogador_disponivel(cur, jogador_id, jogo_id):
         )
         return cur.fetchone() is not None
 
-    cur.execute(
-        """
-        SELECT COUNT(*) FROM escalacoes
-        WHERE jogo_id IN (
-            SELECT id FROM jogos WHERE data_jogo < CURRENT_DATE ORDER BY data_jogo DESC LIMIT %s
-        )
-        """,
-        (JOGOS_JANELA_DISPONIBILIDADE,),
-    )
-    tem_dado_recente_geral = cur.fetchone()[0] > 0
-
-    if not tem_dado_recente_geral:
+    # CORRIGIDO (12/10/2026, `2_ABERTO §1.9`): "os últimos 3 jogos" são os
+    # do TIME, não os da tabela inteira. A versão anterior fazia
+    # `SELECT id FROM jogos ... ORDER BY data_jogo DESC LIMIT 3` sem filtro
+    # de time — só passavam jogadores dos 4-6 times que tinham jogado por
+    # último (1-3 jogos por rodada com mercado de jogador), e quando esses
+    # 3 registros não tinham escalação, passavam TODOS.
+    #
+    # Agora: para cada um dos dois times do jogo, os últimos
+    # JOGOS_JANELA_DISPONIBILIDADE jogos CONCLUÍDOS daquele time (linha da
+    # perspectiva dele, `nosso_time_id`, com placar gravado). `escalacoes`
+    # não diz o time do jogador, mas guarda os dois times de cada jogo, então:
+    #   - apareceu em alguma dessas escalações → disponível;
+    #   - não apareceu e os DOIS times têm escalação na janela → indisponível;
+    #   - algum dos dois times sem escalação na janela → não dá pra saber de
+    #     que time ele é → NÃO bloqueia (mesma regra de antes: dado
+    #     insuficiente não descarta).
+    janela = _janela_disponibilidade_do_jogo(cur, jogo_id)
+    if janela is None:
+        return True  # sem os dois times identificados - não bloqueia
+    todos_ids, os_dois_times_tem_escalacao = janela
+    if not todos_ids:
         return True  # sem dado suficiente pra decidir - não bloqueia
 
     cur.execute(
-        """
-        SELECT COUNT(*) FROM escalacoes
-        WHERE jogador_id = %s
-          AND jogo_id IN (
-              SELECT id FROM jogos WHERE data_jogo < CURRENT_DATE ORDER BY data_jogo DESC LIMIT %s
-          )
-        """,
-        (jogador_id, JOGOS_JANELA_DISPONIBILIDADE),
+        "SELECT COUNT(*) FROM escalacoes WHERE jogador_id = %s AND jogo_id = ANY(%s)",
+        (jogador_id, todos_ids),
     )
-    apareceu_nos_recentes = cur.fetchone()[0]
-    return apareceu_nos_recentes > 0
+    if cur.fetchone()[0] > 0:
+        return True
+    # não apareceu: só bloqueia se os DOIS times têm escalação na janela
+    return not os_dois_times_tem_escalacao
+
+
+# Cache por execução: a janela de um jogo não muda dentro de um processo
+# (o motor roda uma vez por dia; CURRENT_DATE e os jogos concluídos são os
+# mesmos para todas as odds do mesmo jogo_id).
+_CACHE_JANELA_DISPONIBILIDADE = {}
+
+
+def _janela_disponibilidade_do_jogo(cur, jogo_id):
+    """Para os dois times do jogo, os últimos JOGOS_JANELA_DISPONIBILIDADE
+    jogos CONCLUÍDOS de cada um (linha da perspectiva do time, com placar).
+    Devolve (ids de `jogos` dos dois times juntos, se os DOIS times têm
+    escalação nessa janela) — ou None se o jogo não tem os dois times."""
+    if jogo_id in _CACHE_JANELA_DISPONIBILIDADE:
+        return _CACHE_JANELA_DISPONIBILIDADE[jogo_id]
+    cur.execute("SELECT mandante_id, visitante_id FROM jogos WHERE id = %s", (jogo_id,))
+    registro = cur.fetchone()
+    times_do_jogo = [t for t in (registro or ()) if t is not None]
+    if len(times_do_jogo) < 2:
+        _CACHE_JANELA_DISPONIBILIDADE[jogo_id] = None
+        return None
+
+    todos_ids = []
+    os_dois_tem = True
+    for time_id in times_do_jogo:
+        cur.execute(
+            """
+            SELECT id FROM jogos
+            WHERE nosso_time_id = %s
+              AND placar_corinthians IS NOT NULL
+              AND data_jogo < CURRENT_DATE
+            ORDER BY data_jogo DESC, id DESC
+            LIMIT %s
+            """,
+            (time_id, JOGOS_JANELA_DISPONIBILIDADE),
+        )
+        ids = [r[0] for r in cur.fetchall()]
+        todos_ids.extend(ids)
+        if not ids:
+            os_dois_tem = False
+            continue
+        cur.execute("SELECT 1 FROM escalacoes WHERE jogo_id = ANY(%s) LIMIT 1", (ids,))
+        if cur.fetchone() is None:
+            os_dois_tem = False  # esse time sem escalação recente - não dá pra decidir
+
+    resultado = (todos_ids, os_dois_tem)
+    _CACHE_JANELA_DISPONIBILIDADE[jogo_id] = resultado
+    return resultado
 
 
 def calcular_recomendacoes(cur):
