@@ -57,7 +57,10 @@ API_BASE = "https://api.oddspapi.io/v4"
 API_FOOTBALL_BASE = "https://v3.football.api-sports.io"
 SPORT_ID = 10
 TOURNAMENT_ID = 325     # Brasileirão Série A
-BOOKMAKERS = "superbet.bet.br"  # só Superbet por enquanto (plano pago com Player Props)
+# 13/10/2026: superbet.bet.br -> superbet.rs. A MP 1.394/2026 tirou as casas brasileiras do ar
+# em 06/10; o plano pago da OddsPapi foi trocado para a Superbet Sérvia (mesma empresa, 18 de 19
+# tipos de mercado, validada no registro do modelo em 07/10). Revisão prevista: 01/01/2027.
+BOOKMAKERS = "superbet.rs"  # plano pago com Player Props
 DIAS_ANTECEDENCIA = 2   # busca odds de jogos que acontecem em até X dias
 
 
