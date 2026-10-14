@@ -138,6 +138,12 @@ TEMPORADAS_PADRAO = [2026, 2025, 2024, 2023, 2022]
 
 TETO_PADRAO = 6500
 
+# NOVO (13/10/2026, decisão D1): playoff de rebaixamento (contra time da 2ª
+# divisão) NÃO entra na janela de 50 das ligas, então não é coletado. O
+# desempate entre times da liga ("Relegation Decider", Serie A) continua
+# entrando. Os playoffs já coletados vão para o arquivo pelo `d1_ligas.py`.
+RODADAS_FORA_DA_COLETA = ("Relegation Round", "Final")
+
 # O popular_banco dorme 7s entre chamadas (comentário lá: limite do plano
 # GRÁTIS, ~10/min). No plano pago o limite por minuto é bem maior
 # [inferido]; 1s dá folga, e o `chamar_api` já trata o 429 esperando e
@@ -502,6 +508,9 @@ def o_que_falta(cur, jogo_id):
 
 def processar_fixture(conn, cur, fixture, liga_api_id, nome_liga, temporada, contagem):
     fixture_id = fixture["fixture"]["id"]
+    if (fixture.get("league") or {}).get("round") in RODADAS_FORA_DA_COLETA:
+        contagem["fora_d1"] = contagem.get("fora_d1", 0) + 1   # D1: playoff fica fora
+        return
     home = fixture["teams"]["home"]
     away = fixture["teams"]["away"]
     status = fixture["fixture"]["status"]["short"]
@@ -676,7 +685,8 @@ def fase_aplicar(liga_chave, teto, temporadas):
                             "Parando para não gastar cota; a próxima execução continua.")
             print(f"  temporada {temporada}: +{contagem['processados'] - antes['processados']} processados, "
                   f"+{contagem['pulados'] - antes['pulados']} já completos, "
-                  f"+{contagem['futuros'] - antes['futuros']} ainda não jogados. "
+                  f"+{contagem['futuros'] - antes['futuros']} ainda não jogados, "
+                  f"+{contagem.get('fora_d1', 0) - antes.get('fora_d1', 0)} de playoff fora (D1). "
                   f"Cota usada no dia: {pb.requisicoes_usadas}")
 
         print("\n✅ Todas as temporadas pedidas percorridas.")
