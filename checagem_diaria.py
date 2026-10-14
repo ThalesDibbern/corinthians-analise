@@ -68,6 +68,9 @@ DIAS_RODADA_FUTURA = 10
 HORARIOS_MINIMOS_RODADA = 3   # mesmo teste de cheiro do §5.7
 LIMITE_API_DIA = 7000         # LIMITE_REQUISICOES_DIA do popular_banco
 MAX_LISTADOS = 8
+# Status da API-Football de jogo que não foi (ou não terminou de ser) jogado:
+# adiado, cancelado, abandonado, suspenso, a definir. Sem placar é o esperado.
+STATUS_SEM_JOGO = ("PST", "CANC", "ABD", "SUSP", "TBD")
 
 STATUS_VALIDOS = ("OK", "INFO", "ALERTA", "FALHA")
 
@@ -254,6 +257,9 @@ def chk_registro_publico(cur, ctx):
 
 
 def chk_placar(cur, ctx):
+    """Jogo adiado/cancelado (status da API em STATUS_SEM_JOGO) não tem placar por
+    não ter sido jogado — não é atraso. Ele continua aparecendo no detalhe, mas
+    sozinho não acende ALERTA (14/10: o Chapecoense x Vasco, PST, alarmava todo dia)."""
     linhas = todos(cur, """
         SELECT DISTINCT j.fixture_id_api, COALESCE(jl.status, '?')
         FROM jogos j LEFT JOIN jogos_liga jl ON jl.fixture_id_api = j.fixture_id_api
@@ -262,10 +268,18 @@ def chk_placar(cur, ctx):
           AND j.placar_corinthians IS NULL
         ORDER BY 1
     """, (ctx["agora"], HORAS_PLACAR))
-    if linhas:
-        return [("placar_atrasado", "ALERTA", len(linhas),
+    atrasados = [(f, s) for f, s in linhas if s not in STATUS_SEM_JOGO]
+    sem_jogo = [(f, s) for f, s in linhas if s in STATUS_SEM_JOGO]
+    texto_sem_jogo = ("adiado(s)/cancelado(s), sem placar por não ter sido jogado (fixture:status): "
+                      + listar(f"{f}:{s}" for f, s in sem_jogo)) if sem_jogo else ""
+    if atrasados:
+        return [("placar_atrasado", "ALERTA", len(atrasados),
                  f"jogo(s) com apito há mais de {HORAS_PLACAR}h sem placar (fixture:status): "
-                 + listar(f"{f}:{s}" for f, s in linhas))]
+                 + listar(f"{f}:{s}" for f, s in atrasados)
+                 + (" · " + texto_sem_jogo if sem_jogo else ""))]
+    if sem_jogo:
+        return [("placar_atrasado", "INFO", 0,
+                 f"nenhum jogo atrasado · {len(sem_jogo)} " + texto_sem_jogo)]
     return [("placar_atrasado", "OK", 0, f"todo jogo de 2026 com mais de {HORAS_PLACAR}h tem placar")]
 
 
