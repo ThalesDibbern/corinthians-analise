@@ -38,6 +38,22 @@ sem guardar quase nada a longo prazo).
 Feito pra rodar periodicamente (dentro do encadeamento diário) - é uma
 tarefa leve, não faz nenhuma chamada de API externa, só limpeza no banco.
 
+NOVO (13/10/2026): A PARTE QUE APAGA JOGOS ESTÁ DESLIGADA POR PADRÃO.
+Medido em 13/10 (`3_HISTORICO`, §3.88): nenhum jogo passado do Brasileirão
+fica fora da proteção "últimos 50 de cada jogador"; os únicos apagados
+eram jogos SEM estatística de jogador (7 linhas por dia: 3 jogos de 2026 e
+1 de 2024), e o `popular_banco` recriava os mesmos jogos no dia seguinte,
+rebaixando as estatísticas deles da API - um ciclo diário que só gastava
+cota e tempo. O banco usa ~6% do volume. Por isso:
+  - sem variável nenhuma, o script só LISTA o que apagaria (diagnóstico)
+    e segue para a compressão das Múltiplas em Destaque, que continua igual;
+  - com LIMPAR_APAGAR_JOGOS=1 no ambiente, volta ao comportamento antigo.
+Os padrões não mudam com isso: o `motor_padroes` roda ANTES deste script
+no cron, então os jogos recriados já entravam no cálculo do dia.
+⚠️ O "últimos 50 do time" abaixo é dos 50 jogos mais recentes da TABELA
+inteira, não de cada time (achado 13/10). Com a remoção desligada, não
+tem efeito; fica registrado para quem religar.
+
 Variáveis de ambiente:
   - DATABASE_URL -> a URL de conexão do Postgres (mesma usada nos outros scripts)
 """
@@ -49,6 +65,9 @@ import psycopg2
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 JANELA_MAXIMA_DE_JOGOS = 50
+
+# NOVO (13/10/2026): a remoção de jogos só acontece com LIMPAR_APAGAR_JOGOS=1.
+APAGAR_JOGOS = os.environ.get("LIMPAR_APAGAR_JOGOS") == "1"
 
 # quantas rodadas (com Múltiplas em Destaque já calculadas) mantêm o
 # detalhe completo antes de comprimir
@@ -175,6 +194,23 @@ def main():
         if not candidatos:
             print("Nenhum jogo precisa ser removido no momento "
                   f"(todos ainda estão dentro do limite de {JANELA_MAXIMA_DE_JOGOS} jogos).")
+        elif not APAGAR_JOGOS:
+            # NOVO (13/10/2026): só lista. Nada é apagado de `jogos` nem das
+            # tabelas dependentes.
+            removiveis = [j for j in candidatos if not jogo_esta_em_uso(cur, j)]
+            print(f"Remoção de jogos DESLIGADA (LIMPAR_APAGAR_JOGOS != 1) - nada foi apagado de "
+                  f"`jogos` nem das tabelas dependentes.")
+            print(f"  {len(removiveis)} jogo(s) seriam removidos; "
+                  f"{len(candidatos) - len(removiveis)} mantidos por uso.")
+            if removiveis:
+                cur.execute(
+                    "SELECT j.id, j.fixture_id_api, j.data_jogo, t.nome, j.adversario "
+                    "FROM jogos j LEFT JOIN times t ON t.id = j.nosso_time_id "
+                    "WHERE j.id = ANY(%s) ORDER BY j.data_jogo, j.id",
+                    (removiveis,),
+                )
+                for jid, fixture, data, time_nome, adversario in cur.fetchall()[:20]:
+                    print(f"    id {jid} · fixture {fixture} · {data} · {time_nome} x {adversario}")
         else:
             apagados = 0
             mantidos_por_uso = 0
