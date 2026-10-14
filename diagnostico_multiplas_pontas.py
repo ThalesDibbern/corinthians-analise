@@ -31,8 +31,11 @@ Três números por grupo:
   previsto − Q  = o que é erro de CADA perna, multiplicado
   Q − observado = o que é as pernas errarem JUNTAS (dependência)
 
-Controle: o mesmo para múltiplas de jogos DISTINTOS, onde a dependência
-deveria ser ~0. ⚠️ A calibração usa o próprio histórico (dentro da
+Três tipos de múltipla (14/10): MESMO (todas as pernas num jogo), MISTO
+(algum jogo repetido, mais de um jogo) e DISTINTOS (cada perna num jogo
+diferente — o controle, onde a dependência deveria ser ~0). "Algum jogo
+repetido" = MISTO + MESMO, provável definição do "mesmo jogo" de 19/09
+(86% das múltiplas) `[inferido]`. ⚠️ A calibração usa o próprio histórico (dentro da
 amostra): serve para DECOMPOR, não para prever.
 
 Depois, sem as múltiplas: TODOS os pares de pernas recomendadas no mesmo
@@ -269,11 +272,13 @@ def modo_multiplas(cur):
                     q *= cal.taxa(l["tipo"], l["lado"], l["p"])
         fixtures = {l["fixture"] for l in legs}
         mesmo = len(fixtures) == 1
+        # três tipos (14/10): todas as pernas num jogo · algum jogo repetido (misto) · todas em jogos diferentes
+        tipo_mult = "mesmo" if mesmo else ("misto" if len(fixtures) < len(legs) else "distinto")
         if mesmo:
             for l in legs:
                 pernas_vistas[(l["fixture"], l["tipo"], l["jogador_id"], l["jogo_id"] if classe(l["tipo"], l["jogador_id"]) == "TIME" else None,
                                l["linha"], l["lado"])] = l
-        itens.append({"id": cid, "mesmo": mesmo, "n": len(legs), "faixa": tem_faixa or "(faixa)" in (desc or ""),
+        itens.append({"id": cid, "mesmo": mesmo, "tipo_mult": tipo_mult, "n": len(legs), "faixa": tem_faixa or "(faixa)" in (desc or ""),
                       "max_p": max(l["p"] for l in legs), "tem_menos": any(l["lado"] == "menos" for l in legs),
                       "jogador": any(classe(l["tipo"], l["jogador_id"]) == "JOGADOR" for l in legs),
                       "prev": float(prob) / 100.0, "pp": pp, "q": q, "x": x, "odd": float(odd),
@@ -289,14 +294,23 @@ def modo_multiplas(cur):
     print("\nprev = probabilidade gravada · Πp = produto das pernas pela probabilidade do histórico ·"
           "\nQ = produto CALIBRADO e independente · obs = taxa real · ROI pela odd combinada")
 
-    mesmo = [i for i in itens if i["mesmo"]]
-    dist = [i for i in itens if not i["mesmo"]]
+    mesmo = [i for i in itens if i["tipo_mult"] == "mesmo"]
+    misto = [i for i in itens if i["tipo_mult"] == "misto"]
+    dist = [i for i in itens if i["tipo_mult"] == "distinto"]
     print("\n## 1. A DECOMPOSIÇÃO")
+    print("  DISTINTOS = cada perna num jogo diferente (controle puro) · MISTO = algum jogo repetido, mas mais de"
+          "\n  um jogo · MESMO = todas as pernas num jogo só · 'algum jogo repetido' = MISTO + MESMO")
     cabecalho_grupo()
     linha_grupo("jogos DISTINTOS (controle)", dist)
+    linha_grupo("MISTO", misto)
     linha_grupo("MESMO jogo", mesmo)
+    linha_grupo("algum jogo repetido (misto+mesmo)", misto + mesmo)
     for n in sorted({i["n"] for i in mesmo}):
         linha_grupo(f"  mesmo jogo, {n} pernas", [i for i in mesmo if i["n"] == n])
+    for n in sorted({i["n"] for i in misto}):
+        linha_grupo(f"  misto, {n} pernas", [i for i in misto if i["n"] == n])
+    for n in sorted({i["n"] for i in dist}):
+        linha_grupo(f"  distintos, {n} pernas", [i for i in dist if i["n"] == n])
 
     print("\n## 2. MESMO JOGO, POR HIPÓTESE")
     cabecalho_grupo()
@@ -305,9 +319,16 @@ def modo_multiplas(cur):
                    ("com perna de 'menos'", lambda i: i["tem_menos"]), ("sem perna de 'menos'", lambda i: not i["tem_menos"]),
                    ("com perna de jogador", lambda i: i["jogador"]), ("sem perna de jogador", lambda i: not i["jogador"])):
         linha_grupo(rot, [i for i in mesmo if f(i)])
+    print("  — MISTO, pelos mesmos cortes:")
+    for rot, f in (("  misto com FAIXA", lambda i: i["faixa"]), ("  misto sem faixa", lambda i: not i["faixa"]),
+                   ("  misto, alguma perna ≥ 80%", lambda i: i["max_p"] >= 80),
+                   ("  misto, todas < 80%", lambda i: i["max_p"] < 80)):
+        linha_grupo(rot, [i for i in misto if f(i)])
     print("  — e o controle (jogos distintos), pelos mesmos cortes:")
     for rot, f in (("  distintos, alguma perna ≥ 80%", lambda i: i["max_p"] >= 80),
-                   ("  distintos, todas < 80%", lambda i: i["max_p"] < 80)):
+                   ("  distintos, todas < 80%", lambda i: i["max_p"] < 80),
+                   ("  distintos com perna de 'menos'", lambda i: i["tem_menos"]),
+                   ("  distintos sem perna de 'menos'", lambda i: not i["tem_menos"])):
         linha_grupo(rot, [i for i in dist if f(i)])
 
     print("\n## 3. CONCENTRAÇÃO — quantas múltiplas por jogo (N efetivo)")
