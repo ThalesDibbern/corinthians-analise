@@ -38,6 +38,12 @@ O QUE ELE FAZ (nada é reescrito — tudo é importado)
          perspectivas discordam mais que `TOLERANCIA_COERENCIA` (a do
          detector, importada) — o defeito do §5.16 medido linha a linha
      M4  gap contra a casa de referência (100/odd_ref, COM a margem)
+     M4b (R10, 13/10) a casa SEM a margem: em cada par mais/menos (ou
+         sim/não) com odd dos dois lados, p_casa = (1/odd) / (1/odd +
+         1/odd_oposta). Calibração por faixa e lado, e o ERRO QUADRÁTICO
+         (Brier) do modelo × casa nas MESMAS unidades — responde "o modelo
+         erra mais ou menos que a casa?". O lado "outra" (resultado,
+         dupla chance, handicap) fica fora: não é um par de dois lados.
      M5  o subconjunto que o sistema TERIA recomendado: encolhimento de
          produção (`encolher_para_o_mercado`, importado) contra odd_ref e
          VE > piso de produção, perspectiva a perspectiva; ROI com stake 1
@@ -155,6 +161,50 @@ def contar_pares(itens):
     return sum(1 for lados in chaves.values() if len(lados) == 2)
 
 
+def base_do_par(u):
+    """Identidade do par complementar — a mesma do `contar_pares`."""
+    return (u["classe"], u["fixture_id_api"] if u["classe"] != "TIME" else u["jogo_id"],
+            u["tipo_padrao"], u["jogador_id"], u["linha"])
+
+
+def marcar_casa_sem_margem(itens):
+    """R10: põe em cada unidade de lado mais/menos `p_casa_justa` (0-100, a
+    casa sem margem) e `margem` (soma das probabilidades implícitas − 100),
+    quando o lado oposto da MESMA unidade tem odd. Senão, None."""
+    odds = {}
+    for u in itens:
+        l = lado(u["direcao"])
+        if l != "outra" and u["odd_ref"]:
+            odds.setdefault(base_do_par(u), {})[l] = float(u["odd_ref"])
+    for u in itens:
+        u["p_casa_justa"] = u["margem"] = None
+        l = lado(u["direcao"])
+        if l == "outra":
+            continue
+        par = odds.get(base_do_par(u), {})
+        if "mais" in par and "menos" in par:
+            proprio, oposto = 1.0 / par[l], 1.0 / par["menos" if l == "mais" else "mais"]
+            u["p_casa_justa"] = 100.0 * proprio / (proprio + oposto)
+            u["margem"] = 100.0 * (proprio + oposto - 1.0)
+
+
+def brier(itens, campo):
+    """Erro quadrático médio (0 = perfeito; 0,25 = chutar 50% sempre)."""
+    return sum((u[campo] / 100.0 - (1.0 if u["resultado"] == "acertou" else 0.0)) ** 2
+               for u in itens) / len(itens)
+
+
+def linha_brier(rotulo, itens):
+    n = len(itens)
+    if n == 0:
+        return
+    fixtures = len({u["fixture_id_api"] for u in itens})
+    bm, bc = brier(itens, "p"), brier(itens, "p_casa_justa")
+    margem = sum(u["margem"] for u in itens) / n
+    quem = "modelo" if bm < bc else "casa" if bc < bm else "empate"
+    print(f"  {rotulo:<26} {n:>6} {fixtures:>8} {bm:>9.4f} {bc:>9.4f} {bm - bc:>+9.4f} {margem:>8.1f}  {quem}")
+
+
 def passa_no_filtro(f):
     """O que o motor de produção faria com esta linha e a odd de referência:
     encolhe contra a odd (função importada) e aplica o piso de VE de
@@ -209,7 +259,7 @@ def montar_unidades(fotos):
 # ---------------------------------------------------------------------------
 # impressão
 # ---------------------------------------------------------------------------
-def linha_tabela(rotulo, itens, campo_p="p", com_casa=False, com_roi=False):
+def linha_tabela(rotulo, itens, campo_p="p", com_casa=False, com_roi=False, com_justa=False):
     n = len(itens)
     if n == 0:
         print(f"  {rotulo:<26} {0:>6}")
@@ -224,27 +274,32 @@ def linha_tabela(rotulo, itens, campo_p="p", com_casa=False, com_roi=False):
             casa = sum(100.0 / float(u["odd_ref"]) for u in com_odd) / len(com_odd)
             obs_c = 100.0 * sum(1 for u in com_odd if u["resultado"] == "acertou") / len(com_odd)
             texto += f" {casa:>9.1f} {obs_c - casa:>+9.1f}  (n odd {len(com_odd)})"
+    if com_justa:
+        casa = sum(u["p_casa_justa"] for u in itens) / n
+        texto += f" {casa:>9.1f} {obs - casa:>+9.1f}"
     if com_roi:
         lucro = sum((float(u["odd_ref"]) - 1) if u["resultado"] == "acertou" else -1.0 for u in itens)
         texto += f" {100.0 * lucro / n:>+8.1f}%"
     print(texto)
 
 
-def cabecalho_tabela(com_casa=False, com_roi=False):
+def cabecalho_tabela(com_casa=False, com_roi=False, com_justa=False):
     texto = f"  {'':<26} {'N':>6} {'fixtures':>8} {'previsto':>9} {'observ.':>9} {'gap':>8}"
     if com_casa:
         texto += f" {'casa':>9} {'gap casa':>9}"
+    if com_justa:
+        texto += f" {'casa s/m':>9} {'gap casa':>9}"
     if com_roi:
         texto += f" {'ROI':>9}"
     print(texto)
 
 
-def por_faixa(itens, campo_p="p", com_casa=False, com_roi=False):
-    cabecalho_tabela(com_casa, com_roi)
+def por_faixa(itens, campo_p="p", com_casa=False, com_roi=False, com_justa=False):
+    cabecalho_tabela(com_casa, com_roi, com_justa)
     for lo, hi in FAIXAS:
         sel = [u for u in itens if lo <= u[campo_p] < hi]
-        linha_tabela(f"{lo:.0f}-{min(hi, 100):.0f}%", sel, campo_p, com_casa, com_roi)
-    linha_tabela("TOTAL", itens, campo_p, com_casa, com_roi)
+        linha_tabela(f"{lo:.0f}-{min(hi, 100):.0f}%", sel, campo_p, com_casa, com_roi, com_justa)
+    linha_tabela("TOTAL", itens, campo_p, com_casa, com_roi, com_justa)
 
 
 def por_lado(itens, rotulo_bloco, funcao):
@@ -305,6 +360,36 @@ def imprimir_medidas(avaliadas):
 
     print("\n## M4 — CONTRA A CASA DE REFERÊNCIA (100/odd_ref, com margem), por faixa de p_modelo e lado")
     por_lado(avaliadas, "M4", lambda sel: por_faixa(sel, com_casa=True))
+
+    print("\n## M4b — CONTRA A CASA SEM MARGEM (R10): p_casa = (1/odd) / (1/odd + 1/odd do lado oposto)")
+    marcar_casa_sem_margem(avaliadas)
+    dois_lados = [u for u in avaliadas if lado(u["direcao"]) != "outra"]
+    justas = [u for u in dois_lados if u["p_casa_justa"] is not None]
+    print(f"  {len(justas)} de {len(dois_lados)} unidades de lado mais/menos têm odd nos DOIS lados do par "
+          f"(as outras ficam fora do M4b; o lado \"outra\" também).")
+    if justas:
+        print("  Calibração por faixa de p_modelo, com a casa sem margem nas MESMAS unidades:")
+        por_lado(justas, "M4b", lambda sel: por_faixa(sel, com_justa=True))
+        # Num par, modelo e casa dão p e 100 − p aos dois lados, e o resultado
+        # também se inverte: o erro quadrático é IGUAL nos dois lados. Conta-se
+        # cada par UMA vez (lado "mais") para não dobrar o N.
+        pares = [u for u in justas if lado(u["direcao"]) == "mais"]
+        print("\n  Erro quadrático (Brier) por PAR — menor é melhor; 0,25 = dizer 50% sempre.")
+        print("  'margem' = quanto a casa soma acima de 100 nesse par (o que foi tirado).")
+        print(f"  {'':<26} {'pares':>6} {'fixtures':>8} {'modelo':>9} {'casa s/m':>9} {'mod−casa':>9} "
+              f"{'margem':>8}  quem erra menos")
+        linha_brier("TOTAL", pares)
+        for classe in ("JOGADOR", "TIME", "JOGO INTEIRO"):
+            linha_brier(f"{classe}", [u for u in pares if u["classe"] == classe])
+        print("  por mercado:")
+        for tipo in sorted({u["tipo_padrao"] for u in pares}):
+            for classe in ("JOGADOR", "TIME", "JOGO INTEIRO"):
+                sel = [u for u in pares if u["tipo_padrao"] == tipo and u["classe"] == classe]
+                if sel:
+                    nome = tipo if tipo != "cartao" else f"cartao ({classe.lower()})"
+                    linha_brier(nome, sel)
+        print("  ⚠️ Brier de uma rodada tem N efetivo = número de JOGOS: as unidades de um jogo dependem")
+        print("     do mesmo placar e dos mesmos escanteios. Diferença pequena entre modelo e casa é ruído.")
 
     print("\n## M5 — O QUE O SISTEMA TERIA RECOMENDADO (encolhido contra odd_ref, VE > piso)")
     filtradas = [u for u in avaliadas if u["passou_filtro"]]
