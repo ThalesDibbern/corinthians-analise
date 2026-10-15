@@ -7833,6 +7833,38 @@ def escudo(team_id):
     return "", 404
 
 
+# 14/10/2026: logo das ligas para a página inicial, pelo mesmo caminho do
+# escudo (a CDN recusa o pedido feito direto do navegador). Pública porque o
+# endpoint começa com "escudo" (ver exigir_login). Guarda em memória: são
+# no máximo ~50 ligas, e cada uma não muda.
+_logos_liga_cache = {}
+
+
+@app.route("/escudo-liga/<int:liga_id>.png")
+def escudo_liga(liga_id):
+    if liga_id in _logos_liga_cache:
+        conteudo = _logos_liga_cache[liga_id]
+    else:
+        conteudo = None
+        try:
+            resp = requests.get(
+                f"https://media.api-sports.io/football/leagues/{liga_id}.png",
+                timeout=5,
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            if resp.status_code == 200 and resp.content:
+                conteudo = resp.content
+                if len(_logos_liga_cache) < 200:
+                    _logos_liga_cache[liga_id] = conteudo
+        except Exception:
+            pass
+    if conteudo is None:
+        return "", 404
+    resposta = Response(conteudo, mimetype="image/png")
+    resposta.headers["Cache-Control"] = "public, max-age=604800"
+    return resposta
+
+
 # ---------- Cartões acumulados rumo à suspensão automática ----------
 def buscar_cartoes_para_suspensao(cur):
     """Cartões amarelos acumulados rumo à suspensão automática (regra do
