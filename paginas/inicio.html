@@ -26,7 +26,7 @@
   color-scheme:dark;
 }
 *{box-sizing:border-box}
-html{scroll-behavior:smooth;font-size:clamp(16px,calc(100vw / 90),20px)}
+html{scroll-behavior:smooth;font-size:clamp(16px,calc(100vw / 90),24px)}
 body{background:var(--noite);color:var(--texto);font-family:var(--f-corpo);font-size:0.9375rem;line-height:1.55;overflow-x:hidden}
 a{color:var(--azul-claro)}
 button{font:inherit;color:inherit}
@@ -497,6 +497,34 @@ dialog .botoes{display:flex;gap:0.625rem;justify-content:flex-end;flex-wrap:wrap
 .chamada .marca,.chamada .eyebrow,.chamada h1,.chamada p{transition:transform .45s cubic-bezier(.2,.8,.2,1)}
 .chamada.recua .marca{transform:scale(.9);transform-origin:left bottom}
 
+/* ================= v12: largura que acompanha a tela + desempenho ================= */
+/* conteúdo ocupa a tela; margem lateral cresce com a tela */
+.secao{padding-left:max(clamp(1rem,4vw,6rem),env(safe-area-inset-left,0px));padding-right:max(clamp(1rem,4vw,6rem),env(safe-area-inset-right,0px))}
+.envolve{max-width:min(100%,100rem)}
+.pagina-corpo{max-width:min(100%,82rem);padding-left:max(clamp(1rem,4vw,6rem),env(safe-area-inset-left,0px));padding-right:max(clamp(1rem,4vw,6rem),env(safe-area-inset-right,0px))}
+@media (min-width:1600px){
+  .grade{gap:1.25rem}
+  .sobre .bloco{gap:4rem}
+}
+/* logos das ligas sobre vidro, sem fundo branco */
+.selo{background:linear-gradient(140deg,rgba(255,255,255,.16),rgba(255,255,255,.05));border:1px solid rgba(255,255,255,.18);box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
+.selo img{filter:drop-shadow(0 0 1px rgba(255,255,255,.55)) drop-shadow(0 1px 3px rgba(0,0,0,.45))}
+
+/* Desempenho: o desfoque de fundo (backdrop-filter) refaz o desfoque a cada quadro quando o que está
+   atrás se mexe (o degradê animado e o planeta). Sobre o degradê, que já é desfocado, um vidro
+   translúcido fica igual e custa quase nada. O desfoque de verdade fica só onde há planeta atrás. */
+.cartao-nav,.times,.chip,:root[data-vidro="sim"] .chip,:root[data-vidro="sim"] .vidro{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+:root[data-vidro="sim"] .vidro{background:linear-gradient(140deg,rgba(255,255,255,.12),rgba(255,255,255,.03) 55%,rgba(255,255,255,.06)),rgba(4,14,38,.5)}
+:root[data-vidro="sim"] .liga.vidro,:root[data-vidro="sim"] .dado.vidro,:root[data-vidro="sim"] .rodadas.vidro,:root[data-vidro="sim"] .como-visual.vidro{background:linear-gradient(150deg,rgba(255,255,255,.1),rgba(255,255,255,.03) 60%),rgba(3,12,32,.5)}
+.cartao-nav,.times{background:linear-gradient(140deg,rgba(255,255,255,.1),rgba(255,255,255,.03)),rgba(4,14,38,.62)}
+:root[data-vidro="sim"] .rotulo-pais.vidro{-webkit-backdrop-filter:blur(0.75rem) saturate(150%)!important;backdrop-filter:blur(0.75rem) saturate(150%)!important}
+:root[data-vidro="sim"] .pagina{-webkit-backdrop-filter:none;backdrop-filter:none;background:rgba(1,5,15,.94)}
+dialog::backdrop{-webkit-backdrop-filter:none;backdrop-filter:none;background:rgba(2,5,12,.78)}
+/* granulado parado quando o degradê WebGL está ativo (ele já se mexe) */
+.fundo.gl .grao{animation:none}
+/* medidor de quadros (?fps=1) */
+#medidor-fps{position:fixed;left:.5rem;top:.5rem;z-index:99;font:600 12px/1.2 ui-monospace,monospace;color:#0f0;background:rgba(0,0,0,.75);padding:.35rem .5rem;border-radius:.4rem;pointer-events:none;white-space:pre}
+
 /* ================= v7 ================= */
 .cartao-grande{font:inherit;color:inherit}
 .cartao-grande.ativo{border-style:solid;border-color:rgba(255,210,10,.45);cursor:pointer;transition:border-color .2s,transform .2s,box-shadow .2s}
@@ -564,8 +592,8 @@ html.trava{overflow:hidden}
 .fluxo{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0.75rem;counter-reset:no}
 .no{position:relative;background:var(--painel);border:1px solid var(--linha);border-radius:1rem;padding:0.875rem;display:flex;flex-direction:column;gap:0.375rem;min-width:0}
 .no:not(:last-child)::after{content:"";position:absolute;top:1.75rem;right:-12px;width:0.75rem;height:2px;background:linear-gradient(90deg,var(--azul),var(--laranja));
-  background-size:200% 100%;animation:corre 1.6s linear infinite}
-@keyframes corre{from{background-position:100% 0}to{background-position:-100% 0}}
+  background-size:200% 100%;animation:fio 1.6s linear infinite}
+@keyframes fio{from{background-position:100% 0}to{background-position:-100% 0}}
 .no-ic{width:1.875rem;height:1.875rem;border-radius:0.5625rem;display:grid;place-items:center;background:rgba(63,111,209,.25);color:var(--azul-claro);font-size:0.9375rem}
 .no b{font-size:0.9375rem}
 .no span:last-child{font-size:0.8125rem;color:var(--apagado)}
@@ -1276,13 +1304,13 @@ let mudarFundo = () => {};
   enviarCores();
   mudarFundo = p => { alvoCores = PAL[p].map(c => c.slice()); if (reduz) { alvoCores.forEach((c, i) => (cores[i] = c.slice())); enviarCores(); desenha(40); } };
   document.querySelector(".fundo").classList.add("gl");
-  const ESCALA = .35;   // gradiente suave: resolução baixa basta e poupa a GPU
+  const ESCALA = .28;   // gradiente suave: resolução baixa basta e poupa a GPU
   function medir() { cv.width = Math.max(2, Math.round(innerWidth * ESCALA)); cv.height = Math.max(2, Math.round(innerHeight * ESCALA)); gl.viewport(0, 0, cv.width, cv.height); gl.uniform2f(ur, cv.width, cv.height); }
   medir(); addEventListener("resize", () => { medir(); if (reduz) desenha(40); });
   const desenha = s => { gl.uniform1f(ut, s); gl.drawArrays(gl.TRIANGLES, 0, 3); };
   const t0 = performance.now(); let ult = 0;
   function quadro(agora) {
-    if (!document.hidden && agora - ult > 33) {
+    if (!document.hidden && agora - ult > 41) {
       ult = agora;
       let mexeu = false;
       cores.forEach((c, i) => c.forEach((v, k) => { const d = alvoCores[i][k] - v; if (Math.abs(d) > .001) { c[k] = v + d * .12; mexeu = true; } }));
@@ -1457,6 +1485,22 @@ document.querySelectorAll(".casa").forEach(b => b.addEventListener("click", () =
     botoes: [{ txt: "Fechar", cls: "fechar" }]
   });
 }));
+
+
+/* ---------- medidor de quadros: abrir a página com ?fps=1 ---------- */
+if (/[?&]fps=1/.test(location.search)) {
+  const caixa = document.createElement("div"); caixa.id = "medidor-fps"; document.body.appendChild(caixa);
+  let quadros = [], ult = performance.now();
+  (function conta(agora) {
+    quadros.push(agora - ult); ult = agora;
+    if (quadros.length >= 60) {
+      const s = quadros.slice().sort((a, b) => a - b), media = s.reduce((a, b) => a + b, 0) / s.length;
+      caixa.textContent = `${(1000 / media).toFixed(0)} qps\npior ${s[s.length - 1].toFixed(0)} ms\nlentos ${s.filter(x => x > 34).length}/60`;
+      quadros = [];
+    }
+    requestAnimationFrame(conta);
+  })(ult);
+}
 
 /* ---------- uma rolagem, todos os efeitos ---------- */
 let rolagemPedida = false;
@@ -1717,6 +1761,7 @@ if (globo) {
   let checagemPedida = false;
   function checarSobreposicao() {
     checagemPedida = false;
+    if (scrollY > innerHeight) { protegidos.forEach(el => el.classList.remove("recua")); return; }
     const pr = palco.getBoundingClientRect(), cx = pr.left + pr.width / 2, cy = pr.top + pr.height / 2, r = raioPx();
     protegidos.forEach(el => {
       if (fase || getComputedStyle(el).display === "none") { el.classList.remove("recua"); return; }
