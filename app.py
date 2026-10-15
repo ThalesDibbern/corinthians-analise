@@ -283,7 +283,9 @@ def barra_navegacao(pagina_atual, banca_atual=None):
         for chave, href, rotulo in itens
     )
 
-    esquerda = f'<span>Olá, {session.get("usuario_nome", "")}</span><a href="/logout" class="nav-sair">🚪 Sair</a>'
+    esquerda = (f'<span>Olá, {session.get("usuario_nome", "")}</span>'
+                '<a href="/inicio" class="nav-sair">🌍 Ligas globais</a>'
+                '<a href="/logout" class="nav-sair">🚪 Sair</a>')
     direita = ""
     if banca_atual is not None:
         direita = f'<a href="/minhas-apostas" class="nav-banca">🏦 Banca: R$ {banca_atual:.2f}</a>'
@@ -2754,12 +2756,16 @@ def exigir_login():
     sem estar logado, redireciona pro login. Exceções: a própria página de
     login, e o proxy de escudo (é só uma imagem pública, sem dado
     pessoal)."""
-    rotas_livres = ("login", "api_consulta.consultar")
+    rotas_livres = ("login", "api_consulta.consultar", "inicio", "numeros_home")
     if request.endpoint in rotas_livres or (request.endpoint or "").startswith("escudo"):
         return
     if request.endpoint == "static":
         return
     if "usuario_id" not in session:
+        # 14/10/2026: quem abre o endereço principal sem login cai na página
+        # inicial pública (o planeta), não no login.
+        if request.endpoint == "index":
+            return redirect(url_for("inicio"))
         return redirect(url_for("login"))
 
 
@@ -2808,6 +2814,117 @@ def trocar_liga(chave):
     if chave in LIGAS_POR_CHAVE:
         session["liga"] = chave
     return redirect(_caminho_local_seguro(request.args.get("voltar")))
+
+
+# ---------- 14/10/2026: página inicial pública (planeta das ligas) ----------
+#
+# O HTML mora em paginas/inicio.html (gerado a partir do protótipo) e as
+# texturas do planeta em static/inicio/. A página é pública; o único dado
+# que o servidor injeta é se a pessoa está logada, para o clique num país ir
+# direto à liga (logado) ou ao login com ?next= (não logado).
+CAMINHO_PAGINA_INICIO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "paginas", "inicio.html")
+_pagina_inicio_cache = {"mtime": None, "html": None}
+
+
+def _ler_pagina_inicio():
+    mtime = os.path.getmtime(CAMINHO_PAGINA_INICIO)
+    if _pagina_inicio_cache["mtime"] != mtime:
+        with open(CAMINHO_PAGINA_INICIO, encoding="utf-8") as f:
+            _pagina_inicio_cache["html"] = f.read()
+        _pagina_inicio_cache["mtime"] = mtime
+    return _pagina_inicio_cache["html"]
+
+
+@app.route("/inicio")
+def inicio():
+    sessao = json.dumps({"logado": "usuario_id" in session})
+    html = _ler_pagina_inicio().replace("__SESSAO__", sessao, 1)
+    resposta = Response(html, mimetype="text/html")
+    resposta.headers["Cache-Control"] = "no-store"  # muda com o login
+    return resposta
+
+
+# Números da página inicial, contados no banco. Cache de 15 min por processo:
+# a página é pública e não deve gerar consulta a cada visita.
+NUMEROS_HOME_VALIDADE_S = 900
+_numeros_home_cache = {"quando": 0.0, "dados": None}
+_numeros_home_trava = threading.Lock()
+
+# (código do país na página, schema). Nomes fixos aqui, nunca vindos da URL.
+SCHEMAS_NUMEROS_HOME = (
+    ("BRA", "public"), ("ENG", "liga_premier"), ("ESP", "liga_laliga"),
+    ("ITA", "liga_seriea"), ("DEU", "liga_bundesliga"), ("FRA", "liga_ligue1"),
+)
+
+# Cada perspectiva (linha de `jogos`) é um time num jogo: somar por
+# nosso_time_id dá a tabela. Temporada atual = ano do último jogo com placar
+# (Brasileirão) ou a maior `temporada` (ligas). Jogo sem placar fica fora.
+SQL_LIDERES_HOME = """
+    SELECT t.nome,
+           SUM(CASE WHEN j.placar_corinthians > j.placar_adversario THEN 3
+                    WHEN j.placar_corinthians = j.placar_adversario THEN 1 ELSE 0 END) AS pts,
+           COUNT(*) AS jg
+    FROM {s}.jogos j
+    JOIN {s}.times t ON t.id = j.nosso_time_id
+    WHERE j.placar_corinthians IS NOT NULL AND j.placar_adversario IS NOT NULL AND {filtro}
+    GROUP BY t.id, t.nome
+    ORDER BY pts DESC, SUM(j.placar_corinthians - j.placar_adversario) DESC,
+             SUM(j.placar_corinthians) DESC, t.nome
+    LIMIT 5
+"""
+FILTRO_TEMPORADA_BRASILEIRAO = ("j.data_jogo >= date_trunc('year', (SELECT MAX(data_jogo) FROM public.jogos "
+                                "WHERE placar_corinthians IS NOT NULL))::date")
+FILTRO_TEMPORADA_LIGA = "j.temporada = (SELECT MAX(temporada) FROM {s}.jogos)"
+
+
+def _contar_numeros_home():
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        conn.set_session(readonly=True)
+        cur = conn.cursor()
+        jogos = 0
+        lideres = {}
+        for pais, s in SCHEMAS_NUMEROS_HOME:
+            # um jogo = duas linhas em `jogos`: conta por fixture_id_api
+            cur.execute(f"SELECT COUNT(DISTINCT fixture_id_api) FROM {s}.jogos WHERE placar_corinthians IS NOT NULL")
+            jogos += cur.fetchone()[0] or 0
+            filtro = FILTRO_TEMPORADA_BRASILEIRAO if s == "public" else FILTRO_TEMPORADA_LIGA.format(s=s)
+            cur.execute(SQL_LIDERES_HOME.format(s=s, filtro=filtro))
+            lideres[pais] = [[nome, int(pts), int(jg)] for nome, pts, jg in cur.fetchall()]
+        cur.execute("SELECT COUNT(*) FROM odds")
+        odds = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM historico_recomendacoes")
+        recomendacoes = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM multiplas_candidatas WHERE avaliada")
+        multiplas = cur.fetchone()[0]
+        cur.close()
+        conn.rollback()
+    finally:
+        conn.close()
+    return {
+        "atualizado": datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat(timespec="minutes"),
+        "jogos": int(jogos), "odds": int(odds),
+        "recomendacoes": int(recomendacoes), "multiplas": int(multiplas),
+        "lideres": lideres,
+    }
+
+
+@app.route("/api/numeros-home")
+def numeros_home():
+    agora = datetime.now(timezone.utc).timestamp()
+    with _numeros_home_trava:
+        if _numeros_home_cache["dados"] is None or agora - _numeros_home_cache["quando"] > NUMEROS_HOME_VALIDADE_S:
+            try:
+                _numeros_home_cache["dados"] = _contar_numeros_home()
+                _numeros_home_cache["quando"] = agora
+            except Exception as erro:  # a página tem os números fixos como reserva
+                print(f"[numeros-home] falhou: {erro!r}", file=sys.stderr)
+                if _numeros_home_cache["dados"] is None:
+                    return jsonify({"erro": "indisponivel"}), 503
+        dados = _numeros_home_cache["dados"]
+    resposta = jsonify(dados)
+    resposta.headers["Cache-Control"] = "public, max-age=300"
+    return resposta
 
 
 @app.context_processor
@@ -2970,13 +3087,16 @@ def login():
     session.permanent = True  # dura app.permanent_session_lifetime (90 dias)
     session["usuario_id"] = row[0]
     session["usuario_nome"] = row[1]
-    return redirect("/")
+    # 14/10/2026: a página inicial manda para o login com ?next= (ex.: a liga
+    # clicada no planeta). O form não tem action, então o POST mantém a query.
+    # Só aceita caminho do próprio site.
+    return redirect(_caminho_local_seguro(request.args.get("next")))
 
 
 @app.route("/logout")
 def logout():
     session.clear()
-    return redirect("/login")
+    return redirect("/inicio")
 
 
 @app.route("/salvar-aposta", methods=["POST"])
