@@ -525,6 +525,24 @@ dialog::backdrop{-webkit-backdrop-filter:none;backdrop-filter:none;background:rg
 /* medidor de quadros (?fps=1) */
 #medidor-fps{position:fixed;left:.5rem;top:.5rem;z-index:99;font:600 12px/1.2 ui-monospace,monospace;color:#0f0;background:rgba(0,0,0,.75);padding:.35rem .5rem;border-radius:.4rem;pointer-events:none;white-space:pre}
 
+/* ================= v13: largura de referência = seção "Ligas disponíveis" ================= */
+:root{--largura:70rem;--margem:clamp(1rem,6vw,10rem)}
+.secao{padding-left:max(var(--margem),env(safe-area-inset-left,0px));padding-right:max(var(--margem),env(safe-area-inset-right,0px))}
+.envolve{max-width:min(100%,var(--largura))}
+.como-palco{padding-left:var(--margem);padding-right:var(--margem)}
+.como-grade{max-width:var(--largura)}
+.pagina-corpo{max-width:min(100%,64rem)}
+/* como funciona: número grande proporcional à caixa, nada passa da borda */
+.vis{justify-content:safe center;overflow:hidden}
+.vis .grande{font-size:clamp(2.25rem,3.4vw,3.75rem)}
+.vis .grande small{font-size:.36em}
+.como-visual{height:min(52vh,25rem)}
+.como-palco{padding-top:clamp(7.5rem,17vh,11rem);padding-bottom:3rem}
+@media (max-width:900px){.como-palco{padding-top:6.5rem;padding-bottom:2.5rem}.como-visual{height:44vh}.vis{padding:1.125rem;gap:.625rem}}
+.como-passos h3{font-size:clamp(1.375rem,2vw,2rem)}
+.rodadas .chart{overflow:hidden}
+.rodadas .chart svg{display:block}
+
 /* ================= v7 ================= */
 .cartao-grande{font:inherit;color:inherit}
 .cartao-grande.ativo{border-style:solid;border-color:rgba(255,210,10,.45);cursor:pointer;transition:border-color .2s,transform .2s,box-shadow .2s}
@@ -833,14 +851,13 @@ html.trava{overflow:hidden}
             <div class="desc">Jogos de 6 ligas, desde 2022, com placar, gols, escanteios, cartões e escalação de cada um.</div>
           </div>
           <div class="vis" data-vis="1">
-            <div class="ex">Exemplo</div>
             <div class="ex">Exemplo ilustrativo</div>
-            <div class="grande">62%<small>dos jogos considerados</small></div>
+            <div class="grande">62%<small>dos jogos</small></div>
             <div class="bolinhas" id="bolinhas"></div>
             <div class="desc">Cada bolinha é um jogo do histórico; as acesas são as vezes em que a aposta teria dado certo.</div>
           </div>
           <div class="vis" data-vis="2">
-            <div class="ex">Exemplo</div>
+            <div class="ex">Exemplo ilustrativo</div>
             <div class="grande">57,6%<small>estimativa final</small></div>
             <div class="regua" style="--fim:57.6%">
               <div class="trilho-r"></div>
@@ -1397,21 +1414,30 @@ function tempoRolagem() {
     { r: "28", a: 37.9, p: 52.5, roi: -33.3, n: 404 },
     { r: "29", a: 40.3, p: 53.3, roi: -25.2, n: 372, sem: 1 }, { r: "30", a: 44.0, p: 60.7, roi: -30.6, n: 109, sem: 1 }
   ];
-  const W = 700, H = 300, m = { l: 40, r: 12, t: 16, b: 62 }, iw = W - m.l - m.r, ih = H - m.t - m.b, max = 70;
-  const y = v => m.t + ih - v / max * ih, passo = iw / D.length, bw = passo * .46;
-  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Acerto real e prometido por rodada">` +
+  // desenhado na largura real da caixa (1 unidade = 1px): o texto segue o tamanho da página, sem esticar
+  const caixaChart = document.getElementById("chart");
+  function desenhar() {
+  const u = Math.max(1, (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16) / 16);
+  const W = Math.max(320, Math.round(caixaChart.clientWidth || 700)), H = Math.round(300 * u);
+  const m = { l: 40 * u, r: 12 * u, t: 16 * u, b: 62 * u }, iw = W - m.l - m.r, ih = H - m.t - m.b, max = 70;
+  const y = v => m.t + ih - v / max * ih, passo = iw / D.length, bw = Math.min(passo * .46, 64 * u);
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Acerto real e prometido por rodada">` +
     `<defs><pattern id="hachura" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="rgba(255,255,255,.04)"/><rect width="3" height="6" fill="var(--azul)"/></pattern></defs>`;
-  [0, 20, 40, 60].forEach(v => { s += `<line class="eixo" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text class="rot" x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${v}%</text>`; });
+  [0, 20, 40, 60].forEach(v => { s += `<line class="eixo" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text class="rot" x="${m.l - 8 * u}" y="${y(v) + 4 * u}" text-anchor="end">${v}%</text>`; });
   D.forEach((d, i) => {
     const cx = m.l + passo * (i + .5), x = cx - bw / 2;
     s += `<rect class="barra-r${d.sem ? " sem" : ""}" style="transition-delay:${i * 90}ms" x="${x.toFixed(1)}" y="${y(d.a).toFixed(1)}" width="${bw.toFixed(1)}" height="${(m.t + ih - y(d.a)).toFixed(1)}" rx="4"><title>Rodada ${d.r}: ${d.a.toString().replace(".", ",")}% de acerto, ${d.p.toString().replace(".", ",")}% prometido, ${d.n} apostas</title></rect>`;
-    s += `<line class="prev" style="transition-delay:${400 + i * 90}ms" x1="${(x - 6).toFixed(1)}" x2="${(x + bw + 6).toFixed(1)}" y1="${y(d.p).toFixed(1)}" y2="${y(d.p).toFixed(1)}"/>`;
-    s += `<text class="rot-forte" x="${cx}" y="${H - m.b + 20}" text-anchor="middle">R${d.r}</text>`;
+    s += `<line class="prev" style="transition-delay:${400 + i * 90}ms" x1="${(x - 6 * u).toFixed(1)}" x2="${(x + bw + 6 * u).toFixed(1)}" y1="${y(d.p).toFixed(1)}" y2="${y(d.p).toFixed(1)}"/>`;
+    s += `<text class="rot-forte" x="${cx}" y="${H - m.b + 20 * u}" text-anchor="middle">R${d.r}</text>`;
     const roi = (d.roi > 0 ? "+" : "") + d.roi.toString().replace(".", ",") + "%";
-    s += `<text class="rot ${d.roi >= 0 ? "roi-pos" : "roi-neg"}" x="${cx}" y="${H - m.b + 38}" text-anchor="middle">${roi}</text>`;
-    s += `<text class="rot" x="${cx}" y="${H - m.b + 54}" text-anchor="middle">${d.a.toString().replace(".", ",")}%</text>`;
+    s += `<text class="rot ${d.roi >= 0 ? "roi-pos" : "roi-neg"}" x="${cx}" y="${H - m.b + 38 * u}" text-anchor="middle">${roi}</text>`;
+    s += `<text class="rot" x="${cx}" y="${H - m.b + 54 * u}" text-anchor="middle">${d.a.toString().replace(".", ",")}%</text>`;
   });
-  document.getElementById("chart").innerHTML = s + "</svg>";
+  caixaChart.innerHTML = s + "</svg>";
+  }
+  desenhar();
+  let larguraChart = caixaChart.clientWidth, esperaChart = 0;
+  addEventListener("resize", () => { clearTimeout(esperaChart); esperaChart = setTimeout(() => { if (caixaChart.clientWidth !== larguraChart) { larguraChart = caixaChart.clientWidth; desenhar(); } }, 150); });
   const ob = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add("visto"); ob.disconnect(); } }), { threshold: .35 });
   ob.observe(document.getElementById("rodadas"));
 })();
