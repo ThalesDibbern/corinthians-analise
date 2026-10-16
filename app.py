@@ -1706,6 +1706,220 @@ PAGINA = """
 """
 
 
+# REDESIGN (16/10/2026): pedaços do visual novo compartilhados pelas páginas
+# redesenhadas depois da de Recomendações. São cópias exatas do que está no
+# PAGINA (tokens/fundo, topo/ligas, script do fundo vivo); o PAGINA não foi
+# mexido, para não arriscar a página que já está no ar.
+CSS_VISUAL_NOVO = """
+        :root {
+            --noite: #01050f;
+            --linha: rgba(189, 191, 199, .22);
+            --linha-fraca: rgba(189, 191, 199, .12);
+            --texto: #f1f2f6;
+            --apagado: #aeb3c3;
+            --azul: #3f6fd1;
+            --azul-claro: #b4c8f2;
+            --ouro: #ffd20a;
+            --ouro-claro: #ffe066;
+            --cinza: #bdbfc7;
+            --cta-texto: #1d1600;
+            --verde: #5fd38d;
+            --vermelho: #ff7a7a;
+            --f-titulo: "Unbounded", "Arial Black", system-ui, sans-serif;
+            --f-corpo: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+            --f-dado: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+            --raio: 0.875rem;
+            --margem: clamp(1rem, 2.5vw, 3rem);
+            --degrau1: 90%;
+            --degrau2: 80%;
+            /* vidro sem backdrop-filter: sobre o degradê (já desfocado) fica
+               igual e não custa quadro (ver /inicio) */
+            --vidro: linear-gradient(140deg, rgba(255,255,255,.13), rgba(255,255,255,.035) 55%, rgba(255,255,255,.07)), rgba(4, 14, 38, .42);
+            --vidro-borda: rgba(255, 255, 255, .17);
+            --vidro-sombra: inset 0 1px 0 rgba(255,255,255,.25), inset 0 -1px 0 rgba(255,255,255,.04), 0 0.875rem 2.75rem -1rem rgba(0,0,0,.6);
+        }
+        * { box-sizing: border-box; }
+        *::before, *::after { box-sizing: border-box; }
+        html {
+            font-size: clamp(14px, calc(100vw / 112), 18px);
+            background: var(--noite);
+        }
+        body {
+            font-family: var(--f-corpo);
+            font-size: 0.9375rem;
+            line-height: 1.5;
+            background: transparent;
+            color: var(--texto);
+            width: calc(100% - 2 * var(--margem));
+            margin: 0 auto;
+            padding: 1rem 0 6rem;
+        }
+        a { color: var(--azul-claro); }
+        ::selection { background: rgba(255, 210, 10, .35); }
+        button:focus-visible, a:focus-visible { outline: 2px solid var(--azul-claro); outline-offset: 2px; }
+
+        /* ---------- fundo: o degradê vivo da /inicio ----------
+           WebGL a ~24 quadros por segundo, em resolução baixa (script no
+           fim da página). Sem WebGL, fica o degradê parado abaixo. */
+        .fundo {
+            position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none;
+            background:
+                radial-gradient(60vmax 45vmax at 8% -6%, rgba(63, 111, 209, .30), rgba(63, 111, 209, 0) 70%),
+                radial-gradient(55vmax 40vmax at 104% 18%, rgba(92, 74, 0, .55), rgba(92, 74, 0, 0) 70%),
+                radial-gradient(70vmax 50vmax at 70% 112%, rgba(6, 32, 79, .85), rgba(6, 32, 79, 0) 70%),
+                linear-gradient(180deg, #020a1f 0%, var(--noite) 60%);
+        }
+        #fundo-gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+        .grao {
+            position: absolute; inset: 0; opacity: .06;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+        }
+
+        /* ---------- topo: nome | links no centro | banca e Conta ---------- */
+        .topo {
+            display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 1rem;
+            margin: 0 0 1.25rem;
+        }
+        .topo-marca {
+            justify-self: start;
+            font-family: var(--f-titulo); font-weight: 700; font-size: 0.875rem; letter-spacing: -.01em;
+            color: var(--texto); text-decoration: none; white-space: nowrap;
+        }
+        /* 16/10/2026: "Zero" vira o logo desenhado pelo usuário - o desenho
+           recorta um degradê ouro -> azul (mesmas cores do brilho da /inicio) */
+        .logo-zero {
+            display: inline-block; height: 0.86em; aspect-ratio: 1928.53 / 369.92;
+            vertical-align: -0.04em; margin-left: 0.12em;
+            background: linear-gradient(100deg, #ffd20a 0%, #fff3b0 35%, #bdbfc7 65%, #7fa2ea 100%);
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='3.47 307.06 1928.53 369.92'%3E%3Cg fill='%23000'%3E%3Cpath d='M563.46,314.21l-293.13,266.25c-5.76,5.23-2.06,14.81,5.72,14.81h250.01c8.12,0,11.63,10.28,5.2,15.25l-82.69,63.89c-1.49,1.15-3.32,1.78-5.2,1.78H22c-7.78,0-11.48-9.57-5.73-14.81l284.32-258.81c5.75-5.24,2.05-14.81-5.73-14.81h-163.65c-7.78,0-11.48-9.58-5.72-14.81l68.31-62.07c1.56-1.42,3.59-2.21,5.7-2.21l361.38,-1.13c5.48,-0.02,6.64,2.98,2.59,6.66Z' transform='translate(-10 0)'/%3E%3Cpath d='M238.26,652.63l380.83-341.3c2.43-2.18,5.58-3.38,8.84-3.38h279.74c12.16,0,17.89,15,8.84,23.11l-43.83,39.28c-2.43,2.18-5.58,3.38-8.84,3.38h-206.71c-3.3,0-6.48,1.23-8.92,3.46l-48.78,44.47c-8.98,8.19-3.12,23.14,9.03,23.04l146.45-1.19c12.11-.1,17.99,14.76,9.1,22.97l-40.54,37.49c-2.45,2.26-5.66,3.52-8.99,3.52h-205.62c-3.28,0-6.44,1.22-8.88,3.42l-47.32,42.73c-9,8.13-3.25,23.08,8.88,23.08h146.16c12.15,0,17.89,14.99,8.85,23.11l-80.85,72.54c-2.43,2.18-5.58,3.39-8.85,3.39H247.1c-12.16,0-17.89-15-8.84-23.11Z'/%3E%3Cpath d='M1901.71,307.06l-404.11.29c-3.96,0-10.53,5.28-15.79,10.78l-362.08,326.91c-14.03,11.22-9.92,31.62,7.63,31.58l362.77-.81c3.95,0,52.41,2.59,55.57.07l366.99-333.87c14-11.22,6.55-34.95-10.98-34.95ZM1710.9,358.2h43.17l-496.68,217.3,126.27-101.01c94.36-75.48,209.2-116.29,327.24-116.29ZM1790.45,393.15l-144.2,115.57c-94.12,75.43-208.68,116.35-326.49,116.61l-21.56.05,495.02-234.95c-.81.96-1.72,1.88-2.77,2.72Z' transform='translate(12 0)'/%3E%3Cpath d='M1239.16,507.79l202.79-183.3c5.68-5.29,4.71-17.42-2.83-17.42l-447.04,1.67c-1.94,0-3.82.74-5.3,2.08l-384.98,350.66c-5.77,5.25-2.29,15.33,5.3,15.33h115.11c1.94,0,3.81-.74,5.29-2.08l178.91-162.72c1.48-1.34,3.35-2.08,5.29-2.08h66.31c2.44,0,4.75,1.17,6.3,3.18l123.71,160.52c1.55,2.01,3.86,3.18,6.3,3.18h128.81c7.12,0,10.82-9.05,5.99-14.63l-132-152.25h116.68c1.97,0,3.88-.76,5.36-2.14ZM977.69,423.26l43.55-46.49c1.53-1.63,3.61-2.55,5.77-2.55h207.61c7.45,0,11,9.79,5.49,15.15l-47.85,46.49c-1.5,1.46-3.46,2.27-5.49,2.27h-203.31c-7.27,0-10.91-9.38-5.77-14.87Z'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='3.47 307.06 1928.53 369.92'%3E%3Cg fill='%23000'%3E%3Cpath d='M563.46,314.21l-293.13,266.25c-5.76,5.23-2.06,14.81,5.72,14.81h250.01c8.12,0,11.63,10.28,5.2,15.25l-82.69,63.89c-1.49,1.15-3.32,1.78-5.2,1.78H22c-7.78,0-11.48-9.57-5.73-14.81l284.32-258.81c5.75-5.24,2.05-14.81-5.73-14.81h-163.65c-7.78,0-11.48-9.58-5.72-14.81l68.31-62.07c1.56-1.42,3.59-2.21,5.7-2.21l361.38,-1.13c5.48,-0.02,6.64,2.98,2.59,6.66Z' transform='translate(-10 0)'/%3E%3Cpath d='M238.26,652.63l380.83-341.3c2.43-2.18,5.58-3.38,8.84-3.38h279.74c12.16,0,17.89,15,8.84,23.11l-43.83,39.28c-2.43,2.18-5.58,3.38-8.84,3.38h-206.71c-3.3,0-6.48,1.23-8.92,3.46l-48.78,44.47c-8.98,8.19-3.12,23.14,9.03,23.04l146.45-1.19c12.11-.1,17.99,14.76,9.1,22.97l-40.54,37.49c-2.45,2.26-5.66,3.52-8.99,3.52h-205.62c-3.28,0-6.44,1.22-8.88,3.42l-47.32,42.73c-9,8.13-3.25,23.08,8.88,23.08h146.16c12.15,0,17.89,14.99,8.85,23.11l-80.85,72.54c-2.43,2.18-5.58,3.39-8.85,3.39H247.1c-12.16,0-17.89-15-8.84-23.11Z'/%3E%3Cpath d='M1901.71,307.06l-404.11.29c-3.96,0-10.53,5.28-15.79,10.78l-362.08,326.91c-14.03,11.22-9.92,31.62,7.63,31.58l362.77-.81c3.95,0,52.41,2.59,55.57.07l366.99-333.87c14-11.22,6.55-34.95-10.98-34.95ZM1710.9,358.2h43.17l-496.68,217.3,126.27-101.01c94.36-75.48,209.2-116.29,327.24-116.29ZM1790.45,393.15l-144.2,115.57c-94.12,75.43-208.68,116.35-326.49,116.61l-21.56.05,495.02-234.95c-.81.96-1.72,1.88-2.77,2.72Z' transform='translate(12 0)'/%3E%3Cpath d='M1239.16,507.79l202.79-183.3c5.68-5.29,4.71-17.42-2.83-17.42l-447.04,1.67c-1.94,0-3.82.74-5.3,2.08l-384.98,350.66c-5.77,5.25-2.29,15.33,5.3,15.33h115.11c1.94,0,3.81-.74,5.29-2.08l178.91-162.72c1.48-1.34,3.35-2.08,5.29-2.08h66.31c2.44,0,4.75,1.17,6.3,3.18l123.71,160.52c1.55,2.01,3.86,3.18,6.3,3.18h128.81c7.12,0,10.82-9.05,5.99-14.63l-132-152.25h116.68c1.97,0,3.88-.76,5.36-2.14ZM977.69,423.26l43.55-46.49c1.53-1.63,3.61-2.55,5.77-2.55h207.61c7.45,0,11,9.79,5.49,15.15l-47.85,46.49c-1.5,1.46-3.46,2.27-5.49,2.27h-203.31c-7.27,0-10.91-9.38-5.77-14.87Z'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
+        }
+        .topo-nav {
+            justify-self: center;
+            display: flex; align-items: center; gap: 0.125rem; padding: 0.25rem;
+            border-radius: 999px; min-width: 0;
+            background: var(--vidro); border: 1px solid var(--vidro-borda); box-shadow: var(--vidro-sombra);
+        }
+        .topo-link {
+            padding: 0.375rem 0.75rem; border-radius: 999px; white-space: nowrap;
+            color: var(--apagado); font-size: 0.8125rem; font-weight: 500; text-decoration: none;
+            transition: color .15s, background .15s;
+        }
+        .topo-link:hover { color: var(--texto); background: rgba(255, 255, 255, .06); }
+        .topo-link.topo-ativo { color: var(--ouro); background: rgba(255, 210, 10, .1); }
+        .topo-direita { justify-self: end; display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+        .topo-banca {
+            font-family: var(--f-dado); font-size: 0.6875rem; color: var(--ouro); text-decoration: none; white-space: nowrap;
+            padding: 0.375rem 0.625rem; border-radius: 999px; border: 1px solid rgba(255, 210, 10, .35);
+        }
+        .topo-banca:hover { border-color: var(--ouro); }
+        .topo-conta {
+            padding: 0.4375rem 0.9375rem; border-radius: 999px; white-space: nowrap;
+            color: var(--texto); font-size: 0.8125rem; font-weight: 600; text-decoration: none;
+            background: var(--vidro); border: 1px solid var(--vidro-borda); box-shadow: var(--vidro-sombra);
+            transition: border-color .15s;
+        }
+        .topo-conta:hover { border-color: var(--azul-claro); }
+
+        /* ---------- ligas ---------- */
+        .nav-ligas { max-width: none; width: var(--degrau1); gap: 0.5rem; margin: 0 auto 3rem; }
+        .liga-card {
+            background: var(--vidro); border: 1px solid var(--vidro-borda); border-radius: 0.625rem;
+            padding: 0.4375rem 0.5625rem; color: var(--cinza); gap: 0.5rem;
+        }
+        .liga-card:hover { border-color: var(--azul-claro); background: rgba(180, 200, 242, .08); }
+        .liga-card.liga-ativa { background: rgba(63, 111, 209, .22); border-color: rgba(180, 200, 242, .6); color: var(--texto); }
+        /* logo da liga num selo de vidro (mesmo selo da /inicio), sem fundo branco */
+        .liga-selo-logo {
+            width: 1.625rem; height: 1.625rem; flex-shrink: 0; border-radius: 0.5rem;
+            display: grid; place-items: center;
+            background: linear-gradient(140deg, rgba(255,255,255,.34), rgba(255,255,255,.16));
+            border: 1px solid rgba(255,255,255,.28); box-shadow: inset 0 1px 0 rgba(255,255,255,.35);
+        }
+        .liga-selo-logo img {
+            width: 1.125rem; height: 1.125rem; object-fit: contain; display: block;
+            filter: drop-shadow(0 0 1px rgba(255,255,255,.55)) drop-shadow(0 1px 3px rgba(0,0,0,.45));
+        }
+        .liga-nome { font-size: 0.75rem; font-weight: 600; }
+        .liga-selo { font-family: var(--f-dado); font-size: 0.5625rem; letter-spacing: .06em; text-transform: uppercase; color: var(--apagado); font-weight: 500; }
+        .liga-selo-ok { color: var(--ouro); }
+
+        @media (max-width: 1099px) {
+            .topo { grid-template-columns: 1fr auto; row-gap: 0.75rem; }
+            .topo-nav {
+                grid-column: 1 / -1; grid-row: 2;
+                max-width: 100%; overflow-x: auto; scrollbar-width: none; justify-content: flex-start;
+            }
+            .topo-nav::-webkit-scrollbar { display: none; }
+        }
+        @media (max-width: 420px) { .topo-banca { display: none; } }
+"""
+
+FONTES_VISUAL_NOVO = """    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Manrope:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+"""
+
+FUNDO_VISUAL_NOVO = """    <div class="fundo" aria-hidden="true"><canvas id="fundo-gl"></canvas><div class="grao"></div></div>
+"""
+
+SCRIPT_FUNDO_VIVO = """    <script>
+        // REDESIGN (15/10/2026): o degradê vivo da /inicio (paleta "b"):
+        // azul-prússia bem escuro com manchas de ouro escuro que passeiam.
+        // Desenhado em 28% da resolução (é um degradê, não precisa de mais)
+        // e a no máximo ~24 quadros por segundo; para com a aba escondida.
+        // Sem WebGL, ou com "reduzir movimento" no sistema, fica parado.
+        (function fundoVivo() {
+            const cv = document.getElementById("fundo-gl");
+            if (!cv) return;
+            let gl = null;
+            try { gl = cv.getContext("webgl", { antialias: false, alpha: false, powerPreference: "low-power" }); } catch (e) {}
+            if (!gl) { cv.remove(); return; }
+            const vs = "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
+            const fs = "precision mediump float;uniform vec2 r;uniform float t;uniform vec3 u0,u1,u2,u3,u4,u5;" +
+                "float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}" +
+                "float n(vec2 p){vec2 i=floor(p),f=fract(p);vec2 u=f*f*(3.-2.*f);" +
+                "return mix(mix(h(i),h(i+vec2(1,0)),u.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),u.x),u.y);}" +
+                "float fbm(vec2 p){float v=0.,a=.5;for(int k=0;k<4;k++){v+=a*n(p);p=p*2.02+vec2(1.7,9.2);a*=.5;}return v;}" +
+                "vec3 pal(float x){x=clamp(x,0.,1.);" +
+                "if(x<.3)return mix(u0,u1,x/.3);if(x<.58)return mix(u1,u2,(x-.3)/.28);" +
+                "if(x<.82)return mix(u2,u3,(x-.58)/.24);return mix(u3,u4,(x-.82)/.18);}" +
+                "void main(){vec2 uv=gl_FragCoord.xy/r;vec2 q=uv*vec2(r.x/r.y,1.);float s=t*.11;" +
+                "vec2 w=vec2(fbm(q*1.5+vec2(s,-s*.7)),fbm(q*1.5+vec2(-s*.8,s*.6)+3.1));" +
+                "float m=fbm(q*1.1+w*2.+vec2(s*.6,s*.35));float g=uv.x*.5+(1.-uv.y)*.62-.12;g=g*.8+(m-.5)*.85;" +
+                "vec3 col=pal(g);float m2=fbm(q*1.8-w*1.4+vec2(-s*.55,s*.45)+7.3);" +
+                "float zona=smoothstep(.15,1.05,uv.x*.7+(1.-uv.y)*.55);" +
+                "col=mix(col,u5,smoothstep(.48,.86,m2)*zona*.85);gl_FragColor=vec4(col,1.);}";
+            const sh = (tipo, src) => { const s = gl.createShader(tipo); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+            const pr = gl.createProgram();
+            gl.attachShader(pr, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(pr);
+            if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) { cv.remove(); return; }
+            gl.useProgram(pr);
+            const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+            const lp = gl.getAttribLocation(pr, "p"); gl.enableVertexAttribArray(lp); gl.vertexAttribPointer(lp, 2, gl.FLOAT, false, 0, 0);
+            const ur = gl.getUniformLocation(pr, "r"), ut = gl.getUniformLocation(pr, "t");
+            const CORES = [[.004, .012, .04], [.01, .05, .14], [.03, .12, .3], [.07, .22, .48], [.13, .32, .6], [.42, .3, .02]];
+            CORES.forEach((c, i) => gl.uniform3f(gl.getUniformLocation(pr, "u" + i), c[0], c[1], c[2]));
+            const reduz = matchMedia("(prefers-reduced-motion: reduce)").matches;
+            const ESCALA = .28;
+            const desenha = s => { gl.uniform1f(ut, s); gl.drawArrays(gl.TRIANGLES, 0, 3); };
+            function medir() {
+                cv.width = Math.max(2, Math.round(innerWidth * ESCALA)); cv.height = Math.max(2, Math.round(innerHeight * ESCALA));
+                gl.viewport(0, 0, cv.width, cv.height); gl.uniform2f(ur, cv.width, cv.height);
+            }
+            medir(); addEventListener("resize", () => { medir(); if (reduz) desenha(40); });
+            const t0 = performance.now(); let ult = 0;
+            function quadro(agora) {
+                if (!document.hidden && agora - ult > 41) { ult = agora; desenha((agora - t0) / 1000 + 40); }
+                requestAnimationFrame(quadro);
+            }
+            if (reduz) desenha(40); else requestAnimationFrame(quadro);
+        })();
+    </script>
+"""
+
+
 from combinacoes import (
     MERCADOS_JOGO_INTEIRO, deduplicar_mercados_jogo_inteiro, buscar_recomendacoes,
     LARGURA_MINIMA_FAIXA, LIMITE_POOL_PARA_5_PERNAS, LIMITE_POOL_PARA_4_PERNAS,
@@ -6172,126 +6386,151 @@ PAGINA_TIMES = """
     <link rel="apple-touch-icon" href="/static/marca/apple-touch-icon.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Estatísticas de Times - Achismo Zero</title>
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-            background: #0d1117; color: #e6edf3; max-width: 1500px;
-            margin: 0 auto; padding: 32px 24px 80px;
-        }
-        h1 { font-size: 1.5rem; margin: 0 0 4px; text-align: center; }
-        .subtitulo { color: #8b949e; margin: 0 0 16px; font-size: 0.88rem; text-align: center; }
-        .vazio {
-            text-align: center; color: #8b949e; padding: 24px; margin-top: 10px;
-            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.85rem;
-        }
-        .titulo-coluna { font-size: 1.05rem; font-weight: 700; margin: 0 0 14px; text-align: center; }
-
-        /* NOVO (Correlação entre estatísticas, só exibição) */
-        .cartao-correlacao {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 18px 20px; margin-top: 20px;
-        }
-        .correlacao-aviso { font-size: 0.8rem; color: #8b949e; margin: 0 0 14px; }
-        .correlacao-grid {
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
-        }
-        @media (max-width: 1000px) {
-            .correlacao-grid { grid-template-columns: 1fr; }
-        }
-        .correlacao-item {
-            background: #0d1117; border: 1px solid #21262d; border-radius: 10px; padding: 12px 14px;
-        }
-        .correlacao-titulo { font-size: 0.88rem; font-weight: 700; margin-bottom: 8px; }
-        .correlacao-linha { font-size: 0.8rem; color: #c9d1d9; margin-bottom: 4px; }
-        .correlacao-linha .acima { color: #f85149; }
-        .correlacao-linha .abaixo { color: #3fb950; }
-        .correlacao-detalhe { font-size: 0.74rem; color: #8b949e; margin-top: 6px; }
-
-        /* layout de 3 colunas - usa a largura toda da página, não só o meio */
-        .grid-times {
-            display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 22px; align-items: start; margin-top: 24px;
-        }
-        @media (max-width: 1000px) {
-            .grid-times { grid-template-columns: 1fr; }
-        }
-
-        /* coluna 1: tabela de classificação */
-        .tabela-scroll { overflow-x: auto; border: 1px solid #30363d; border-radius: 12px; background: #161b22; }
-        .tabela-classificacao { width: 100%; border-collapse: collapse; font-size: 0.78rem; white-space: nowrap; }
-        .tabela-classificacao th {
-            text-align: center; padding: 10px 8px; color: #8b949e; font-weight: 600;
-            border-bottom: 1px solid #30363d; position: sticky; top: 0; background: #161b22;
-        }
-        .tabela-classificacao td { text-align: center; padding: 8px; border-bottom: 1px solid #21262d; }
-        .tabela-classificacao th:nth-child(2), .tabela-classificacao td:nth-child(2) { text-align: left; }
-        .tabela-classificacao tr:last-child td { border-bottom: none; }
-        .tabela-classificacao tr:hover td { background: #1c2531; }
-        .pos-cel { font-weight: 700; color: #8b949e; }
-        .time-cel { display: flex; align-items: center; gap: 8px; font-weight: 600; }
-        .escudo-mini { width: 20px; height: 20px; object-fit: contain; flex-shrink: 0; }
-        .pts-cel { font-weight: 700; }
-        .forma-cel { display: flex; gap: 3px; justify-content: center; }
-        .bola-forma {
-            width: 18px; height: 18px; border-radius: 50%; display: inline-flex;
-            align-items: center; justify-content: center; font-size: 0.62rem; font-weight: 700; color: white;
-        }
-        .bola-v { background: #238636; }
-        .bola-e { background: #6e7681; }
-        .bola-d { background: #da3633; }
-
-        /* coluna 2: busca + lista de clubes */
-        .busca {
-            width: 100%; padding: 10px 14px; margin-bottom: 14px;
-            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
-            border-radius: 8px; font-size: 0.9rem;
-        }
-        .clube-btn {
-            display: flex; align-items: center; gap: 12px;
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 14px 20px; margin-bottom: 12px; text-decoration: none;
-            color: #e6edf3; transition: border-color 0.15s;
-        }
-        .clube-btn:hover { border-color: #58a6ff; }
-        .clube-selo {
-            width: 40px; height: 40px; border-radius: 50%;
-            background: transparent;
-            flex-shrink: 0; object-fit: contain;
-        }
-        .clube-nome { font-weight: 700; font-size: 1rem; }
-        .clube-sub { color: #8b949e; font-size: 0.78rem; }
-
-        /* coluna 3: líderes de estatísticas */
-        .lider-card {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 16px; margin-bottom: 16px;
-        }
-        .lider-titulo {
-            display: inline-block; padding: 4px 14px; border-radius: 999px;
-            font-size: 0.78rem; font-weight: 700; margin-bottom: 12px;
-        }
-        .lider-cor-0 { background: #9e6a0322; color: #d29922; }
-        .lider-cor-1 { background: #a371f722; color: #a371f7; }
-        .lider-cor-2 { background: #39c5cf22; color: #39c5cf; }
-        .lider-cor-3 { background: #3fb95022; color: #3fb950; }
-        .lider-cor-4 { background: #f8514922; color: #f85149; }
-        .lider-cor-5 { background: #db61a222; color: #db61a2; }
-        .tabela-lider { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-        .tabela-lider th { text-align: left; color: #8b949e; font-weight: 600; padding: 4px 6px; }
-        .tabela-lider th:not(:first-child), .tabela-lider td:not(:first-child) { text-align: right; }
-        .tabela-lider td { padding: 6px; font-weight: 600; border-top: 1px solid #21262d; }
-        .vazio-pequeno { color: #8b949e; font-size: 0.8rem; font-style: italic; }
+    <title>Times - Achismo Zero</title>
+""" + FONTES_VISUAL_NOVO + """    <style>
+        /* REDESIGN (16/10/2026): página de Times no visual da de Recomendações
+           (paleta, fontes, vidro, fundo vivo, topo e ligas vêm das constantes
+           compartilhadas). Os dados e o comportamento são os de antes: tabela,
+           busca de clubes, líderes e correlações; o redirecionamento para o
+           último time visto continua igual.
+           Layout: título; tabela (esquerda) + clubes (direita); líderes em
+           seis quadros; correlações no fim. Largura do conteúdo = degrau 1. */
         """ + NAV_CSS + """
+""" + CSS_VISUAL_NOVO + """
+        .conteudo { width: var(--degrau1); margin: 0 auto; }
+        .cabeca { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin: 0 0 1.5rem; }
+        .cabeca h1 {
+            margin: 0; font-family: var(--f-corpo); font-weight: 300; font-size: clamp(1.75rem, 2.6vw, 2.5rem);
+            letter-spacing: -.03em; line-height: 1;
+        }
+        .cabeca p { margin: 0.375rem 0 0; color: var(--apagado); font-size: 0.8125rem; max-width: 40rem; }
+        .rotulo {
+            font-family: var(--f-dado); font-size: 0.625rem; letter-spacing: .08em; text-transform: uppercase;
+            color: var(--apagado);
+        }
+        .secao-titulo {
+            margin: 0 0 0.875rem; font-family: var(--f-corpo); font-weight: 300;
+            font-size: clamp(1.125rem, 1.5vw, 1.4375rem); letter-spacing: -.025em; line-height: 1.1;
+        }
+        .vidro {
+            background: var(--vidro); border: 1px solid var(--vidro-borda); box-shadow: var(--vidro-sombra);
+            border-radius: var(--raio);
+        }
+        .vazio {
+            text-align: center; color: var(--apagado); padding: 2rem 1.5rem; font-size: 0.8125rem;
+            background: rgba(3, 12, 32, .4); border: 1px dashed var(--linha); border-radius: var(--raio);
+        }
+
+        /* ---------- tabela + clubes ---------- */
+        .grade-topo { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 2rem; align-items: start; margin-bottom: 3.5rem; }
+        .tabela-caixa { overflow-x: auto; padding: 0.375rem 0.25rem; }
+        .classificacao { width: 100%; border-collapse: collapse; font-size: 0.8125rem; white-space: nowrap; }
+        .classificacao th {
+            font-family: var(--f-dado); font-weight: 500; font-size: 0.625rem; letter-spacing: .06em; text-transform: uppercase;
+            color: var(--apagado); text-align: right; padding: 0.5rem 0.5rem 0.625rem; border-bottom: 1px solid var(--linha);
+        }
+        .classificacao td { text-align: right; padding: 0.4375rem 0.5rem; border-bottom: 1px solid var(--linha-fraca); font-family: var(--f-dado); font-variant-numeric: tabular-nums; color: var(--apagado); }
+        .classificacao tr:last-child td { border-bottom: none; }
+        .classificacao tbody tr { transition: background .15s; }
+        .classificacao tbody tr:hover { background: rgba(255, 255, 255, .04); }
+        .classificacao th.esq, .classificacao td.esq { text-align: left; }
+        .classificacao .c-pos { width: 2.25rem; text-align: left; position: relative; padding-left: 0.875rem; color: var(--texto); }
+        /* marca da zona: ouro nos 4 primeiros, cinza-azulado nos 4 últimos */
+        .classificacao .c-pos::before {
+            content: ""; position: absolute; left: 0.25rem; top: 0.5rem; bottom: 0.5rem; width: 3px; border-radius: 2px; background: transparent;
+        }
+        .zona-topo .c-pos::before { background: var(--ouro); }
+        .zona-baixo .c-pos::before { background: #6b7488; }
+        .classificacao .c-time { font-family: var(--f-corpo); font-weight: 600; color: var(--texto); }
+        .classificacao .c-time a { color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 0.5rem; }
+        .classificacao .c-time a:hover { color: var(--azul-claro); }
+        .classificacao .c-pts { color: var(--ouro); font-weight: 600; }
+        .escudo { width: 1.25rem; height: 1.25rem; object-fit: contain; flex-shrink: 0; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+        .forma { display: inline-flex; gap: 0.1875rem; }
+        .forma i {
+            font-style: normal; width: 1.125rem; height: 1.125rem; border-radius: 0.3125rem; display: inline-grid; place-items: center;
+            font-family: var(--f-dado); font-size: 0.5625rem; font-weight: 600;
+        }
+        .forma .v { background: var(--ouro); color: var(--cta-texto); }
+        .forma .e { background: rgba(189, 191, 199, .22); color: var(--texto); }
+        .forma .d { border: 1px solid rgba(180, 200, 242, .35); color: var(--apagado); }
+        .legenda { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.625rem; font-size: 0.6875rem; color: var(--apagado); }
+        .legenda span { display: inline-flex; align-items: center; gap: 0.375rem; }
+        .legenda b { width: 3px; height: 0.75rem; border-radius: 2px; display: inline-block; }
+
+        .busca {
+            width: 100%; margin: 0 0 0.875rem; padding: 0.5625rem 0.875rem;
+            background: rgba(1, 5, 15, .55); border: 1px solid var(--linha); color: var(--texto);
+            border-radius: 999px; font-family: var(--f-corpo); font-size: 0.8125rem;
+            transition: border-color .15s, box-shadow .15s;
+        }
+        .busca::placeholder { color: #7d849c; }
+        .busca:focus { outline: none; border-color: var(--azul-claro); box-shadow: 0 0 0 3px rgba(180, 200, 242, .18); }
+        .clubes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+        .clube {
+            display: flex; align-items: center; gap: 0.625rem; min-width: 0;
+            padding: 0.625rem 0.75rem; border-radius: 0.75rem; text-decoration: none; color: var(--texto);
+            background: var(--vidro); border: 1px solid var(--vidro-borda);
+            transition: border-color .15s, background .15s;
+        }
+        .clube:hover { border-color: var(--azul-claro); background: rgba(180, 200, 242, .08); }
+        .clube .escudo { width: 1.75rem; height: 1.75rem; }
+        .clube-sem-escudo { width: 1.75rem; height: 1.75rem; flex-shrink: 0; border-radius: 50%; background: rgba(255,255,255,.08); }
+        .clube-nome { font-size: 0.8125rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .clube-seta { margin-left: auto; color: var(--apagado); font-size: 0.75rem; transition: color .15s, transform .15s; }
+        .clube:hover .clube-seta { color: var(--azul-claro); transform: translateX(2px); }
+
+        /* ---------- líderes ---------- */
+        .lideres { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.75rem; margin-bottom: 3.5rem; }
+        .lider { padding: 0.875rem 1rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+        .lider-valor { font-family: var(--f-dado); font-weight: 500; font-size: 1.75rem; line-height: 1; color: var(--texto); font-variant-numeric: tabular-nums; }
+        .lider-valor small { font-family: var(--f-corpo); font-size: 0.6875rem; font-weight: 400; color: var(--apagado); margin-left: 0.25rem; }
+        .lider-time { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; font-weight: 600; min-width: 0; }
+        .lider-time span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .lider-recente { font-size: 0.6875rem; color: var(--apagado); border-top: 1px solid var(--linha-fraca); padding-top: 0.5rem; margin-top: auto; }
+        .lider-recente b { font-family: var(--f-dado); font-weight: 500; color: var(--ouro); }
+
+        /* ---------- correlações ---------- */
+        .correl-intro { color: var(--apagado); font-size: 0.75rem; line-height: 1.6; max-width: 62rem; margin: -0.25rem 0 1rem; }
+        .correl-intro b { color: var(--texto); font-weight: 600; }
+        .correl-grade { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; }
+        .correl { padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+        .correl-titulo { font-size: 0.875rem; font-weight: 600; line-height: 1.35; }
+        .correl-titulo em { font-style: normal; color: var(--apagado); font-weight: 400; margin: 0 0.25rem; }
+        .correl-tipo { align-self: flex-start; }
+        .barra-linha { display: grid; grid-template-columns: 4.25rem 1fr auto; align-items: center; gap: 0.5rem; font-size: 0.6875rem; color: var(--apagado); }
+        .barra { height: 0.5rem; border-radius: 999px; background: rgba(255,255,255,.06); overflow: hidden; }
+        .barra b { display: block; height: 100%; border-radius: 999px; }
+        .barra-acima b { background: var(--ouro); }
+        .barra-abaixo b { background: var(--azul-claro); }
+        .barra-linha .num { font-family: var(--f-dado); color: var(--texto); font-variant-numeric: tabular-nums; }
+        .correl-pe { font-size: 0.6875rem; color: var(--apagado); margin-top: auto; }
+        .correl-pe b { font-family: var(--f-dado); font-weight: 500; color: var(--texto); }
+
+        @media (max-width: 1280px) {
+            .lideres { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .correl-grade { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (max-width: 1099px) {
+            :root { --degrau1: 100%; --degrau2: 100%; }
+            .grade-topo { grid-template-columns: minmax(0, 1fr); }
+            .clubes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
+        @media (max-width: 640px) {
+            .lideres, .correl-grade { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .clubes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (max-width: 420px) {
+            .lideres, .correl-grade { grid-template-columns: 1fr; }
+        }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
     </style>
 </head>
 <body>
-    <h1>🏟️ Estatísticas de Times</h1>
-    <p class="subtitulo">Tabela oficial do Brasileirão, estatísticas por clube e líderes entre os times rastreados
-        (não depende de nenhuma odd disponível na casa de apostas)</p>
-    {{ nav_html|safe }}
+""" + FUNDO_VISUAL_NOVO + """    {{ nav_html|safe }}
     <script>
-        // NOVO: mesma lógica de /jogadores, mas pro time - ver comentário lá
+        // mesma lógica de /jogadores: volta para o último time visto, a não ser
+        // que a página tenha sido pedida com ?geral=1
         if (!window.location.search.includes('geral=1')) {
             try {
                 const timeId = localStorage.getItem('ultimo_time_id');
@@ -6300,179 +6539,166 @@ PAGINA_TIMES = """
         }
     </script>
 
-    {% if correlacoes %}
-    <div class="cartao-correlacao">
-        <div class="titulo-coluna" style="margin-bottom: 8px;">🔗 Correlação entre estatísticas (times rastreados)</div>
-        <p class="correlacao-aviso">
-            Dentro do MESMO jogo, como uma estatística tende a se mover junto com outra - "acima/abaixo da média"
-            se refere ao total do jogo (mandante + visitante somados). <b>Dois destes pares JÁ afetam as
-            recomendações</b> (chutes → escanteios entra no mercado de Escanteios Total do Jogo; faltas → cartões
-            entra no de Cartões Total do Jogo): o sistema estima quanto de chute/falta esse confronto tende a
-            produzir somando a média histórica dos dois times, e aplica o efeito correspondente. O par
-            desarmes → faltas continua só informativo, porque não existe mercado de "Faltas Total do Jogo" pra
-            apostar.
-        </p>
-        <div class="correlacao-grid">
-            {% for c in correlacoes %}
-            <div class="correlacao-item">
-                <div class="correlacao-titulo">{{ c.titulo_a }} → {{ c.titulo_b }}</div>
-                <div class="correlacao-linha">
-                    Quando {{ c.titulo_a|lower }} fica <b>acima</b> da média ({{ c.media_a }}/jogo):
-                    {{ c.titulo_b|lower }} médio é
-                    <b class="{{ 'acima' if c.sobe_junto else 'abaixo' }}">{{ c.valor_acima }}/jogo</b>
-                </div>
-                <div class="correlacao-linha">
-                    Quando fica <b>abaixo</b>: {{ c.titulo_b|lower }} médio é
-                    <b class="{{ 'abaixo' if c.sobe_junto else 'acima' }}">{{ c.valor_abaixo }}/jogo</b>
-                </div>
-                <div class="correlacao-detalhe">{{ c.jogos_total }} jogo(s) analisados</div>
+    <main class="conteudo">
+        <div class="cabeca">
+            <div>
+                <h1>Times</h1>
+                <p>Tabela do Brasileirão, estatísticas por clube e líderes entre os times rastreados. Nada aqui depende das odds da casa.</p>
             </div>
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
-    {% if correlacoes_categoria %}
-    <div class="cartao-correlacao" style="margin-top: 16px;">
-        <div class="titulo-coluna" style="margin-bottom: 8px;">🧩 Correlação entre categorias de jogador (times rastreados)</div>
-        <p class="correlacao-aviso">
-            Cruza a estatística de um GRUPO de jogadores (por posição - Goleiro/Defensor/Meio-campista/Atacante,
-            a granularidade máxima disponível) com a de outro grupo, dos dois times somados, no mesmo jogo.
-            <b>Informativo por enquanto, não afeta nenhuma recomendação.</b>
-        </p>
-        <div class="correlacao-grid">
-            {% for c in correlacoes_categoria %}
-            <div class="correlacao-item">
-                <div class="correlacao-titulo">{{ c.titulo_a }} → {{ c.titulo_b }}</div>
-                <div class="correlacao-linha">
-                    Quando {{ c.titulo_a|lower }} fica <b>acima</b> da média ({{ c.media_a }}/jogo):
-                    {{ c.titulo_b|lower }} médio é
-                    <b class="{{ 'acima' if c.sobe_junto else 'abaixo' }}">{{ c.valor_acima }}/jogo</b>
-                </div>
-                <div class="correlacao-linha">
-                    Quando fica <b>abaixo</b>: {{ c.titulo_b|lower }} médio é
-                    <b class="{{ 'abaixo' if c.sobe_junto else 'acima' }}">{{ c.valor_abaixo }}/jogo</b>
-                </div>
-                <div class="correlacao-detalhe">{{ c.jogos_total }} jogo(s) analisados</div>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
-    <div class="grid-times">
-        <div class="coluna-tabela">
-            <div class="titulo-coluna">Tabela do Brasileirão</div>
-            {% if tabela %}
-            <div class="tabela-scroll">
-                <table class="tabela-classificacao">
-                    <thead>
-                        <tr>
-                            <th>#</th><th>Clube</th><th>Pts</th><th>PJ</th><th>VIT</th><th>E</th><th>DER</th>
-                            <th>GM</th><th>GC</th><th>SG</th><th>Últimas 5</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for l in tabela %}
-                        <tr>
-                            <td class="pos-cel">{{ l.posicao }}</td>
-                            <td class="time-cel">
-                                <img src="/escudo/{{ l.team_id }}.png" class="escudo-mini" onerror="this.style.display='none'">
-                                {{ l.nome }}
-                            </td>
-                            <td class="pts-cel">{{ l.pontos }}</td>
-                            <td>{{ l.jogos }}</td>
-                            <td>{{ l.vitorias }}</td>
-                            <td>{{ l.empates }}</td>
-                            <td>{{ l.derrotas }}</td>
-                            <td>{{ l.gols_pro }}</td>
-                            <td>{{ l.gols_contra }}</td>
-                            <td>{{ l.saldo }}</td>
-                            <td>
-                                {% if l.forma %}
-                                <div class="forma-cel">
-                                    {% for r in l.forma %}
-                                    <span class="bola-forma bola-{{ 'v' if r == 'W' else ('e' if r == 'D' else 'd') }}">{{ '✓' if r == 'W' else ('–' if r == 'D' else '✕') }}</span>
-                                    {% endfor %}
-                                </div>
-                                {% else %}
-                                <span style="color:#8b949e; font-size:0.75rem;" title="A API-Football não mandou esse dado pra esse time">—</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="vazio">Não foi possível carregar a tabela agora - tenta de novo em alguns minutos.</div>
-            {% endif %}
         </div>
 
-        <div class="coluna-lista">
-            <input type="text" class="busca" id="busca-time" placeholder="Buscar por time (ex: Corinthians)..." onkeyup="filtrarTimes()">
-            <div id="lista-times">
-            {% if clubes %}
-                {% for c in clubes %}
-                <a href="/time/{{ c.id }}" class="clube-btn item-time">
-                    {% if c.escudo_url %}
-                    <img src="{{ c.escudo_url }}" alt="{{ c.nome }}" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
-                    {% else %}
-                    <div class="clube-selo"></div>
-                    {% endif %}
-                    <div>
-                        <div class="clube-nome">{{ c.nome }}</div>
-                        <div class="clube-sub">Ver estatísticas do time →</div>
-                    </div>
-                </a>
-                {% endfor %}
-            {% else %}
-                <div class="vazio">Nenhum clube rastreado ainda.</div>
-            {% endif %}
-            </div>
-            <div class="vazio" id="nenhum-resultado-time" style="display:none;">Nenhum time rastreado encontrado com esse nome.</div>
-        </div>
-
-        <div class="coluna-lideres">
-            <div class="titulo-coluna">Líderes de Estatísticas (times rastreados)</div>
-            {% for l in lideres %}
-            <div class="lider-card">
-                <div class="lider-titulo lider-cor-{{ loop.index0 % 6 }}">{{ l.titulo }}</div>
-                {% if l.time_nome %}
-                <table class="tabela-lider">
-                    <thead>
-                        <tr><th>Time</th><th>Média últimos 5</th><th>Média Total</th></tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>{{ l.time_nome }}</td>
-                            <td>{{ l.media_5 if l.media_5 is not none else "-" }}</td>
-                            <td>{{ l.media_total }}</td>
-                        </tr>
-                    </tbody>
-                </table>
+        <div class="grade-topo">
+            <section aria-labelledby="t-tabela">
+                <h2 class="secao-titulo" id="t-tabela">Tabela do Brasileirão</h2>
+                {% if tabela %}
+                <div class="vidro tabela-caixa">
+                    <table class="classificacao">
+                        <thead>
+                            <tr>
+                                <th class="esq">#</th><th class="esq">Clube</th><th>Pts</th><th>J</th><th>V</th><th>E</th><th>D</th>
+                                <th>GP</th><th>GC</th><th>SG</th><th>Últimos 5</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% set total = tabela|length %}
+                            {% for l in tabela %}
+                            {% set clube = (clubes|selectattr('escudo_url', 'equalto', '/escudo/' ~ l.team_id ~ '.png')|list|first) if clubes else none %}
+                            <tr class="{{ 'zona-topo' if l.posicao <= 4 else ('zona-baixo' if l.posicao > total - 4 else '') }}">
+                                <td class="c-pos">{{ l.posicao }}</td>
+                                <td class="esq c-time">
+                                    {% if clube %}<a href="/time/{{ clube.id }}">{% else %}<a>{% endif %}
+                                        <img src="/escudo/{{ l.team_id }}.png" class="escudo" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+                                        {{ l.nome }}
+                                    </a>
+                                </td>
+                                <td class="c-pts">{{ l.pontos }}</td>
+                                <td>{{ l.jogos }}</td>
+                                <td>{{ l.vitorias }}</td>
+                                <td>{{ l.empates }}</td>
+                                <td>{{ l.derrotas }}</td>
+                                <td>{{ l.gols_pro }}</td>
+                                <td>{{ l.gols_contra }}</td>
+                                <td>{{ ('+' ~ l.saldo) if l.saldo > 0 else l.saldo }}</td>
+                                <td>
+                                    {% if l.forma %}
+                                    <span class="forma" aria-label="Últimos 5 jogos">
+                                        {% for r in l.forma %}<i class="{{ 'v' if r == 'W' else ('e' if r == 'D' else 'd') }}" title="{{ 'Vitória' if r == 'W' else ('Empate' if r == 'D' else 'Derrota') }}">{{ 'V' if r == 'W' else ('E' if r == 'D' else 'D') }}</i>{% endfor %}
+                                    </span>
+                                    {% else %}
+                                    <span title="A API-Football não mandou esse dado para esse time">—</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="legenda">
+                    <span><b style="background: var(--ouro)"></b>4 primeiros</span>
+                    <span><b style="background: #6b7488"></b>4 últimos (rebaixamento)</span>
+                </div>
                 {% else %}
-                <div class="vazio-pequeno">Ainda não há dados suficientes pra essa categoria.</div>
+                <div class="vazio">Não foi possível carregar a tabela agora. Tente de novo em alguns minutos.</div>
                 {% endif %}
-            </div>
-            {% endfor %}
+            </section>
+
+            <section aria-labelledby="t-clubes">
+                <h2 class="secao-titulo" id="t-clubes">Clubes</h2>
+                <input type="search" class="busca" id="busca-time" placeholder="Buscar time" aria-label="Buscar time" oninput="filtrarTimes()">
+                <div class="clubes" id="lista-times">
+                {% if clubes %}
+                    {% for c in clubes %}
+                    <a href="/time/{{ c.id }}" class="clube item-time">
+                        {% if c.escudo_url %}
+                        <img src="{{ c.escudo_url }}" alt="" class="escudo" loading="lazy" onerror="this.outerHTML='<span class=&quot;clube-sem-escudo&quot;></span>'">
+                        {% else %}
+                        <span class="clube-sem-escudo"></span>
+                        {% endif %}
+                        <span class="clube-nome">{{ c.nome }}</span>
+                        <span class="clube-seta" aria-hidden="true">→</span>
+                    </a>
+                    {% endfor %}
+                {% endif %}
+                </div>
+                {% if not clubes %}<div class="vazio">Nenhum clube rastreado ainda.</div>{% endif %}
+                <div class="vazio" id="nenhum-resultado-time" hidden>Nenhum time encontrado com esse nome.</div>
+            </section>
         </div>
-    </div>
+
+        <section aria-labelledby="t-lideres">
+            <h2 class="secao-titulo" id="t-lideres">Líderes por estatística</h2>
+            <div class="lideres">
+                {% for l in lideres %}
+                {% set clube = (clubes|selectattr('id', 'equalto', l.time_id)|list|first) if (clubes and l.time_id) else none %}
+                <div class="vidro lider">
+                    <div class="rotulo">{{ l.titulo }}</div>
+                    {% if l.time_nome %}
+                    <div class="lider-valor">{{ ('%.2f'|format(l.media_total)).replace('.', ',') }}<small>por jogo</small></div>
+                    <div class="lider-time">
+                        {% if clube and clube.escudo_url %}<img src="{{ clube.escudo_url }}" class="escudo" alt="" loading="lazy">{% endif %}
+                        <span>{{ l.time_nome }}</span>
+                    </div>
+                    <div class="lider-recente">Últimos 5: <b>{{ ('%.1f'|format(l.media_5)).replace('.', ',') if l.media_5 is not none else '—' }}</b></div>
+                    {% else %}
+                    <div class="lider-recente">Ainda não há dados suficientes.</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        {% if correlacoes or correlacoes_categoria %}
+        <section aria-labelledby="t-correl">
+            <h2 class="secao-titulo" id="t-correl">Correlações</h2>
+            <p class="correl-intro">
+                No mesmo jogo, como uma estatística se move junto com outra. "Acima" e "abaixo" se referem à média do total do jogo
+                (os dois times somados). <b>Chutes → escanteios e faltas → cartões já entram nas recomendações</b> (escanteios e
+                cartões totais do jogo); desarmes → faltas e a correlação entre posições são só informativas.
+            </p>
+            <div class="correl-grade">
+                {% for grupo, rotulo in [(correlacoes, 'Entre estatísticas'), (correlacoes_categoria, 'Entre posições')] %}
+                {% for c in grupo or [] %}
+                {% set maior = [c.valor_acima, c.valor_abaixo]|max %}
+                <div class="vidro correl">
+                    <span class="rotulo correl-tipo">{{ rotulo }}</span>
+                    <div class="correl-titulo">{{ c.titulo_a }}<em>→</em>{{ c.titulo_b }}</div>
+                    <div>
+                        <div class="barra-linha">
+                            <span>Acima</span>
+                            <span class="barra barra-acima"><b style="width: {{ (100 * c.valor_acima / maior)|round(1) if maior else 0 }}%"></b></span>
+                            <span class="num">{{ ('%.2f'|format(c.valor_acima)).replace('.', ',') }}</span>
+                        </div>
+                        <div class="barra-linha" style="margin-top: 0.375rem">
+                            <span>Abaixo</span>
+                            <span class="barra barra-abaixo"><b style="width: {{ (100 * c.valor_abaixo / maior)|round(1) if maior else 0 }}%"></b></span>
+                            <span class="num">{{ ('%.2f'|format(c.valor_abaixo)).replace('.', ',') }}</span>
+                        </div>
+                    </div>
+                    <div class="correl-pe">
+                        {{ c.titulo_b }} por jogo quando {{ c.titulo_a|lower }} fica acima ou abaixo da média
+                        (<b>{{ ('%.1f'|format(c.media_a)).replace('.', ',') }}</b>). <b>{{ '{:,}'.format(c.jogos_total).replace(',', '.') }}</b> jogos.
+                    </div>
+                </div>
+                {% endfor %}
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+    </main>
 
     <script>
         function filtrarTimes() {
-            const termo = document.getElementById('busca-time').value.toLowerCase();
+            const termo = document.getElementById('busca-time').value.toLowerCase().trim();
             let visiveis = 0;
             document.querySelectorAll('.item-time').forEach(function(card) {
-                const nome = card.querySelector('.clube-nome').textContent.toLowerCase();
-                const bate = nome.includes(termo);
+                const bate = card.querySelector('.clube-nome').textContent.toLowerCase().includes(termo);
                 card.style.display = bate ? '' : 'none';
                 if (bate) visiveis++;
             });
-            document.getElementById('nenhum-resultado-time').style.display = (termo && visiveis === 0) ? '' : 'none';
+            document.getElementById('nenhum-resultado-time').hidden = !(termo && visiveis === 0);
         }
     </script>
-</body>
+""" + SCRIPT_FUNDO_VIVO + """</body>
 </html>
 """
 
@@ -6485,540 +6711,463 @@ PAGINA_TIME = """
     <link rel="apple-touch-icon" href="/static/marca/apple-touch-icon.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ nome_time }} - Estatísticas de Time</title>
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-            background: #0d1117; color: #e6edf3; max-width: 1500px;
-            margin: 0 auto; padding: 32px 24px 80px;
-        }
-        h1 { font-size: 1.6rem; margin: 0 0 4px; text-align: center; }
-        .subtitulo { color: #8b949e; margin: 0 0 16px; font-size: 0.88rem; text-align: center; }
-        .vazio {
-            text-align: center; color: #8b949e; padding: 24px; margin-top: 10px;
-            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.85rem;
-        }
-        .titulo-coluna { font-size: 1.05rem; font-weight: 700; margin: 0 0 14px; text-align: center; }
+    <title>{{ nome_time }} - Achismo Zero</title>
+""" + FONTES_VISUAL_NOVO + """    <style>
+        /* REDESIGN (16/10/2026): página de um time no visual novo. Os dados e
+           o comportamento são os de antes (estatísticas por linha, estilo de
+           jogo, zona da tabela, padrão por rodada, correlações, posição,
+           últimos jogos e busca de confronto direto). A lista de clubes da
+           esquerda virou uma fileira de escudos no topo.
+           Layout: fileira de escudos; cabeçalho do time; coluna principal
+           (estatísticas) + coluna lateral (tabela e jogos). */
         """ + NAV_CSS + """
+""" + CSS_VISUAL_NOVO + """
+        .conteudo { width: var(--degrau1); margin: 0 auto; }
+        .rotulo {
+            font-family: var(--f-dado); font-size: 0.625rem; letter-spacing: .08em; text-transform: uppercase;
+            color: var(--apagado);
+        }
+        .secao-titulo {
+            margin: 0 0 0.875rem; font-family: var(--f-corpo); font-weight: 300;
+            font-size: clamp(1.125rem, 1.5vw, 1.4375rem); letter-spacing: -.025em; line-height: 1.1;
+        }
+        .secao-titulo small { font-size: 0.75rem; color: var(--apagado); letter-spacing: 0; margin-left: 0.5rem; font-weight: 400; }
+        .nota { color: var(--apagado); font-size: 0.75rem; line-height: 1.6; margin: -0.375rem 0 1rem; max-width: 52rem; }
+        .nota b { color: var(--texto); font-weight: 600; }
+        .vidro { background: var(--vidro); border: 1px solid var(--vidro-borda); box-shadow: var(--vidro-sombra); border-radius: var(--raio); }
+        .vazio {
+            text-align: center; color: var(--apagado); padding: 2rem 1.5rem; font-size: 0.8125rem;
+            background: rgba(3, 12, 32, .4); border: 1px dashed var(--linha); border-radius: var(--raio);
+        }
+        .num { font-family: var(--f-dado); font-variant-numeric: tabular-nums; }
+        .sobe { color: var(--ouro); }
+        .desce { color: var(--azul-claro); }
+        .escudo { object-fit: contain; flex-shrink: 0; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
 
-        .grid-time {
-            display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 22px; align-items: start; margin-top: 12px;
+        /* ---------- fileira de escudos (trocar de time) ---------- */
+        .fileira {
+            display: flex; align-items: center; justify-content: space-between; gap: 0.25rem; padding: 0.375rem;
+            overflow-x: auto; scrollbar-width: thin; margin-bottom: 2rem;
         }
-        @media (max-width: 1000px) {
-            .grid-time { grid-template-columns: 1fr; }
+        .fileira-todos {
+            flex-shrink: 0; padding: 0.4375rem 0.75rem; margin-right: 0.25rem; border-radius: 999px; white-space: nowrap;
+            font-size: 0.75rem; font-weight: 600; color: var(--azul-claro); text-decoration: none;
+            border: 1px solid rgba(180, 200, 242, .35);
         }
+        .fileira-todos:hover { background: rgba(180, 200, 242, .1); }
+        .fileira-time {
+            flex-shrink: 0; width: 2.375rem; height: 2.375rem; border-radius: 0.625rem; display: grid; place-items: center;
+            border: 1px solid transparent; transition: background .15s, border-color .15s, transform .15s;
+        }
+        .fileira-time img { width: 1.5rem; height: 1.5rem; }
+        .fileira-time:hover { background: rgba(255,255,255,.07); transform: translateY(-1px); }
+        .fileira-time.ativo { background: rgba(255, 210, 10, .12); border-color: rgba(255, 210, 10, .5); }
 
-        /* coluna 1: geral + busca + lista de times */
-        .btn-geral {
-            display: block; text-align: center; background: #161b22; border: 1px solid #30363d;
-            color: #c9d1d9; border-radius: 10px; padding: 10px; margin-bottom: 14px;
-            text-decoration: none; font-weight: 600; font-size: 0.85rem;
+        /* ---------- cabeçalho do time ---------- */
+        .heroi { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 2.5rem; }
+        .heroi .escudo-grande { width: 4.5rem; height: 4.5rem; }
+        .heroi h1 { margin: 0; font-family: var(--f-corpo); font-weight: 300; font-size: clamp(2rem, 3.2vw, 3rem); letter-spacing: -.035em; line-height: 1; }
+        .heroi-info { display: flex; align-items: center; gap: 0.625rem; flex-wrap: wrap; margin-top: 0.625rem; }
+        .chip {
+            display: inline-flex; align-items: baseline; gap: 0.375rem; padding: 0.3125rem 0.75rem; border-radius: 999px;
+            font-size: 0.75rem; color: var(--apagado); background: rgba(255,255,255,.05); border: 1px solid var(--linha);
         }
-        .btn-geral:hover { border-color: #58a6ff; }
+        .chip b { font-family: var(--f-dado); font-weight: 600; color: var(--texto); }
+        .chip.ouro b { color: var(--ouro); }
+        .forma { display: inline-flex; gap: 0.1875rem; }
+        .forma i {
+            font-style: normal; width: 1.25rem; height: 1.25rem; border-radius: 0.3125rem; display: inline-grid; place-items: center;
+            font-family: var(--f-dado); font-size: 0.625rem; font-weight: 600;
+        }
+        .forma .v, .res.v { background: var(--ouro); color: var(--cta-texto); }
+        .forma .e, .res.e { background: rgba(189, 191, 199, .22); color: var(--texto); }
+        .forma .d, .res.d { border: 1px solid rgba(180, 200, 242, .35); color: var(--apagado); }
+
+        /* ---------- duas colunas ---------- */
+        .grade { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 22rem); gap: 2.5rem; align-items: start; }
+        .principal > section, .lateral > section { margin-bottom: 3rem; }
+
+        /* frequência por linha */
+        .blocos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+        .bloco { padding: 1rem 1.125rem; min-width: 0; }
+        .bloco-topo { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; margin-bottom: 0.75rem; }
+        .bloco-titulo { font-size: 0.875rem; font-weight: 600; }
+        .bloco-media { text-align: right; white-space: nowrap; }
+        .bloco-media b { font-family: var(--f-dado); font-weight: 500; font-size: 1.25rem; color: var(--texto); }
+        .bloco-media small { display: block; font-size: 0.625rem; color: var(--apagado); }
+        .linha-freq { display: grid; grid-template-columns: 3rem 1fr 3rem; align-items: center; gap: 0.625rem; font-size: 0.75rem; margin-top: 0.375rem; }
+        .linha-freq .lbl { font-family: var(--f-dado); color: var(--apagado); }
+        .linha-freq .pct { font-family: var(--f-dado); text-align: right; color: var(--texto); }
+        .barra { height: 0.4375rem; border-radius: 999px; background: rgba(255,255,255,.06); overflow: hidden; }
+        .barra b { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--azul), var(--azul-claro)); }
+        .barra.forte b { background: linear-gradient(90deg, #c9a400, var(--ouro)); }
+        .posse-grande { font-family: var(--f-dado); font-size: 2.25rem; font-weight: 500; line-height: 1; }
+        .posse-barra { margin-top: 0.875rem; height: 0.5rem; border-radius: 999px; background: rgba(180, 200, 242, .22); overflow: hidden; }
+        .posse-barra b { display: block; height: 100%; background: var(--ouro); border-radius: 999px; }
+
+        /* estilo de jogo */
+        .estilo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+        .estilo-cartao { padding: 1rem 1.125rem; }
+        .estilo-linhas { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 0.75rem; }
+        .estilo-valor { font-family: var(--f-dado); font-size: 1.375rem; font-weight: 500; line-height: 1.1; margin: 0.25rem 0; }
+        .estilo-detalhe { font-size: 0.6875rem; color: var(--apagado); }
+
+        /* zona da tabela */
+        .zonas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; }
+        .zona { padding: 1rem 1.125rem; display: flex; flex-direction: column; gap: 0.875rem; min-width: 0; }
+        .zona-titulo { font-size: 0.875rem; font-weight: 600; }
+        .zona-res { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; }
+        .zona-res div { min-width: 0; }
+        .zona-res b { display: block; font-family: var(--f-dado); font-size: 1.125rem; font-weight: 500; }
+        .zona-res span { display: block; font-size: 0.625rem; color: var(--apagado); line-height: 1.35; }
+        .zona-outros { display: grid; grid-template-columns: 1fr auto; gap: 0.1875rem 0.75rem; font-size: 0.6875rem; color: var(--apagado); border-top: 1px solid var(--linha-fraca); padding-top: 0.75rem; }
+        .zona-outros b { font-family: var(--f-dado); font-weight: 500; color: var(--texto); text-align: right; }
+
+        /* padrão por rodada */
+        .quebras { padding: 0.375rem 1.125rem; }
+        .quebra { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 1rem; align-items: center; padding: 0.625rem 0; border-bottom: 1px solid var(--linha-fraca); font-size: 0.8125rem; }
+        .quebra:last-child { border-bottom: none; }
+        .quebra-rodada { font-size: 0.6875rem; color: var(--apagado); white-space: nowrap; }
+        .quebra-rodada b { font-family: var(--f-dado); font-weight: 500; color: var(--texto); }
+        .quebra-valores { font-family: var(--f-dado); white-space: nowrap; }
+        .quebra-valores .antes { color: var(--apagado); }
+
+        /* correlações */
+        .correl-grade { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+        .correl { padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+        .correl-titulo { font-size: 0.8125rem; font-weight: 600; line-height: 1.35; }
+        .correl-titulo em { font-style: normal; color: var(--apagado); font-weight: 400; margin: 0 0.25rem; }
+        .barra-linha { display: grid; grid-template-columns: 3.5rem 1fr auto; align-items: center; gap: 0.5rem; font-size: 0.6875rem; color: var(--apagado); }
+        .barra-linha + .barra-linha { margin-top: 0.375rem; }
+        .barra-acima b { background: var(--ouro); }
+        .barra-abaixo b { background: var(--azul-claro); }
+        .barra-linha .num { color: var(--texto); }
+        .correl-pe { font-size: 0.6875rem; color: var(--apagado); }
+        .correl-pe b { font-family: var(--f-dado); font-weight: 500; color: var(--texto); }
+
+        /* lateral: posição */
+        .vizinhos { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+        .vizinhos td { padding: 0.5rem 0.625rem; border-bottom: 1px solid var(--linha-fraca); }
+        .vizinhos tr:last-child td { border-bottom: none; }
+        .vizinhos .pos { width: 2.25rem; font-family: var(--f-dado); color: var(--apagado); }
+        .vizinhos .pts { text-align: right; font-family: var(--f-dado); color: var(--apagado); }
+        .vizinhos .nome a { color: var(--texto); text-decoration: none; display: inline-flex; align-items: center; gap: 0.5rem; }
+        .vizinhos .nome a:hover { color: var(--azul-claro); }
+        .vizinhos .escudo { width: 1.25rem; height: 1.25rem; }
+        .vizinhos tr.eu td { background: rgba(255, 210, 10, .08); }
+        .vizinhos tr.eu .pos, .vizinhos tr.eu .pts { color: var(--ouro); }
+        .vizinhos tr.eu .nome a { font-weight: 700; }
+        .tabela-caixa { padding: 0.25rem; }
+
+        /* lateral: jogos */
+        .busca-wrap { position: relative; margin-bottom: 0.75rem; }
         .busca {
-            width: 100%; padding: 10px 14px; margin-bottom: 14px;
-            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
-            border-radius: 8px; font-size: 0.9rem;
+            width: 100%; padding: 0.5625rem 4.5rem 0.5625rem 0.875rem;
+            background: rgba(1, 5, 15, .55); border: 1px solid var(--linha); color: var(--texto);
+            border-radius: 999px; font-family: var(--f-corpo); font-size: 0.8125rem;
+            transition: border-color .15s, box-shadow .15s;
         }
-        .clube-btn {
-            display: flex; align-items: center; gap: 12px;
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 12px 16px; margin-bottom: 10px; text-decoration: none;
-            color: #e6edf3; transition: border-color 0.15s;
+        .busca::placeholder { color: #7d849c; }
+        .busca:focus { outline: none; border-color: var(--azul-claro); box-shadow: 0 0 0 3px rgba(180, 200, 242, .18); }
+        .limpar {
+            position: absolute; right: 0.875rem; top: 50%; transform: translateY(-50%);
+            background: none; border: 0; padding: 0; font-size: 0.6875rem; font-weight: 600; color: var(--azul-claro); cursor: pointer;
         }
-        .clube-btn:hover { border-color: #58a6ff; }
-        .clube-btn.item-ativo { background: #1f6feb26; border: 1px solid #58a6ff88; }
-        .clube-selo {
-            width: 34px; height: 34px; border-radius: 50%;
-            background: transparent;
-            flex-shrink: 0; object-fit: contain;
+        .limpar:hover { color: var(--texto); background: none; }
+        .jogo { margin-bottom: 0.5rem; overflow: hidden; cursor: pointer; }
+        .jogo-linha { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 0.5rem; padding: 0.75rem 0.875rem 0.375rem; }
+        .jogo-time { display: flex; align-items: center; gap: 0.4375rem; font-size: 0.75rem; font-weight: 600; min-width: 0; }
+        .jogo-time span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .jogo-time.dir { justify-content: flex-end; text-align: right; }
+        .jogo-time .escudo { width: 1.375rem; height: 1.375rem; }
+        .placar { font-family: var(--f-dado); font-size: 1rem; font-weight: 600; white-space: nowrap; }
+        .jogo-rodape { display: flex; justify-content: space-between; align-items: center; padding: 0 0.875rem 0.625rem; font-size: 0.625rem; color: var(--apagado); }
+        .res { font-family: var(--f-dado); font-size: 0.5625rem; font-weight: 600; padding: 0.0625rem 0.375rem; border-radius: 0.25rem; }
+        .seta {
+            width: 0.4375rem; height: 0.4375rem; border-right: 2px solid var(--apagado); border-bottom: 2px solid var(--apagado);
+            transform: translateY(-0.125rem) rotate(45deg); transition: transform .2s;
         }
-        .clube-nome { font-weight: 700; font-size: 0.92rem; }
-        .clube-sub { color: #8b949e; font-size: 0.75rem; }
-        .paginacao {
-            display: flex; align-items: center; justify-content: center; gap: 14px;
-            margin-top: 4px; font-size: 0.82rem; color: #8b949e;
+        .jogo.aberto .seta { transform: translateY(0.0625rem) rotate(-135deg); border-color: var(--ouro); }
+        .jogo-detalhe { display: none; padding: 0.625rem 0.875rem 0.875rem; border-top: 1px solid var(--linha-fraca); }
+        .jogo.aberto .jogo-detalhe { display: block; }
+        .comp { display: grid; grid-template-columns: 2.25rem 1fr 2.25rem; align-items: center; gap: 0.5rem; font-size: 0.6875rem; margin-top: 0.4375rem; }
+        .comp .n1 { font-family: var(--f-dado); color: var(--texto); }
+        .comp .n2 { font-family: var(--f-dado); color: var(--apagado); text-align: right; }
+        .comp-meio { display: flex; flex-direction: column; gap: 0.1875rem; }
+        .comp-lbl { text-align: center; color: var(--apagado); font-size: 0.625rem; }
+        .comp-barra { display: flex; height: 0.3125rem; border-radius: 999px; overflow: hidden; background: rgba(255,255,255,.06); }
+        .comp-barra .a { background: var(--ouro); }
+        .comp-barra .b { background: rgba(180, 200, 242, .45); }
+        .ver-mais {
+            width: 100%; background: transparent; border: 1px solid rgba(180, 200, 242, .45); color: var(--azul-claro);
         }
-        .btn-pagina {
-            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
-            border-radius: 8px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer;
-        }
-        .btn-pagina:hover:not(:disabled) { border-color: #58a6ff; }
-        .btn-pagina:disabled { opacity: 0.35; cursor: default; }
+        .ver-mais:hover { background: rgba(180, 200, 242, .1); }
 
-        /* coluna 2: cabeçalho do time + blocos de estatística */
-        .selo-titulo {
-            width: 34px; height: 34px; border-radius: 50%;
-            background: transparent;
-            flex-shrink: 0; object-fit: contain;
+        @media (max-width: 1280px) {
+            .zonas { grid-template-columns: minmax(0, 1fr); }
+            .zona-outros { grid-template-columns: repeat(2, minmax(0, 1fr) auto); }
         }
-        .cabecalho-time {
-            display: flex; align-items: center; gap: 14px;
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 18px 22px; margin-bottom: 14px; font-size: 1.15rem; font-weight: 700;
+        @media (max-width: 1099px) {
+            :root { --degrau1: 100%; --degrau2: 100%; }
+            .grade { grid-template-columns: minmax(0, 1fr); }
+            .lateral { order: -1; }
         }
-        .cartao {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 18px 22px; margin-bottom: 14px;
+        @media (max-width: 640px) {
+            .blocos, .estilo, .correl-grade { grid-template-columns: minmax(0, 1fr); }
+            .zona-outros { grid-template-columns: 1fr auto; }
+            .heroi .escudo-grande { width: 3.25rem; height: 3.25rem; }
         }
-        .bloco-topo { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; flex-wrap: wrap; gap: 6px; }
-        .bloco-titulo { font-weight: 700; font-size: 1rem; }
-        .bloco-media { color: #8b949e; font-size: 0.8rem; }
-        .bloco-media b { color: #e6edf3; }
-        .linhas-grid { display: flex; gap: 10px; flex-wrap: wrap; }
-        .linha-item {
-            background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
-            padding: 6px 12px; font-size: 0.85rem;
-        }
-        .linha-item b { color: #3fb950; }
-
-        /* NOVO (estilo de jogo - Fase 1, só exibição): cartão com o
-           "jeito de jogar" do time (ofensivo/defensivo), em impedimento
-           e cartão - nada aqui influencia recomendação/VE, é só
-           informativo. */
-        .estilo-aviso {
-            color: #8b949e; font-size: 0.78rem; margin: 6px 0 0;
-        }
-        .estilo-grid {
-            display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px;
-        }
-        @media (max-width: 700px) {
-            .estilo-grid { grid-template-columns: 1fr; }
-        }
-        .estilo-papel-titulo {
-            font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.03em;
-            margin-bottom: 6px;
-        }
-        .estilo-valor {
-            font-size: 1.05rem; font-weight: 700; margin-bottom: 2px;
-        }
-        .estilo-valor.acima { color: #f85149; }
-        .estilo-valor.abaixo { color: #3fb950; }
-        .estilo-valor.neutro { color: #8b949e; }
-        .estilo-detalhe { font-size: 0.76rem; color: #8b949e; }
-
-        /* NOVO (Fase B - padrão por rodada, só exibição) */
-        .quebra-rodada-item {
-            padding: 10px 0; border-top: 1px solid #21262d;
-        }
-        .quebra-rodada-item:first-of-type { border-top: none; padding-top: 4px; }
-        .quebra-rodada-titulo { font-size: 0.85rem; font-weight: 600; margin-bottom: 3px; }
-        .quebra-rodada-texto { font-size: 0.82rem; color: #c9d1d9; }
-        .quebra-rodada-texto .acima { color: #f85149; }
-        .quebra-rodada-texto .abaixo { color: #3fb950; }
-
-        /* NOVO (Fase C - comportamento por zona, só exibição) */
-        .zona-momento-grid {
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
-        }
-        @media (max-width: 700px) {
-            .zona-momento-grid { grid-template-columns: 1fr; }
-        }
-        .zona-outros-mercados { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
-        .zona-outros-item {
-            font-size: 0.78rem; color: #c9d1d9; background: #161b22;
-            border: 1px solid #21262d; border-radius: 6px; padding: 4px 8px;
-        }
-
-        /* NOVO (Correlação entre estatísticas, só exibição) */
-        .cartao-correlacao {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 18px 20px;
-        }
-        .correlacao-aviso { font-size: 0.8rem; color: #8b949e; margin: 0 0 14px; }
-        .correlacao-grid { display: grid; gap: 14px; }
-        .correlacao-item {
-            background: #0d1117; border: 1px solid #21262d; border-radius: 10px; padding: 12px 14px;
-        }
-        .correlacao-titulo { font-size: 0.88rem; font-weight: 700; margin-bottom: 8px; }
-        .correlacao-linha { font-size: 0.8rem; color: #c9d1d9; margin-bottom: 4px; }
-        .correlacao-linha .acima { color: #f85149; }
-        .correlacao-linha .abaixo { color: #3fb950; }
-        .correlacao-detalhe { font-size: 0.74rem; color: #8b949e; margin-top: 6px; }
-
-        /* coluna 3: posição na tabela + últimos jogos */
-        .tabela-vizinhos { width: 100%; border-collapse: collapse; margin-bottom: 26px; }
-        .linha-vizinho td {
-            padding: 10px 8px; border-bottom: 1px solid #21262d; font-size: 0.92rem;
-        }
-        .linha-vizinho.ativa td { background: #1f6feb26; border-radius: 8px; font-weight: 700; }
-        .pos-vizinho { font-size: 1.3rem; font-weight: 700; color: #8b949e; width: 36px; }
-        .linha-vizinho.ativa .pos-vizinho { color: #58a6ff; }
-        .escudo-vizinho { width: 26px; height: 26px; object-fit: contain; vertical-align: middle; margin-right: 8px; }
-        .jogo-card {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            margin-bottom: 10px; cursor: pointer; overflow: hidden;
-        }
-        .jogo-placar-linha {
-            display: flex; align-items: center; justify-content: space-between; gap: 8px;
-            padding: 12px 16px;
-        }
-        .jogo-time { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.88rem; flex: 1; }
-        .jogo-time.jogo-time-direita { justify-content: flex-end; text-align: right; }
-        .escudo-jogo { width: 24px; height: 24px; object-fit: contain; flex-shrink: 0; }
-        .jogo-placar { font-weight: 700; font-size: 1rem; white-space: nowrap; padding: 0 6px; }
-        .jogo-seta { color: #8b949e; transition: transform 0.15s; }
-        .jogo-card.aberto .jogo-seta { transform: rotate(180deg); }
-        .jogo-detalhe { display: none; padding: 0 16px 14px; }
-        .jogo-card.aberto .jogo-detalhe { display: block; }
-        .tabela-detalhe-jogo { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-        .tabela-detalhe-jogo th { color: #8b949e; font-weight: 600; padding: 6px 4px; text-align: center; }
-        .tabela-detalhe-jogo th:first-child { text-align: left; }
-        .tabela-detalhe-jogo td { padding: 6px 4px; text-align: center; border-top: 1px solid #21262d; }
-        .tabela-detalhe-jogo td:first-child { text-align: left; color: #8b949e; }
-
-        /* NOVO (busca de confronto direto) */
-        .confronto-busca-wrap { position: relative; margin-bottom: 12px; }
-        .confronto-busca-wrap .busca { margin-bottom: 0; padding-right: 76px; }
-        .confronto-limpar {
-            position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
-            color: #8b949e; font-size: 0.72rem; cursor: pointer; white-space: nowrap;
-        }
-        .confronto-limpar:hover { color: #f85149; }
-        .confronto-data { color: #8b949e; font-size: 0.74rem; padding: 0 16px 10px; margin-top: -6px; }
-        .btn-ver-mais-confronto {
-            display: block; width: 100%; background: #161b22; border: 1px solid #30363d;
-            color: #58a6ff; border-radius: 8px; padding: 10px; margin-bottom: 10px;
-            font-size: 0.82rem; font-weight: 600; cursor: pointer;
-        }
-        .btn-ver-mais-confronto:hover { border-color: #58a6ff; }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
     </style>
 </head>
 <body>
-    <h1>
-        {% if escudo_url %}
-        <img src="{{ escudo_url }}" alt="{{ nome_time }}" class="selo-titulo" style="display:inline-block; vertical-align:middle; margin-right:8px;" onerror="this.outerHTML='<span class=&quot;selo-titulo&quot;></span>'">
-        {% endif %}
-        Estatísticas de Time
-    </h1>
-    <p class="subtitulo">{{ nome_time }} - frequência histórica (só o lado do {{ nome_time }}), posição no
-        Brasileirão e últimos jogos - estatísticas normais, sem depender de nenhuma odd disponível na casa de apostas.</p>
-    {{ nav_html|safe }}
+""" + FUNDO_VISUAL_NOVO + """    {{ nav_html|safe }}
     <script>
         try { localStorage.setItem('ultimo_time_id', '{{ time_id }}'); } catch (e) {}
     </script>
+    {% macro dec(v, casas=2) %}{{ (('%.' ~ casas ~ 'f')|format(v)).replace('.', ',') }}{% endmacro %}
+    {% set eu = (vizinhos_tabela|selectattr('team_id', 'equalto', api_football_team_id)|list|first) if vizinhos_tabela else none %}
 
-    <div class="grid-time">
-        <div class="coluna-lista">
-            <a href="/times?geral=1" class="btn-geral">📊 Estatísticas Gerais</a>
-            <input type="text" class="busca" id="busca-time" placeholder="Buscar times..." onkeyup="filtrarTimes()">
-            <div id="lista-times">
-            {% if clubes %}
-                {% for c in clubes %}
-                <a href="/time/{{ c.id }}" class="clube-btn item-time item-pagina{{ ' item-ativo' if c.id == time_id else '' }}">
-                    {% if c.escudo_url %}
-                    <img src="{{ c.escudo_url }}" alt="{{ c.nome }}" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
-                    {% else %}
-                    <div class="clube-selo"></div>
+    <main class="conteudo">
+        <nav class="vidro fileira" aria-label="Trocar de time">
+            <a href="/times?geral=1" class="fileira-todos">Todos os times</a>
+            {% for c in clubes %}
+            <a href="/time/{{ c.id }}" class="fileira-time{{ ' ativo' if c.id == time_id else '' }}" title="{{ c.nome }}" aria-label="{{ c.nome }}"{{ ' aria-current="page"'|safe if c.id == time_id else '' }}>
+                {% if c.escudo_url %}<img src="{{ c.escudo_url }}" alt="" class="escudo" loading="lazy">{% else %}<span class="rotulo">{{ c.nome[:3] }}</span>{% endif %}
+            </a>
+            {% endfor %}
+        </nav>
+
+        <header class="heroi">
+            {% if escudo_url %}<img src="{{ escudo_url }}" alt="" class="escudo escudo-grande" onerror="this.style.display='none'">{% endif %}
+            <div>
+                <h1>{{ nome_time }}</h1>
+                {% if eu %}
+                <div class="heroi-info">
+                    <span class="chip ouro"><b>{{ eu.posicao }}º</b> no Brasileirão</span>
+                    <span class="chip"><b>{{ eu.pontos }}</b> pts em <b>{{ eu.jogos }}</b> jogos</span>
+                    <span class="chip"><b>{{ eu.vitorias }}</b>V <b>{{ eu.empates }}</b>E <b>{{ eu.derrotas }}</b>D</span>
+                    <span class="chip">gols <b>{{ eu.gols_pro }}</b>–<b>{{ eu.gols_contra }}</b></span>
+                    {% if eu.forma %}
+                    <span class="forma" aria-label="Últimos 5 jogos">{% for r in eu.forma %}<i class="{{ 'v' if r == 'W' else ('e' if r == 'D' else 'd') }}" title="{{ 'Vitória' if r == 'W' else ('Empate' if r == 'D' else 'Derrota') }}">{{ 'V' if r == 'W' else ('E' if r == 'D' else 'D') }}</i>{% endfor %}</span>
                     {% endif %}
-                    <div>
-                        <div class="clube-nome">{{ c.nome }}</div>
-                        <div class="clube-sub">Ver elenco e última escalação →</div>
-                    </div>
-                </a>
-                {% endfor %}
-            {% else %}
-                <div class="vazio">Nenhum clube rastreado ainda.</div>
-            {% endif %}
-            </div>
-            <div class="vazio" id="nenhum-resultado-time" style="display:none;">Nenhum time encontrado com esse nome.</div>
-            {% if clubes|length > 10 %}
-            <div class="paginacao">
-                <button class="btn-pagina" id="anterior-lista-times" onclick="mudarPagina('lista-times', -1)">← Anterior</button>
-                <span id="label-lista-times"></span>
-                <button class="btn-pagina" id="proximo-lista-times" onclick="mudarPagina('lista-times', 1)">Próxima →</button>
-            </div>
-            {% endif %}
-        </div>
-
-        <div class="coluna-principal">
-            <div class="cabecalho-time">
-                {% if escudo_url %}
-                <img src="{{ escudo_url }}" alt="{{ nome_time }}" class="selo-titulo" onerror="this.outerHTML='<span class=&quot;selo-titulo&quot;></span>'">
-                {% else %}
-                <span class="selo-titulo"></span>
+                </div>
                 {% endif %}
-                {{ nome_time }}
             </div>
+        </header>
 
-            {% if estilo_time %}
-            <div class="cartao">
-                <div class="bloco-topo">
-                    <div class="bloco-titulo">🧬 Estilo de jogo</div>
-                </div>
-                <p class="estilo-aviso">
-                    Ofensivo = o quanto o próprio {{ nome_time }} gera esse evento. Defensivo = o quanto jogar
-                    CONTRA o {{ nome_time }} faz o adversário gerar mais ou menos esse evento. Comparado só entre
-                    os times rastreados hoje - <b>já usado como ajuste na fórmula de recomendação (cartão e
-                    impedimento de jogador), além de aparecer aqui pra consulta.</b>
-                </p>
-                {% for tipo, papeis in estilo_time.items() %}
-                {% set titulo_tipo = papeis.ofensivo.titulo if papeis.ofensivo is defined else papeis.defensivo.titulo %}
-                <div style="margin-top: 16px;">
-                    <div class="bloco-titulo" style="font-size: 0.92rem; margin-bottom: 6px;">{{ titulo_tipo }}</div>
-                    <div class="estilo-grid">
-                        {% if papeis.ofensivo is defined %}
-                        {% set d = papeis.ofensivo %}
-                        <div>
-                            <div class="estilo-papel-titulo">Ofensivo</div>
-                            <div class="estilo-valor {{ 'acima' if d.desvio_pct > 0 else ('abaixo' if d.desvio_pct < 0 else 'neutro') }}">
-                                {{ '+' if d.desvio_pct >= 0 else '' }}{{ d.desvio_pct }}% vs. média
+        <div class="grade">
+            <div class="principal">
+                <section aria-labelledby="t-freq">
+                    <h2 class="secao-titulo" id="t-freq">Frequência por linha</h2>
+                    <p class="nota">Em quantos dos últimos jogos o {{ nome_time }} passou de cada linha, contando só o lado dele. Não depende de nenhuma odd.</p>
+                    {% if blocos %}
+                    <div class="blocos">
+                        {% for bloco in blocos %}
+                        <div class="vidro bloco">
+                            <div class="bloco-topo">
+                                <div>
+                                    <div class="bloco-titulo">{{ 'Gols do time' if bloco.titulo == 'gols' else bloco.titulo }}</div>
+                                    <div class="rotulo" style="margin-top: 0.25rem">Últimos {{ bloco.jogos_analisados }} jogos</div>
+                                </div>
+                                {% if bloco.tipo != 'posse' %}
+                                <div class="bloco-media"><b>{{ dec(bloco.media) }}</b><small>média por jogo</small></div>
+                                {% endif %}
                             </div>
-                            <div class="estilo-detalhe">{{ d.media_time }}/jogo (liga: {{ d.media_liga }}) · {{ d.jogos_analisados }} jogo(s)</div>
-                        </div>
-                        {% endif %}
-                        {% if papeis.defensivo is defined %}
-                        {% set d = papeis.defensivo %}
-                        <div>
-                            <div class="estilo-papel-titulo">Defensivo (efeito no adversário)</div>
-                            <div class="estilo-valor {{ 'acima' if d.desvio_pct > 0 else ('abaixo' if d.desvio_pct < 0 else 'neutro') }}">
-                                {{ '+' if d.desvio_pct >= 0 else '' }}{{ d.desvio_pct }}% vs. média
+                            {% if bloco.tipo == 'posse' %}
+                            <div class="posse-grande">{{ dec(bloco.media, 1) }}%</div>
+                            <div class="posse-barra" aria-hidden="true"><b style="width: {{ bloco.media }}%"></b></div>
+                            {% else %}
+                            {% for item in bloco.itens %}
+                            <div class="linha-freq">
+                                <span class="lbl">+{{ dec(item.linha, 1) }}</span>
+                                <span class="barra{{ ' forte' if item.frequencia >= 60 else '' }}"><b style="width: {{ item.frequencia }}%"></b></span>
+                                <span class="pct">{{ dec(item.frequencia, 0) }}%</span>
                             </div>
-                            <div class="estilo-detalhe">{{ d.media_time }}/jogo (liga: {{ d.media_liga }}) · {{ d.jogos_analisados }} jogo(s)</div>
+                            {% endfor %}
+                            {% endif %}
                         </div>
-                        {% endif %}
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-            {% endif %}
-
-            {% if quebras_rodada %}
-            <div class="cartao">
-                <div class="bloco-topo">
-                    <div class="bloco-titulo">📈 Padrão por rodada</div>
-                </div>
-                <p class="estilo-aviso">
-                    Onde o comportamento do {{ nome_time }} muda de forma mais nítida ao longo do campeonato,
-                    juntando as temporadas coletadas - detectado automaticamente, sem faixa fixa definida na mão.
-                    <b>Informativo por enquanto, não afeta nenhuma recomendação.</b>
-                </p>
-                {% for q in quebras_rodada %}
-                <div class="quebra-rodada-item">
-                    <div class="quebra-rodada-titulo">{{ q.titulo }}</div>
-                    <div class="quebra-rodada-texto">
-                        Quebra detectada na rodada <b>{{ q.rodada_quebra }}</b>: antes,
-                        <b>{{ q.valor_antes }}{{ '%' if q.eh_percentual else '/jogo' }}</b> · depois,
-                        <b class="{{ 'acima' if q.subiu else 'abaixo' }}">{{ q.valor_depois }}{{ '%' if q.eh_percentual else '/jogo' }}</b>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-            {% endif %}
-
-            {% if padroes_zona %}
-            <div class="cartao">
-                <div class="bloco-topo">
-                    <div class="bloco-titulo">🎯 Comportamento por zona da tabela</div>
-                </div>
-                <p class="estilo-aviso">
-                    Como o {{ nome_time }} se sai dependendo de onde estava na tabela ANTES de cada jogo (G4/meio/
-                    Z4/rebaixamento) - "depois de vitória" vs "depois de derrota" mostra se ele tende a embalar ou
-                    afundar dentro da mesma zona. Zonas simplificadas (não distingue Libertadores/Sul-Americana
-                    ainda). <b>Já usado como ajuste na fórmula de recomendação (resultado final e escanteio de
-                    time), além de aparecer aqui pra consulta.</b>
-                </p>
-                {% for zona_key, z in padroes_zona.items() %}
-                <div style="margin-top: 16px;">
-                    <div class="bloco-titulo" style="font-size: 0.92rem; margin-bottom: 6px;">{{ z.titulo }}</div>
-
-                    {% if z.resultado %}
-                    <div class="zona-momento-grid">
-                        {% if z.resultado.geral %}
-                        <div>
-                            <div class="estilo-papel-titulo">Geral nessa zona</div>
-                            <div class="estilo-valor neutro">{{ z.resultado.geral.valor }}% vitória</div>
-                            <div class="estilo-detalhe">{{ z.resultado.geral.jogos_amostra }} jogo(s)</div>
-                        </div>
-                        {% endif %}
-                        {% if z.resultado.apos_vitoria %}
-                        <div>
-                            <div class="estilo-papel-titulo">Depois de vitória</div>
-                            <div class="estilo-valor abaixo">{{ z.resultado.apos_vitoria.valor }}% vitória</div>
-                            <div class="estilo-detalhe">{{ z.resultado.apos_vitoria.jogos_amostra }} jogo(s)</div>
-                        </div>
-                        {% endif %}
-                        {% if z.resultado.apos_derrota %}
-                        <div>
-                            <div class="estilo-papel-titulo">Depois de derrota</div>
-                            <div class="estilo-valor acima">{{ z.resultado.apos_derrota.valor }}% vitória</div>
-                            <div class="estilo-detalhe">{{ z.resultado.apos_derrota.jogos_amostra }} jogo(s)</div>
-                        </div>
-                        {% endif %}
-                    </div>
-                    {% endif %}
-
-                    {% if z.outros %}
-                    <div class="zona-outros-mercados">
-                        {% for o in z.outros %}
-                        <span class="zona-outros-item">{{ o.titulo }}: <b>{{ o.valor }}/jogo</b> ({{ o.jogos_amostra }})</span>
                         {% endfor %}
                     </div>
+                    {% else %}
+                    <div class="vazio">Ainda não há dados suficientes para as estatísticas desse time (precisa de pelo menos 5 jogos concluídos).</div>
                     {% endif %}
-                </div>
-                {% endfor %}
-            </div>
-            {% endif %}
+                </section>
 
-            {% if correlacoes_time %}
-            <div class="cartao-correlacao" style="margin-top: 16px;">
-                <div class="bloco-titulo" style="margin-bottom: 8px;">🔗 Correlação entre estatísticas ({{ nome_time }})</div>
-                <p class="correlacao-aviso">
-                    A mesma relação da liga inteira (ver "Estatísticas de Times"), mas só com os jogos do
-                    {{ nome_time }} - revela se esse time tem essa relação mais forte, mais fraca, ou diferente
-                    do padrão geral. <b>Informativo por enquanto, não afeta nenhuma recomendação.</b>
-                </p>
-                <div class="correlacao-grid" style="grid-template-columns: 1fr;">
-                    {% for c in correlacoes_time %}
-                    <div class="correlacao-item">
-                        <div class="correlacao-titulo">{{ c.titulo_a }} → {{ c.titulo_b }}</div>
-                        <div class="correlacao-linha">
-                            Acima da média ({{ c.media_a }}/jogo): {{ c.titulo_b|lower }} médio é
-                            <b class="{{ 'acima' if c.sobe_junto else 'abaixo' }}">{{ c.valor_acima }}/jogo</b>
-                            · abaixo: <b class="{{ 'abaixo' if c.sobe_junto else 'acima' }}">{{ c.valor_abaixo }}/jogo</b>
+                {% if estilo_time %}
+                <section aria-labelledby="t-estilo">
+                    <h2 class="secao-titulo" id="t-estilo">Estilo de jogo</h2>
+                    <p class="nota">Ofensivo: quanto o próprio {{ nome_time }} gera o evento. Defensivo: quanto o adversário gera jogando contra ele. Comparado com os times rastreados. <b>Já entra como ajuste nas recomendações de cartão e impedimento de jogador.</b></p>
+                    <div class="estilo">
+                        {% for tipo, papeis in estilo_time.items() %}
+                        <div class="vidro estilo-cartao">
+                            <div class="bloco-titulo">{{ papeis.ofensivo.titulo if papeis.ofensivo is defined else papeis.defensivo.titulo }}</div>
+                            <div class="estilo-linhas">
+                                {% for chave, rotulo in [('ofensivo', 'Ofensivo'), ('defensivo', 'Defensivo')] %}
+                                {% if papeis[chave] is defined %}
+                                {% set d = papeis[chave] %}
+                                <div>
+                                    <div class="rotulo">{{ rotulo }}</div>
+                                    <div class="estilo-valor {{ 'sobe' if d.desvio_pct > 0 else ('desce' if d.desvio_pct < 0 else '') }}">{{ '+' if d.desvio_pct >= 0 else '' }}{{ dec(d.desvio_pct, 1) }}%</div>
+                                    <div class="estilo-detalhe"><span class="num">{{ dec(d.media_time) }}</span>/jogo · liga <span class="num">{{ dec(d.media_liga) }}</span> · {{ d.jogos_analisados }} jogos</div>
+                                </div>
+                                {% endif %}
+                                {% endfor %}
+                            </div>
                         </div>
-                        <div class="correlacao-detalhe">{{ c.jogos_total }} jogo(s) analisados</div>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-
-            {% if correlacoes_categoria_time %}
-            <div class="cartao-correlacao" style="margin-top: 16px;">
-                <div class="bloco-titulo" style="margin-bottom: 8px;">🧩 Correlação entre categorias ({{ nome_time }})</div>
-                <p class="correlacao-aviso">
-                    Isola a direção: só o ATAQUE do {{ nome_time }} contra a DEFESA do adversário, no mesmo jogo -
-                    diferente da versão geral, que soma os dois lados juntos. <b>Informativo por enquanto, não
-                    afeta nenhuma recomendação.</b>
-                </p>
-                <div class="correlacao-grid" style="grid-template-columns: 1fr;">
-                    {% for c in correlacoes_categoria_time %}
-                    <div class="correlacao-item">
-                        <div class="correlacao-titulo">{{ c.titulo_a }} do {{ nome_time }} → {{ c.titulo_b }} do adversário</div>
-                        <div class="correlacao-linha">
-                            Acima da média ({{ c.media_a }}/jogo): {{ c.titulo_b|lower }} médio do adversário é
-                            <b class="{{ 'acima' if c.sobe_junto else 'abaixo' }}">{{ c.valor_acima }}/jogo</b>
-                            · abaixo: <b class="{{ 'abaixo' if c.sobe_junto else 'acima' }}">{{ c.valor_abaixo }}/jogo</b>
-                        </div>
-                        <div class="correlacao-detalhe">{{ c.jogos_total }} jogo(s) analisados</div>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-
-
-            {% if blocos %}
-                {% for bloco in blocos %}
-                <div class="cartao">
-                    <div class="bloco-topo">
-                        <div class="bloco-titulo">{{ bloco.titulo }}</div>
-                        <div class="bloco-media">Média: <b>{{ bloco.media }}{{ '%' if bloco.tipo == 'posse' else '' }}</b>
-                            {{ 'por jogo' if bloco.tipo != 'posse' else '' }} · últimos {{ bloco.jogos_analisados }} jogo(s)</div>
-                    </div>
-                    {% if bloco.itens %}
-                    <div class="linhas-grid">
-                        {% for item in bloco.itens %}
-                        <div class="linha-item">+{{ item.linha }}: <b>{{ item.frequencia }}%</b></div>
                         {% endfor %}
                     </div>
-                    {% endif %}
-                </div>
-                {% endfor %}
-            {% else %}
-                <div class="vazio">Ainda não há dados suficientes pra calcular as estatísticas desse time
-                    (precisa de pelo menos 5 jogos concluídos).</div>
-            {% endif %}
-        </div>
+                </section>
+                {% endif %}
 
-        <div class="coluna-lateral">
-            {% if vizinhos_tabela %}
-            <div class="titulo-coluna">Posição no Brasileirão</div>
-            <table class="tabela-vizinhos">
-                {% for l in vizinhos_tabela %}
-                <tr class="linha-vizinho{{ ' ativa' if l.team_id == api_football_team_id else '' }}">
-                    <td class="pos-vizinho">{{ l.posicao }}</td>
-                    <td>
-                        <img src="/escudo/{{ l.team_id }}.png" class="escudo-vizinho" onerror="this.style.display='none'">
-                        {{ l.nome }}
-                    </td>
-                </tr>
-                {% endfor %}
-            </table>
-            {% endif %}
+                {% if padroes_zona %}
+                <section aria-labelledby="t-zona">
+                    <h2 class="secao-titulo" id="t-zona">Por zona da tabela</h2>
+                    <p class="nota">Como o {{ nome_time }} se sai conforme onde estava na tabela antes de cada jogo, e se embala ou afunda depois de vitória ou derrota. <b>Já entra como ajuste nas recomendações de resultado final e escanteio de time.</b></p>
+                    <div class="zonas">
+                        {% for zona_key, z in padroes_zona.items() %}
+                        <div class="vidro zona">
+                            <div class="zona-titulo">{{ z.titulo }}</div>
+                            {% if z.resultado %}
+                            <div class="zona-res">
+                                {% for chave, rotulo in [('geral', 'vitórias na zona'), ('apos_vitoria', 'depois de vitória'), ('apos_derrota', 'depois de derrota')] %}
+                                {% if z.resultado[chave] %}
+                                <div><b>{{ dec(z.resultado[chave].valor, 1) }}%</b><span>{{ rotulo }} · {{ z.resultado[chave].jogos_amostra }} jogos</span></div>
+                                {% endif %}
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                            {% if z.outros %}
+                            <div class="zona-outros">
+                                {% for o in z.outros %}<span>{{ o.titulo }}</span><b>{{ dec(o.valor) }}</b>{% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
 
-            <div class="titulo-coluna" id="titulo-ultimos-jogos">Últimos Jogos</div>
+                {% if quebras_rodada %}
+                <section aria-labelledby="t-rodada">
+                    <h2 class="secao-titulo" id="t-rodada">Mudança ao longo do campeonato</h2>
+                    <p class="nota">Onde o comportamento do {{ nome_time }} muda de forma mais nítida, juntando as temporadas coletadas, detectado automaticamente. Só informativo.</p>
+                    <div class="vidro quebras">
+                        {% for q in quebras_rodada %}
+                        <div class="quebra">
+                            <span>{{ q.titulo }}</span>
+                            <span class="quebra-rodada">a partir da rodada <b>{{ q.rodada_quebra }}</b></span>
+                            <span class="quebra-valores"><span class="antes">{{ dec(q.valor_antes) }}{{ '%' if q.eh_percentual else '' }}</span> → <span class="{{ 'sobe' if q.subiu else 'desce' }}">{{ dec(q.valor_depois) }}{{ '%' if q.eh_percentual else '' }}</span></span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
 
-            <div class="confronto-busca-wrap">
-                <input type="text" class="busca" id="busca-confronto" list="lista-adversarios-confronto"
-                       placeholder="Buscar confronto direto (ex: Palmeiras)..."
-                       oninput="buscarConfrontoDireto()" autocomplete="off">
-                <datalist id="lista-adversarios-confronto">
-                    {% for t in times_serie_a %}
-                    <option value="{{ t.nome }}">
-                    {% endfor %}
-                </datalist>
-                <span class="confronto-limpar" id="confronto-limpar" onclick="limparConfrontoDireto()" style="display:none;">✕ limpar</span>
+                {% if correlacoes_time or correlacoes_categoria_time %}
+                <section aria-labelledby="t-correl">
+                    <h2 class="secao-titulo" id="t-correl">Correlações do {{ nome_time }}</h2>
+                    <p class="nota">As mesmas relações da página de Times, só com os jogos do {{ nome_time }}. Na de posições, só o ataque dele contra a defesa do adversário. Só informativo.</p>
+                    <div class="correl-grade">
+                        {% for grupo, eh_cat in [(correlacoes_time, false), (correlacoes_categoria_time, true)] %}
+                        {% for c in grupo or [] %}
+                        {% set maior = [c.valor_acima, c.valor_abaixo]|max %}
+                        <div class="vidro correl">
+                            <div class="correl-titulo">
+                                {% if eh_cat %}{{ c.titulo_a }} do {{ nome_time }}<em>→</em>{{ c.titulo_b }} do adversário{% else %}{{ c.titulo_a }}<em>→</em>{{ c.titulo_b }}{% endif %}
+                            </div>
+                            <div>
+                                <div class="barra-linha"><span>Acima</span><span class="barra barra-acima"><b style="width: {{ (100 * c.valor_acima / maior)|round(1) if maior else 0 }}%"></b></span><span class="num">{{ dec(c.valor_acima) }}</span></div>
+                                <div class="barra-linha"><span>Abaixo</span><span class="barra barra-abaixo"><b style="width: {{ (100 * c.valor_abaixo / maior)|round(1) if maior else 0 }}%"></b></span><span class="num">{{ dec(c.valor_abaixo) }}</span></div>
+                            </div>
+                            <div class="correl-pe">{{ c.titulo_b }} por jogo com {{ c.titulo_a|lower }} acima ou abaixo da média (<b>{{ dec(c.media_a, 1) }}</b>). <b>{{ c.jogos_total }}</b> jogos.</div>
+                        </div>
+                        {% endfor %}
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
             </div>
 
-            <div id="lista-ultimos-jogos">
-            {% if ultimos_jogos %}
-                {% for jogo in ultimos_jogos %}
-                <div class="jogo-card" id="card-jogo-{{ jogo.jogo_id }}" onclick="toggleJogo({{ jogo.jogo_id }})">
-                    <div class="jogo-placar-linha">
-                        {% if jogo.mandante %}
-                            <div class="jogo-time">
-                                {% if escudo_url %}<img src="{{ escudo_url }}" class="escudo-jogo">{% endif %}
-                                {{ nome_time }}
-                            </div>
-                            <div class="jogo-placar">{{ jogo.placar_nosso }} x {{ jogo.placar_adversario }}</div>
-                            <div class="jogo-time jogo-time-direita">
-                                {{ jogo.adversario }}
-                                {% if jogo.escudo_adversario %}<img src="{{ jogo.escudo_adversario }}" class="escudo-jogo">{% endif %}
-                            </div>
-                        {% else %}
-                            <div class="jogo-time">
-                                {% if jogo.escudo_adversario %}<img src="{{ jogo.escudo_adversario }}" class="escudo-jogo">{% endif %}
-                                {{ jogo.adversario }}
-                            </div>
-                            <div class="jogo-placar">{{ jogo.placar_adversario }} x {{ jogo.placar_nosso }}</div>
-                            <div class="jogo-time jogo-time-direita">
-                                {{ nome_time }}
-                                {% if escudo_url %}<img src="{{ escudo_url }}" class="escudo-jogo">{% endif %}
-                            </div>
-                        {% endif %}
-                        <span class="jogo-seta">▾</span>
-                    </div>
-                    <div class="jogo-detalhe">
-                        <table class="tabela-detalhe-jogo">
-                            <thead>
-                                <tr><th>Estatística</th><th>{{ nome_time }}</th><th>{{ jogo.adversario }}</th></tr>
-                            </thead>
-                            <tbody>
-                                <tr><td>Posse de bola</td><td>{{ jogo.estatisticas.nosso.posse if jogo.estatisticas.nosso.posse is not none else "-" }}%</td><td>{{ jogo.estatisticas.adversario.posse if jogo.estatisticas.adversario.posse is not none else "-" }}%</td></tr>
-                                <tr><td>Escanteios</td><td>{{ jogo.estatisticas.nosso.escanteios if jogo.estatisticas.nosso.escanteios is not none else "-" }}</td><td>{{ jogo.estatisticas.adversario.escanteios if jogo.estatisticas.adversario.escanteios is not none else "-" }}</td></tr>
-                                <tr><td>Chutes (total)</td><td>{{ jogo.estatisticas.nosso.chutes if jogo.estatisticas.nosso.chutes is not none else "-" }}</td><td>{{ jogo.estatisticas.adversario.chutes if jogo.estatisticas.adversario.chutes is not none else "-" }}</td></tr>
-                                <tr><td>Chutes no gol</td><td>{{ jogo.estatisticas.nosso.chutes_no_gol if jogo.estatisticas.nosso.chutes_no_gol is not none else "-" }}</td><td>{{ jogo.estatisticas.adversario.chutes_no_gol if jogo.estatisticas.adversario.chutes_no_gol is not none else "-" }}</td></tr>
-                                <tr><td>Faltas</td><td>{{ jogo.estatisticas.nosso.faltas if jogo.estatisticas.nosso.faltas is not none else "-" }}</td><td>{{ jogo.estatisticas.adversario.faltas if jogo.estatisticas.adversario.faltas is not none else "-" }}</td></tr>
-                                <tr><td>Desarmes</td><td>{{ jogo.estatisticas.nosso.desarmes if jogo.estatisticas.nosso.desarmes is not none else "-" }}</td><td>{{ jogo.estatisticas.adversario.desarmes if jogo.estatisticas.adversario.desarmes is not none else "-" }}</td></tr>
-                                <tr><td>Cartões</td><td>{{ jogo.estatisticas.nosso.cartoes }}</td><td>{{ jogo.estatisticas.adversario.cartoes }}</td></tr>
-                            </tbody>
+            <aside class="lateral">
+                {% if vizinhos_tabela %}
+                <section aria-labelledby="t-pos">
+                    <h2 class="secao-titulo" id="t-pos">Posição no Brasileirão</h2>
+                    <div class="vidro tabela-caixa">
+                        <table class="vizinhos">
+                            {% for l in vizinhos_tabela %}
+                            {% set clube = (clubes|selectattr('escudo_url', 'equalto', '/escudo/' ~ l.team_id ~ '.png')|list|first) if clubes else none %}
+                            <tr class="{{ 'eu' if l.team_id == api_football_team_id else '' }}">
+                                <td class="pos">{{ l.posicao }}</td>
+                                <td class="nome">{% if clube %}<a href="/time/{{ clube.id }}">{% else %}<a>{% endif %}<img src="/escudo/{{ l.team_id }}.png" class="escudo" alt="" loading="lazy" onerror="this.style.visibility='hidden'">{{ l.nome }}</a></td>
+                                <td class="pts">{{ l.pontos }} pts</td>
+                            </tr>
+                            {% endfor %}
                         </table>
                     </div>
-                </div>
-                {% endfor %}
-            {% else %}
-                <div class="vazio">Nenhum jogo concluído ainda pra esse time.</div>
-            {% endif %}
-            </div>
-            <button class="btn-ver-mais-confronto" id="confronto-ver-mais" onclick="mostrarTodosConfronto()" style="display:none;">Ver todos os confrontos ↓</button>
+                </section>
+                {% endif %}
+
+                <section aria-labelledby="titulo-ultimos-jogos">
+                    <h2 class="secao-titulo" id="titulo-ultimos-jogos">Últimos jogos</h2>
+                    <div class="busca-wrap">
+                        <input type="text" class="busca" id="busca-confronto" list="lista-adversarios-confronto"
+                               placeholder="Confronto direto (ex: Palmeiras)" aria-label="Buscar confronto direto"
+                               oninput="buscarConfrontoDireto()" autocomplete="off">
+                        <datalist id="lista-adversarios-confronto">
+                            {% for t in times_serie_a %}<option value="{{ t.nome }}">{% endfor %}
+                        </datalist>
+                        <button type="button" class="limpar" id="confronto-limpar" onclick="limparConfrontoDireto()" hidden>limpar</button>
+                    </div>
+                    <div id="lista-ultimos-jogos">
+                    {% if ultimos_jogos %}
+                        {% for jogo in ultimos_jogos %}
+                        {% set res = 'v' if jogo.placar_nosso > jogo.placar_adversario else ('e' if jogo.placar_nosso == jogo.placar_adversario else 'd') %}
+                        <div class="vidro jogo" id="card-jogo-{{ jogo.jogo_id }}" onclick="toggleJogo({{ jogo.jogo_id }})">
+                            <div class="jogo-linha">
+                                {% if jogo.mandante %}
+                                <div class="jogo-time">{% if escudo_url %}<img src="{{ escudo_url }}" class="escudo" alt="">{% endif %}<span>{{ nome_time }}</span></div>
+                                <div class="placar">{{ jogo.placar_nosso }} x {{ jogo.placar_adversario }}</div>
+                                <div class="jogo-time dir"><span>{{ jogo.adversario }}</span>{% if jogo.escudo_adversario %}<img src="{{ jogo.escudo_adversario }}" class="escudo" alt="">{% endif %}</div>
+                                {% else %}
+                                <div class="jogo-time">{% if jogo.escudo_adversario %}<img src="{{ jogo.escudo_adversario }}" class="escudo" alt="">{% endif %}<span>{{ jogo.adversario }}</span></div>
+                                <div class="placar">{{ jogo.placar_adversario }} x {{ jogo.placar_nosso }}</div>
+                                <div class="jogo-time dir"><span>{{ nome_time }}</span>{% if escudo_url %}<img src="{{ escudo_url }}" class="escudo" alt="">{% endif %}</div>
+                                {% endif %}
+                            </div>
+                            <div class="jogo-rodape">
+                                <span><span class="res {{ res }}">{{ res|upper }}</span> {{ jogo.data_jogo.strftime('%d/%m/%Y') if jogo.data_jogo else '' }} · {{ 'em casa' if jogo.mandante else 'fora' }}</span>
+                                <span class="seta" aria-hidden="true"></span>
+                            </div>
+                            <div class="jogo-detalhe">
+                                {% set en = jogo.estatisticas.nosso %}{% set ea = jogo.estatisticas.adversario %}
+                                {% for chave, rotulo, suf in [('posse', 'Posse de bola', '%'), ('escanteios', 'Escanteios', ''), ('chutes', 'Chutes', ''), ('chutes_no_gol', 'Chutes no gol', ''), ('faltas', 'Faltas', ''), ('desarmes', 'Desarmes', ''), ('cartoes', 'Cartões', '')] %}
+                                {% set a = en[chave] %}{% set b = ea[chave] %}
+                                {% set soma = ((a or 0)|float) + ((b or 0)|float) %}
+                                <div class="comp">
+                                    <span class="n1">{{ ((a|float)|round|int) if a is not none else '-' }}{{ suf if a is not none else '' }}</span>
+                                    <span class="comp-meio">
+                                        <span class="comp-lbl">{{ rotulo }}</span>
+                                        <span class="comp-barra"><span class="a" style="width: {{ (100 * (a or 0)|float / soma)|round(1) if soma else 50 }}%"></span><span class="b" style="flex: 1"></span></span>
+                                    </span>
+                                    <span class="n2">{{ ((b|float)|round|int) if b is not none else '-' }}{{ suf if b is not none else '' }}</span>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="vazio">Nenhum jogo concluído ainda para esse time.</div>
+                    {% endif %}
+                    </div>
+                    <button type="button" class="ver-mais" id="confronto-ver-mais" onclick="mostrarTodosConfronto()" hidden>Ver todos os confrontos</button>
+                </section>
+            </aside>
         </div>
-    </div>
+    </main>
 
     <script>
-        // NOVO (busca de confronto direto)
+        // busca de confronto direto (mesma rota de antes: /api/confronto/<time>/<adversário>)
         const NOME_TIME_ATUAL = {{ nome_time|tojson }};
         const ESCUDO_URL_ATUAL = {{ (escudo_url or "")|tojson }};
         const TIMES_SERIE_A_CONFRONTO = {{ times_serie_a|tojson }};
@@ -7031,33 +7180,29 @@ PAGINA_TIME = """
             if (!termo) { limparConfrontoDireto(); return; }
             const encontrado = TIMES_SERIE_A_CONFRONTO.find(t => t.nome.toLowerCase() === termo.toLowerCase());
             if (!encontrado) return; // ainda digitando - espera bater com uma opção da lista
-
-            document.getElementById('confronto-limpar').style.display = '';
-            document.getElementById('titulo-ultimos-jogos').textContent = `Confrontos: ${NOME_TIME_ATUAL} x ${encontrado.nome}`;
+            document.getElementById('confronto-limpar').hidden = false;
+            document.getElementById('titulo-ultimos-jogos').textContent = 'Confrontos com ' + encontrado.nome;
             document.getElementById('lista-ultimos-jogos').innerHTML = '<div class="vazio">Buscando confrontos...</div>';
-            document.getElementById('confronto-ver-mais').style.display = 'none';
-
+            document.getElementById('confronto-ver-mais').hidden = true;
             fetch(`/api/confronto/${TIME_ID_ATUAL}/${encontrado.id}`)
                 .then(r => r.json())
                 .then(jogos => {
                     confrontoJogosCompletos = jogos;
                     renderizarConfrontoDireto(jogos.slice(0, 5));
-                    if (jogos.length > 5) {
-                        document.getElementById('confronto-ver-mais').style.display = '';
-                    }
+                    if (jogos.length > 5) document.getElementById('confronto-ver-mais').hidden = false;
                 });
         }
 
         function mostrarTodosConfronto() {
             renderizarConfrontoDireto(confrontoJogosCompletos);
-            document.getElementById('confronto-ver-mais').style.display = 'none';
+            document.getElementById('confronto-ver-mais').hidden = true;
         }
 
         function limparConfrontoDireto() {
             document.getElementById('busca-confronto').value = '';
-            document.getElementById('confronto-limpar').style.display = 'none';
-            document.getElementById('confronto-ver-mais').style.display = 'none';
-            document.getElementById('titulo-ultimos-jogos').textContent = 'Últimos Jogos';
+            document.getElementById('confronto-limpar').hidden = true;
+            document.getElementById('confronto-ver-mais').hidden = true;
+            document.getElementById('titulo-ultimos-jogos').textContent = 'Últimos jogos';
             document.getElementById('lista-ultimos-jogos').innerHTML = ULTIMOS_JOGOS_HTML_ORIGINAL;
         }
 
@@ -7070,120 +7215,44 @@ PAGINA_TIME = """
             const escapar = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
                 '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
             }[c]));
-            const val = (v, suf) => (v === null || v === undefined) ? '-' : (v + (suf || ''));
+            const num = (v) => (v === null || v === undefined || v === '') ? null : Number(v);
+            const data = (d) => { const p = String(d || '').slice(0, 10).split('-'); return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : escapar(d); };
+            const LINHAS = [['posse', 'Posse de bola', '%'], ['escanteios', 'Escanteios', ''], ['chutes', 'Chutes', ''],
+                ['chutes_no_gol', 'Chutes no gol', ''], ['faltas', 'Faltas', ''], ['desarmes', 'Desarmes', ''], ['cartoes', 'Cartões', '']];
             cont.innerHTML = jogos.map(jogo => {
-                const escudoNosso = ESCUDO_URL_ATUAL ? `<img src="${ESCUDO_URL_ATUAL}" class="escudo-jogo">` : '';
-                const escudoAdv = jogo.escudo_adversario ? `<img src="${jogo.escudo_adversario}" class="escudo-jogo">` : '';
-                const nomeAdv = escapar(jogo.adversario);
-                const linhaPlacar = jogo.mandante
-                    ? `<div class="jogo-time">${escudoNosso}${escapar(NOME_TIME_ATUAL)}</div>
-                       <div class="jogo-placar">${jogo.placar_nosso} x ${jogo.placar_adversario}</div>
-                       <div class="jogo-time jogo-time-direita">${nomeAdv}${escudoAdv}</div>`
-                    : `<div class="jogo-time">${escudoAdv}${nomeAdv}</div>
-                       <div class="jogo-placar">${jogo.placar_adversario} x ${jogo.placar_nosso}</div>
-                       <div class="jogo-time jogo-time-direita">${escapar(NOME_TIME_ATUAL)}${escudoNosso}</div>`;
+                const escNosso = ESCUDO_URL_ATUAL ? `<img src="${ESCUDO_URL_ATUAL}" class="escudo" alt="">` : '';
+                const escAdv = jogo.escudo_adversario ? `<img src="${escapar(jogo.escudo_adversario)}" class="escudo" alt="">` : '';
+                const nosso = `<span>${escapar(NOME_TIME_ATUAL)}</span>`, adv = `<span>${escapar(jogo.adversario)}</span>`;
+                const linha = jogo.mandante
+                    ? `<div class="jogo-time">${escNosso}${nosso}</div><div class="placar">${jogo.placar_nosso} x ${jogo.placar_adversario}</div><div class="jogo-time dir">${adv}${escAdv}</div>`
+                    : `<div class="jogo-time">${escAdv}${adv}</div><div class="placar">${jogo.placar_adversario} x ${jogo.placar_nosso}</div><div class="jogo-time dir">${nosso}${escNosso}</div>`;
+                const r = jogo.placar_nosso > jogo.placar_adversario ? 'v' : (jogo.placar_nosso === jogo.placar_adversario ? 'e' : 'd');
                 const en = (jogo.estatisticas && jogo.estatisticas.nosso) || {};
                 const ea = (jogo.estatisticas && jogo.estatisticas.adversario) || {};
-                return `<div class="jogo-card" id="card-confronto-${jogo.jogo_id}" onclick="toggleJogoConfronto(${jogo.jogo_id})">
-                    <div class="jogo-placar-linha">
-                        ${linhaPlacar}
-                        <span class="jogo-seta">▾</span>
-                    </div>
-                    <div class="confronto-data">${jogo.data_jogo}</div>
-                    <div class="jogo-detalhe">
-                        <table class="tabela-detalhe-jogo">
-                            <thead><tr><th>Estatística</th><th>${escapar(NOME_TIME_ATUAL)}</th><th>${nomeAdv}</th></tr></thead>
-                            <tbody>
-                                <tr><td>Posse de bola</td><td>${val(en.posse, '%')}</td><td>${val(ea.posse, '%')}</td></tr>
-                                <tr><td>Escanteios</td><td>${val(en.escanteios)}</td><td>${val(ea.escanteios)}</td></tr>
-                                <tr><td>Chutes (total)</td><td>${val(en.chutes)}</td><td>${val(ea.chutes)}</td></tr>
-                                <tr><td>Chutes no gol</td><td>${val(en.chutes_no_gol)}</td><td>${val(ea.chutes_no_gol)}</td></tr>
-                                <tr><td>Faltas</td><td>${val(en.faltas)}</td><td>${val(ea.faltas)}</td></tr>
-                                <tr><td>Desarmes</td><td>${val(en.desarmes)}</td><td>${val(ea.desarmes)}</td></tr>
-                                <tr><td>Cartões</td><td>${en.cartoes != null ? en.cartoes : 0}</td><td>${ea.cartoes != null ? ea.cartoes : 0}</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
+                const comp = LINHAS.map(([k, rot, suf]) => {
+                    const a = num(en[k]), b = num(ea[k]); const soma = (a || 0) + (b || 0);
+                    const pa = soma ? (100 * (a || 0) / soma).toFixed(1) : 50;
+                    const fmt = (v) => v === null ? '-' : Math.round(v) + suf;
+                    return `<div class="comp"><span class="n1">${fmt(a)}</span><span class="comp-meio"><span class="comp-lbl">${rot}</span><span class="comp-barra"><span class="a" style="width:${pa}%"></span><span class="b" style="flex:1"></span></span></span><span class="n2">${fmt(b)}</span></div>`;
+                }).join('');
+                return `<div class="vidro jogo" id="card-confronto-${jogo.jogo_id}" onclick="toggleJogoConfronto(${jogo.jogo_id})">
+                    <div class="jogo-linha">${linha}</div>
+                    <div class="jogo-rodape"><span><span class="res ${r}">${r.toUpperCase()}</span> ${data(jogo.data_jogo)} · ${jogo.mandante ? 'em casa' : 'fora'}</span><span class="seta" aria-hidden="true"></span></div>
+                    <div class="jogo-detalhe">${comp}</div>
                 </div>`;
             }).join('');
         }
 
-        function toggleJogoConfronto(jogoId) {
-            document.getElementById('card-confronto-' + jogoId).classList.toggle('aberto');
-        }
+        function toggleJogoConfronto(jogoId) { document.getElementById('card-confronto-' + jogoId).classList.toggle('aberto'); }
+        function toggleJogo(jogoId) { document.getElementById('card-jogo-' + jogoId).classList.toggle('aberto'); }
 
-        function toggleJogo(jogoId) {
-            document.getElementById('card-jogo-' + jogoId).classList.toggle('aberto');
-        }
-
-        function filtrarTimes() {
-            const termo = document.getElementById('busca-time').value.toLowerCase();
-            let visiveis = 0;
-            document.querySelectorAll('.item-time').forEach(function(card) {
-                const nome = card.querySelector('.clube-nome').textContent.toLowerCase();
-                const bate = nome.includes(termo);
-                card.dataset.escondidoBusca = bate ? '0' : '1';
-                if (bate) visiveis++;
-            });
-            document.getElementById('nenhum-resultado-time').style.display = (termo && visiveis === 0) ? '' : 'none';
-            paginaAtual['lista-times'] = 0;
-            renderizarPagina('lista-times');
-        }
-
-        const TAMANHO_PAGINA = 10;
-        const paginaAtual = {};
-
-        function salvarPaginaNoNavegador(listaId, pagina) {
-            try { localStorage.setItem('pagina:' + window.location.pathname + ':' + listaId, String(pagina)); } catch (e) {}
-        }
-        function carregarPaginaDoNavegador(listaId) {
-            try {
-                const v = localStorage.getItem('pagina:' + window.location.pathname + ':' + listaId);
-                return v !== null ? parseInt(v, 10) : 0;
-            } catch (e) { return 0; }
-        }
-
-        function totalPaginas(listaId) {
-            let n = 0;
-            document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
-                if (item.dataset.escondidoBusca !== '1') n++;
-            });
-            return Math.max(1, Math.ceil(n / TAMANHO_PAGINA));
-        }
-
-        function renderizarPagina(listaId) {
-            if (!(listaId in paginaAtual)) { paginaAtual[listaId] = carregarPaginaDoNavegador(listaId); }
-            const total = totalPaginas(listaId);
-            if (paginaAtual[listaId] > total - 1) paginaAtual[listaId] = total - 1;
-            if (paginaAtual[listaId] < 0) paginaAtual[listaId] = 0;
-            const pagina = paginaAtual[listaId];
-            let visivelIndice = 0;
-            document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
-                if (item.dataset.escondidoBusca === '1') { item.style.display = 'none'; return; }
-                const paginaDoItem = Math.floor(visivelIndice / TAMANHO_PAGINA);
-                item.style.display = (paginaDoItem === pagina) ? '' : 'none';
-                visivelIndice++;
-            });
-            const label = document.getElementById('label-' + listaId);
-            if (label) label.textContent = 'Página ' + (pagina + 1) + ' de ' + total;
-            const btnAnterior = document.getElementById('anterior-' + listaId);
-            const btnProximo = document.getElementById('proximo-' + listaId);
-            if (btnAnterior) btnAnterior.disabled = (pagina === 0);
-            if (btnProximo) btnProximo.disabled = (pagina >= total - 1);
-        }
-
-        function mudarPagina(listaId, direcao) {
-            const total = totalPaginas(listaId);
-            let pagina = (paginaAtual[listaId] || 0) + direcao;
-            pagina = Math.max(0, Math.min(total - 1, pagina));
-            paginaAtual[listaId] = pagina;
-            salvarPaginaNoNavegador(listaId, pagina);
-            renderizarPagina(listaId);
-        }
-
-        renderizarPagina('lista-times');
+        // a fileira de escudos começa mostrando o time aberto
+        (function () {
+            const ativo = document.querySelector('.fileira-time.ativo');
+            if (ativo) { const f = ativo.parentElement; f.scrollLeft = ativo.offsetLeft - f.clientWidth / 2 + ativo.clientWidth / 2; }
+        })();
     </script>
-</body>
+""" + SCRIPT_FUNDO_VIVO + """</body>
 </html>
 """
 
@@ -7205,6 +7274,7 @@ NOMES_TIPO_LINHA_TIME = {
     "impedimento": "Impedimentos do time",
     "desarme": "Desarmes do time",
     "posse": "Posse de bola média",
+    "gols": "Gols do time",
 }
 ORDEM_BLOCOS_TIME = [
     "escanteio", "chute", "chute_no_gol", "falta", "cartao", "impedimento", "desarme", "posse",
@@ -7405,7 +7475,7 @@ def buscar_lideres_estatisticas(cur):
             continue
         time_id, time_nome, media_total = row
         lideres.append({
-            "titulo": titulo, "tipo": tipo, "time_nome": time_nome,
+            "titulo": titulo, "tipo": tipo, "time_nome": time_nome, "time_id": time_id,
             "media_total": float(media_total),
             "media_5": buscar_media_ultimos_5_jogos(cur, time_id, tipo),
         })
@@ -8630,7 +8700,7 @@ def times_lista():
     return render_template_string(
         PAGINA_TIMES, clubes=clubes, tabela=tabela, lideres=lideres, correlacoes=correlacoes,
         correlacoes_categoria=correlacoes_categoria,
-        nav_html=barra_navegacao("times", round(banca_atual, 2)),
+        nav_html=barra_navegacao_nova("times", round(banca_atual, 2)),
     )
 
 
@@ -8692,7 +8762,7 @@ def time_detalhe(time_id):
         estilo_time=estilo_time, quebras_rodada=quebras_rodada, padroes_zona=padroes_zona,
         correlacoes_time=correlacoes_time, correlacoes_categoria_time=correlacoes_categoria_time,
         times_serie_a=times_serie_a,
-        nav_html=barra_navegacao("times", round(banca_atual, 2)),
+        nav_html=barra_navegacao_nova("times", round(banca_atual, 2)),
     )
 
 
