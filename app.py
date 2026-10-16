@@ -36,7 +36,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 import psycopg2
-from flask import Flask, render_template_string, request, redirect, Response, session, url_for, flash, get_flashed_messages, jsonify
+from flask import Flask, render_template_string, request, redirect, Response, session, url_for, flash, get_flashed_messages, jsonify, send_from_directory
 from werkzeug.security import generate_password_hash, check_password_hash
 from api_consulta import api_consulta
 
@@ -310,7 +310,8 @@ def barra_navegacao_nova(pagina_atual, banca_atual=None):
         banca = f'<a href="/minhas-apostas" class="topo-banca">Banca R$ {banca_atual:.2f}</a>'
     return (
         '<header class="topo">'
-        f'<a href="/" class="topo-marca" title="{MARCA}, {SLOGAN["pt"]}">{MARCA}</a>'
+        f'<a href="/" class="topo-marca" aria-label="{MARCA}" title="{MARCA}, {SLOGAN["pt"]}">'
+        'Achismo <span class="logo-zero" aria-hidden="true"></span></a>'
         f'<nav class="topo-nav" aria-label="Páginas">{links}</nav>'
         f'<div class="topo-direita">{banca}<a href="/minhas-apostas" class="topo-conta">Conta</a></div>'
         '</header>'
@@ -734,6 +735,9 @@ PAGINA = """
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
+    <link rel="icon" href="/static/marca/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/static/marca/favicon-32.png" sizes="32x32" type="image/png">
+    <link rel="apple-touch-icon" href="/static/marca/apple-touch-icon.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recomendações - Achismo Zero</title>
@@ -913,6 +917,15 @@ PAGINA = """
             justify-self: start;
             font-family: var(--f-titulo); font-weight: 700; font-size: 0.875rem; letter-spacing: -.01em;
             color: var(--texto); text-decoration: none; white-space: nowrap;
+        }
+        /* 16/10/2026: "Zero" vira o logo desenhado pelo usuário - o desenho
+           recorta um degradê ouro -> azul (mesmas cores do brilho da /inicio) */
+        .logo-zero {
+            display: inline-block; height: 0.86em; aspect-ratio: 1928.53 / 369.92;
+            vertical-align: -0.04em; margin-left: 0.12em;
+            background: linear-gradient(100deg, #ffd20a 0%, #fff3b0 35%, #bdbfc7 65%, #7fa2ea 100%);
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='3.47 307.06 1928.53 369.92'%3E%3Cg fill='%23000'%3E%3Cpath d='M563.46,314.21l-293.13,266.25c-5.76,5.23-2.06,14.81,5.72,14.81h250.01c8.12,0,11.63,10.28,5.2,15.25l-82.69,63.89c-1.49,1.15-3.32,1.78-5.2,1.78H22c-7.78,0-11.48-9.57-5.73-14.81l284.32-258.81c5.75-5.24,2.05-14.81-5.73-14.81h-163.65c-7.78,0-11.48-9.58-5.72-14.81l68.31-62.07c1.56-1.42,3.59-2.21,5.7-2.21l361.38,-1.13c5.48,-0.02,6.64,2.98,2.59,6.66Z' transform='translate(-10 0)'/%3E%3Cpath d='M238.26,652.63l380.83-341.3c2.43-2.18,5.58-3.38,8.84-3.38h279.74c12.16,0,17.89,15,8.84,23.11l-43.83,39.28c-2.43,2.18-5.58,3.38-8.84,3.38h-206.71c-3.3,0-6.48,1.23-8.92,3.46l-48.78,44.47c-8.98,8.19-3.12,23.14,9.03,23.04l146.45-1.19c12.11-.1,17.99,14.76,9.1,22.97l-40.54,37.49c-2.45,2.26-5.66,3.52-8.99,3.52h-205.62c-3.28,0-6.44,1.22-8.88,3.42l-47.32,42.73c-9,8.13-3.25,23.08,8.88,23.08h146.16c12.15,0,17.89,14.99,8.85,23.11l-80.85,72.54c-2.43,2.18-5.58,3.39-8.85,3.39H247.1c-12.16,0-17.89-15-8.84-23.11Z'/%3E%3Cpath d='M1901.71,307.06l-404.11.29c-3.96,0-10.53,5.28-15.79,10.78l-362.08,326.91c-14.03,11.22-9.92,31.62,7.63,31.58l362.77-.81c3.95,0,52.41,2.59,55.57.07l366.99-333.87c14-11.22,6.55-34.95-10.98-34.95ZM1710.9,358.2h43.17l-496.68,217.3,126.27-101.01c94.36-75.48,209.2-116.29,327.24-116.29ZM1790.45,393.15l-144.2,115.57c-94.12,75.43-208.68,116.35-326.49,116.61l-21.56.05,495.02-234.95c-.81.96-1.72,1.88-2.77,2.72Z' transform='translate(12 0)'/%3E%3Cpath d='M1239.16,507.79l202.79-183.3c5.68-5.29,4.71-17.42-2.83-17.42l-447.04,1.67c-1.94,0-3.82.74-5.3,2.08l-384.98,350.66c-5.77,5.25-2.29,15.33,5.3,15.33h115.11c1.94,0,3.81-.74,5.29-2.08l178.91-162.72c1.48-1.34,3.35-2.08,5.29-2.08h66.31c2.44,0,4.75,1.17,6.3,3.18l123.71,160.52c1.55,2.01,3.86,3.18,6.3,3.18h128.81c7.12,0,10.82-9.05,5.99-14.63l-132-152.25h116.68c1.97,0,3.88-.76,5.36-2.14ZM977.69,423.26l43.55-46.49c1.53-1.63,3.61-2.55,5.77-2.55h207.61c7.45,0,11,9.79,5.49,15.15l-47.85,46.49c-1.5,1.46-3.46,2.27-5.49,2.27h-203.31c-7.27,0-10.91-9.38-5.77-14.87Z'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='3.47 307.06 1928.53 369.92'%3E%3Cg fill='%23000'%3E%3Cpath d='M563.46,314.21l-293.13,266.25c-5.76,5.23-2.06,14.81,5.72,14.81h250.01c8.12,0,11.63,10.28,5.2,15.25l-82.69,63.89c-1.49,1.15-3.32,1.78-5.2,1.78H22c-7.78,0-11.48-9.57-5.73-14.81l284.32-258.81c5.75-5.24,2.05-14.81-5.73-14.81h-163.65c-7.78,0-11.48-9.58-5.72-14.81l68.31-62.07c1.56-1.42,3.59-2.21,5.7-2.21l361.38,-1.13c5.48,-0.02,6.64,2.98,2.59,6.66Z' transform='translate(-10 0)'/%3E%3Cpath d='M238.26,652.63l380.83-341.3c2.43-2.18,5.58-3.38,8.84-3.38h279.74c12.16,0,17.89,15,8.84,23.11l-43.83,39.28c-2.43,2.18-5.58,3.38-8.84,3.38h-206.71c-3.3,0-6.48,1.23-8.92,3.46l-48.78,44.47c-8.98,8.19-3.12,23.14,9.03,23.04l146.45-1.19c12.11-.1,17.99,14.76,9.1,22.97l-40.54,37.49c-2.45,2.26-5.66,3.52-8.99,3.52h-205.62c-3.28,0-6.44,1.22-8.88,3.42l-47.32,42.73c-9,8.13-3.25,23.08,8.88,23.08h146.16c12.15,0,17.89,14.99,8.85,23.11l-80.85,72.54c-2.43,2.18-5.58,3.39-8.85,3.39H247.1c-12.16,0-17.89-15-8.84-23.11Z'/%3E%3Cpath d='M1901.71,307.06l-404.11.29c-3.96,0-10.53,5.28-15.79,10.78l-362.08,326.91c-14.03,11.22-9.92,31.62,7.63,31.58l362.77-.81c3.95,0,52.41,2.59,55.57.07l366.99-333.87c14-11.22,6.55-34.95-10.98-34.95ZM1710.9,358.2h43.17l-496.68,217.3,126.27-101.01c94.36-75.48,209.2-116.29,327.24-116.29ZM1790.45,393.15l-144.2,115.57c-94.12,75.43-208.68,116.35-326.49,116.61l-21.56.05,495.02-234.95c-.81.96-1.72,1.88-2.77,2.72Z' transform='translate(12 0)'/%3E%3Cpath d='M1239.16,507.79l202.79-183.3c5.68-5.29,4.71-17.42-2.83-17.42l-447.04,1.67c-1.94,0-3.82.74-5.3,2.08l-384.98,350.66c-5.77,5.25-2.29,15.33,5.3,15.33h115.11c1.94,0,3.81-.74,5.29-2.08l178.91-162.72c1.48-1.34,3.35-2.08,5.29-2.08h66.31c2.44,0,4.75,1.17,6.3,3.18l123.71,160.52c1.55,2.01,3.86,3.18,6.3,3.18h128.81c7.12,0,10.82-9.05,5.99-14.63l-132-152.25h116.68c1.97,0,3.88-.76,5.36-2.14ZM977.69,423.26l43.55-46.49c1.53-1.63,3.61-2.55,5.77-2.55h207.61c7.45,0,11,9.79,5.49,15.15l-47.85,46.49c-1.5,1.46-3.46,2.27-5.49,2.27h-203.31c-7.27,0-10.91-9.38-5.77-14.87Z'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
         }
         .topo-nav {
             justify-self: center;
@@ -1743,6 +1756,9 @@ PAGINA_HISTORICO = """
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
+    <link rel="icon" href="/static/marca/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/static/marca/favicon-32.png" sizes="32x32" type="image/png">
+    <link rel="apple-touch-icon" href="/static/marca/apple-touch-icon.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Histórico - Achismo Zero</title>
@@ -3026,7 +3042,7 @@ def exigir_login():
     sem estar logado, redireciona pro login. Exceções: a própria página de
     login, e o proxy de escudo (é só uma imagem pública, sem dado
     pessoal)."""
-    rotas_livres = ("login", "api_consulta.consultar", "inicio", "numeros_home")
+    rotas_livres = ("login", "api_consulta.consultar", "inicio", "numeros_home", "favicon")
     if request.endpoint in rotas_livres or (request.endpoint or "").startswith("escudo"):
         return
     if request.endpoint == "static":
@@ -3045,6 +3061,9 @@ PAGINA_LIGA_NAO_IMPLEMENTADA = """
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
+    <link rel="icon" href="/static/marca/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/static/marca/favicon-32.png" sizes="32x32" type="image/png">
+    <link rel="apple-touch-icon" href="/static/marca/apple-touch-icon.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ liga_nome }} - Achismo Zero</title>
@@ -3240,6 +3259,9 @@ PAGINA_LOGIN = """
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
+    <link rel="icon" href="/static/marca/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/static/marca/favicon-32.png" sizes="32x32" type="image/png">
+    <link rel="apple-touch-icon" href="/static/marca/apple-touch-icon.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - Achismo Zero</title>
@@ -3646,6 +3668,9 @@ PAGINA_ROI = """
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
+    <link rel="icon" href="/static/marca/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/static/marca/favicon-32.png" sizes="32x32" type="image/png">
+    <link rel="apple-touch-icon" href="/static/marca/apple-touch-icon.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Minhas Apostas - Achismo Zero</title>
@@ -4992,6 +5017,9 @@ PAGINA_JOGADORES = """
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
+    <link rel="icon" href="/static/marca/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/static/marca/favicon-32.png" sizes="32x32" type="image/png">
+    <link rel="apple-touch-icon" href="/static/marca/apple-touch-icon.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jogadores - Achismo Zero</title>
@@ -5323,6 +5351,9 @@ PAGINA_CLUBE = """
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
+    <link rel="icon" href="/static/marca/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/static/marca/favicon-32.png" sizes="32x32" type="image/png">
+    <link rel="apple-touch-icon" href="/static/marca/apple-touch-icon.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ nome_clube }} - Achismo Zero</title>
@@ -6136,6 +6167,9 @@ PAGINA_TIMES = """
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
+    <link rel="icon" href="/static/marca/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/static/marca/favicon-32.png" sizes="32x32" type="image/png">
+    <link rel="apple-touch-icon" href="/static/marca/apple-touch-icon.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Estatísticas de Times - Achismo Zero</title>
@@ -6446,6 +6480,9 @@ PAGINA_TIME = """
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
+    <link rel="icon" href="/static/marca/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/static/marca/favicon-32.png" sizes="32x32" type="image/png">
+    <link rel="apple-touch-icon" href="/static/marca/apple-touch-icon.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ nome_time }} - Estatísticas de Time</title>
@@ -8085,6 +8122,16 @@ def buscar_escudo_url(cur, nome_time):
 
 
 _escudos_cache = {}
+
+
+# 16/10/2026: ícone do site (o "0" do logo Achismo Zero, em pé). As páginas
+# apontam para /static/marca/ no <head>; esta rota cobre quem pede o
+# /favicon.ico direto (navegador antigo, leitor de feed, aba de JSON).
+@app.route("/favicon.ico")
+def favicon():
+    resposta = send_from_directory(os.path.join(app.root_path, "static", "marca"), "favicon-32.png", mimetype="image/png")
+    resposta.headers["Cache-Control"] = "public, max-age=604800"
+    return resposta
 
 
 @app.route("/escudo/<int:team_id>.png")
