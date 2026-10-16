@@ -5237,112 +5237,142 @@ PAGINA_JOGADORES = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jogadores - Achismo Zero</title>
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-            background: #0d1117; color: #e6edf3; max-width: 1500px;
-            margin: 0 auto; padding: 32px 24px 80px;
-        }
-        h1 { font-size: 1.6rem; margin: 0 0 4px; text-align: center; }
-        .subtitulo { color: #8b949e; margin: 0 0 16px; font-size: 0.88rem; text-align: center; }
-        .subtitulo a { color: #58a6ff; }
-        .titulo-coluna { font-size: 1.05rem; font-weight: 700; margin: 0 0 14px; text-align: center; }
-        .vazio {
-            text-align: center; color: #8b949e; padding: 24px; margin-top: 10px;
-            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
-        }
-        .busca {
-            width: 100%; padding: 10px 14px; margin-bottom: 14px;
-            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
-            border-radius: 8px; font-size: 0.9rem;
-        }
-        .cartao {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 16px 20px; margin-bottom: 12px;
-        }
-        .nome-jogador { font-weight: 700; font-size: 1rem; margin-bottom: 4px; }
-        .nome-jogador-time { color: #8b949e; font-weight: 400; font-size: 0.8rem; }
-        .bloco { margin-bottom: 10px; margin-top: 10px; }
-        .bloco-titulo { color: #8b949e; font-size: 0.78rem; text-transform: uppercase;
-            letter-spacing: 0.03em; margin-bottom: 6px; }
-        .linhas-grid { display: flex; gap: 10px; flex-wrap: wrap; }
-        .linha-item {
-            background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
-            padding: 6px 12px; font-size: 0.82rem;
-        }
-        .linha-item b { color: #3fb950; }
-        .binario-texto { font-size: 0.88rem; color: #c9d1d9; }
-        .binario-texto b { color: #3fb950; }
-        .nenhum-resultado { display: none; }
-
-        /* coluna 1: clubes (busca + lista, igual /time/<id>) */
-        .clube-btn {
-            display: flex; align-items: center; gap: 12px;
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 12px 16px; margin-bottom: 10px; text-decoration: none;
-            color: #e6edf3; transition: border-color 0.15s;
-        }
-        .clube-btn:hover { border-color: #58a6ff; }
-        .clube-selo {
-            width: 34px; height: 34px; border-radius: 50%;
-            background: transparent;
-            flex-shrink: 0; object-fit: contain;
-        }
-        .clube-nome { font-weight: 700; font-size: 0.92rem; }
-        .clube-sub { color: #8b949e; font-size: 0.75rem; }
-        .paginacao {
-            display: flex; align-items: center; justify-content: center; gap: 14px;
-            margin-top: 4px; font-size: 0.82rem; color: #8b949e;
-        }
-        .btn-pagina {
-            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
-            border-radius: 8px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer;
-        }
-        .btn-pagina:hover:not(:disabled) { border-color: #58a6ff; }
-        .btn-pagina:disabled { opacity: 0.35; cursor: default; }
-
-        /* coluna 3: líderes de estatísticas */
-        .lider-card {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 16px; margin-bottom: 16px;
-        }
-        .lider-titulo {
-            display: inline-block; padding: 4px 14px; border-radius: 999px;
-            font-size: 0.78rem; font-weight: 700; margin-bottom: 12px;
-        }
-        .lider-cor-0 { background: #9e6a0322; color: #d29922; }
-        .lider-cor-1 { background: #a371f722; color: #a371f7; }
-        .lider-cor-2 { background: #39c5cf22; color: #39c5cf; }
-        .lider-cor-3 { background: #3fb95022; color: #3fb950; }
-        .lider-cor-4 { background: #f8514922; color: #f85149; }
-        .lider-cor-5 { background: #db61a222; color: #db61a2; }
-        .tabela-lider { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-        .tabela-lider th { text-align: left; color: #8b949e; font-weight: 600; padding: 4px 6px; }
-        .tabela-lider th:not(:first-child), .tabela-lider td:not(:first-child) { text-align: right; }
-        .tabela-lider td { padding: 6px; font-weight: 600; border-top: 1px solid #21262d; }
-        .vazio-pequeno { color: #8b949e; font-size: 0.8rem; font-style: italic; }
-
-        .grid-jogadores {
-            display: grid; grid-template-columns: 1fr 1.5fr 1fr; gap: 22px; align-items: start; margin-top: 12px;
-        }
-        @media (max-width: 1000px) {
-            .grid-jogadores { grid-template-columns: 1fr; }
-        }
+""" + FONTES_VISUAL_NOVO + """    <style>
+        /* REDESIGN (16/10/2026): lista geral de jogadores no visual novo.
+           Dados e comportamento são os de antes (busca na hora, páginas de
+           10, líderes, redirecionamento para o último clube aberto). A lista
+           de clubes da esquerda virou a fileira de escudos do topo. */
         """ + NAV_CSS + """
+""" + CSS_VISUAL_NOVO + """
+        .conteudo { width: var(--degrau1); margin: 0 auto; }
+        .rotulo {
+            font-family: var(--f-dado); font-size: 0.625rem; letter-spacing: .08em; text-transform: uppercase;
+            color: var(--apagado);
+        }
+        .secao-titulo {
+            margin: 0 0 0.875rem; font-family: var(--f-corpo); font-weight: 300;
+            font-size: clamp(1.125rem, 1.5vw, 1.4375rem); letter-spacing: -.025em; line-height: 1.1;
+        }
+        .nota { color: var(--apagado); font-size: 0.75rem; line-height: 1.6; margin: -0.375rem 0 1rem; max-width: 52rem; }
+        .nota b { color: var(--texto); font-weight: 600; }
+        .vidro { background: var(--vidro); border: 1px solid var(--vidro-borda); box-shadow: var(--vidro-sombra); border-radius: var(--raio); }
+        .vazio {
+            text-align: center; color: var(--apagado); padding: 2rem 1.5rem; font-size: 0.8125rem;
+            background: rgba(3, 12, 32, .4); border: 1px dashed var(--linha); border-radius: var(--raio);
+        }
+        .num { font-family: var(--f-dado); font-variant-numeric: tabular-nums; }
+        .escudo { object-fit: contain; flex-shrink: 0; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+
+        /* ---------- fileira de escudos (trocar de clube) ---------- */
+        .fileira {
+            display: flex; align-items: center; justify-content: space-between; gap: 0.25rem; padding: 0.375rem;
+            overflow-x: auto; scrollbar-width: thin; margin-bottom: 2rem;
+        }
+        .fileira-todos {
+            flex-shrink: 0; padding: 0.4375rem 0.75rem; margin-right: 0.25rem; border-radius: 999px; white-space: nowrap;
+            font-size: 0.75rem; font-weight: 600; color: var(--azul-claro); text-decoration: none;
+            border: 1px solid rgba(180, 200, 242, .35);
+        }
+        .fileira-todos:hover { background: rgba(180, 200, 242, .1); }
+        .fileira-todos.ativo { color: var(--ouro); border-color: rgba(255, 210, 10, .5); background: rgba(255, 210, 10, .12); }
+        .fileira-time {
+            flex-shrink: 0; width: 2.375rem; height: 2.375rem; border-radius: 0.625rem; display: grid; place-items: center;
+            border: 1px solid transparent; transition: background .15s, border-color .15s, transform .15s;
+        }
+        .fileira-time img { width: 1.5rem; height: 1.5rem; }
+        .fileira-time:hover { background: rgba(255,255,255,.07); transform: translateY(-1px); }
+        .fileira-time.ativo { background: rgba(255, 210, 10, .12); border-color: rgba(255, 210, 10, .5); }
+
+        /* ---------- duas colunas ---------- */
+        .grade { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 21rem); gap: 2.5rem; align-items: start; }
+        .lateral > section { margin-bottom: 2.5rem; }
+
+        .busca {
+            width: 100%; margin: 0 0 0.875rem; padding: 0.5625rem 0.875rem;
+            background: rgba(1, 5, 15, .55); border: 1px solid var(--linha); color: var(--texto);
+            border-radius: 999px; font-family: var(--f-corpo); font-size: 0.8125rem;
+            transition: border-color .15s, box-shadow .15s;
+        }
+        .busca::placeholder { color: #7d849c; }
+        .busca:focus { outline: none; border-color: var(--azul-claro); box-shadow: 0 0 0 3px rgba(180, 200, 242, .18); }
+
+        /* ---------- cartão do jogador ---------- */
+        .jogador { padding: 1rem 1.125rem 1.125rem; margin-bottom: 0.75rem; }
+        .jog-topo { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.875rem; }
+        .jog-nome { display: flex; align-items: center; gap: 0.625rem; min-width: 0; }
+        .jog-nome .escudo { width: 1.5rem; height: 1.5rem; }
+        .jog-nome b { font-size: 0.9375rem; font-weight: 700; }
+        .jog-nome span { font-size: 0.75rem; color: var(--apagado); }
+        .regua { display: inline-flex; align-items: center; gap: 0.375rem; font-size: 0.6875rem; color: var(--apagado); white-space: nowrap; }
+        .regua i { width: 0.5625rem; height: 0.75rem; border-radius: 0.125rem; border: 1px solid rgba(255, 210, 10, .5); display: inline-block; }
+        .regua i.cheio { background: var(--ouro); border-color: var(--ouro); }
+        .regua.alerta { color: var(--ouro); font-weight: 600; }
+        .jog-linhas { display: grid; gap: 0.375rem; }
+        .jog-linha { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); align-items: center; gap: 0.75rem; }
+        .jog-linha > span:first-child { font-size: 0.6875rem; color: var(--apagado); }
+        .celulas { display: flex; flex-wrap: wrap; gap: 0.3125rem; }
+        .cel {
+            --p: 0;
+            position: relative; display: inline-flex; align-items: baseline; gap: 0.375rem;
+            padding: 0.25rem 0.5rem; border-radius: 0.4375rem; font-size: 0.6875rem; white-space: nowrap;
+            border: 1px solid var(--linha-fraca);
+            background: linear-gradient(90deg, rgba(63, 111, 209, .32) calc(var(--p) * 1%), rgba(255,255,255,.03) calc(var(--p) * 1%));
+        }
+        .cel.forte { background: linear-gradient(90deg, rgba(255, 210, 10, .26) calc(var(--p) * 1%), rgba(255,255,255,.03) calc(var(--p) * 1%)); }
+        .cel span { font-family: var(--f-dado); color: var(--apagado); }
+        .cel b { font-family: var(--f-dado); font-weight: 600; color: var(--texto); }
+        .jog-extra { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--linha-fraca); font-size: 0.6875rem; color: var(--apagado); line-height: 1.6; }
+        .jog-extra b { font-family: var(--f-dado); font-weight: 500; color: var(--texto); }
+
+        /* paginação */
+        .paginacao { display: flex; align-items: center; justify-content: center; gap: 0.875rem; margin-top: 1rem; font-family: var(--f-dado); font-size: 0.6875rem; color: var(--apagado); }
+        .btn-pagina {
+            background: rgba(255,255,255,.05); border: 1px solid var(--linha); color: var(--texto);
+            border-radius: 999px; padding: 0.3125rem 0.75rem; font-family: var(--f-corpo); font-size: 0.75rem; font-weight: 600; cursor: pointer;
+        }
+        .btn-pagina:hover:not(:disabled) { border-color: var(--azul-claro); background: rgba(180, 200, 242, .1); }
+        .btn-pagina:disabled { opacity: .35; cursor: default; }
+
+        /* líderes (lateral) */
+        .lideres { display: grid; gap: 0.5rem; }
+        .lider { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.25rem 0.75rem; padding: 0.75rem 0.875rem; }
+        .lider .rotulo { grid-column: 1 / -1; }
+        .lider-quem { display: flex; align-items: center; gap: 0.5rem; min-width: 0; font-size: 0.8125rem; font-weight: 600; }
+        .lider-quem span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .lider-quem .escudo { width: 1.25rem; height: 1.25rem; }
+        .lider-valor { text-align: right; }
+        .lider-valor b { font-family: var(--f-dado); font-weight: 500; font-size: 1.25rem; display: block; line-height: 1; }
+        .lider-valor small { font-size: 0.625rem; color: var(--apagado); }
+
+        @media (max-width: 1099px) {
+            :root { --degrau1: 100%; --degrau2: 100%; }
+            .grade { grid-template-columns: minmax(0, 1fr); }
+        }
+        @media (max-width: 560px) {
+            .jog-linha { grid-template-columns: minmax(0, 1fr); gap: 0.25rem; }
+        }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+        /* foto do jogador (pelo servidor; sem foto, ficam as iniciais) */
+        .foto {
+            position: relative; flex-shrink: 0; width: 2.75rem; height: 2.75rem; border-radius: 50%;
+            display: grid; place-items: center; background: linear-gradient(150deg, #1d3a7a, #0a1a3f);
+            box-shadow: 0 0 0 1px rgba(180, 200, 242, .35), 0 0.25rem 0.75rem -0.25rem rgba(0,0,0,.6);
+        }
+        .foto .foto-iniciais { font-family: var(--f-titulo); font-size: 0.75rem; font-weight: 700; color: var(--azul-claro); letter-spacing: .02em; }
+        .foto > img:not(.foto-escudo) { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; object-position: center top; background: #e9edf5; }
+        .foto-escudo { position: absolute; right: -0.25rem; bottom: -0.25rem; width: 1.125rem; height: 1.125rem; object-fit: contain; filter: drop-shadow(0 1px 2px rgba(0,0,0,.7)); }
+        .cabeca { margin: 0 0 1.5rem; }
+        .cabeca h1 { margin: 0; font-family: var(--f-corpo); font-weight: 300; font-size: clamp(1.75rem, 2.6vw, 2.5rem); letter-spacing: -.03em; line-height: 1; }
+        .cabeca p { margin: 0.375rem 0 0; color: var(--apagado); font-size: 0.8125rem; max-width: 44rem; }
+        .cabeca a { color: var(--azul-claro); }
     </style>
 </head>
 <body>
-    <h1>📈 Estatísticas de Jogadores</h1>
-    <p class="subtitulo">Digite pra filtrar entre todos os jogadores de todos os clubes rastreados, na hora.
-        Procurando estatística do TIME inteiro? <a href="/times">Ver Estatísticas de Times →</a></p>
-    {{ nav_html|safe }}
+""" + FUNDO_VISUAL_NOVO + """    {{ nav_html|safe }}
     <script>
-        // NOVO: se a pessoa já tinha um clube aberto antes (ex: Corinthians)
-        // e voltou pra essa lista pelo botão da barra de navegação (sem
-        // "?geral=1"), leva direto pro clube de novo, em vez de mostrar a
-        // lista geral - o "📊 Estatísticas Gerais" (link com ?geral=1) é a
-        // saída explícita pra ver a lista de verdade.
+        // se a pessoa já tinha um clube aberto e voltou pela barra (sem ?geral=1),
+        // leva direto para ele; "Todos os jogadores" (com ?geral=1) é a saída
         if (!window.location.search.includes('geral=1')) {
             try {
                 const clubeId = localStorage.getItem('ultimo_clube_id');
@@ -5350,162 +5380,126 @@ PAGINA_JOGADORES = """
             } catch (e) {}
         }
     </script>
+    {% macro foto(j, escudo=None) %}
+        {%- set partes = j.nome.replace('.', ' ').split() -%}
+        <span class="foto" aria-hidden="true">
+            <span class="foto-iniciais">{{ (partes[0][0] ~ (partes[-1][0] if partes|length > 1 else '')) | upper }}</span>
+            {% if j.jogador_id %}<img src="/foto-jogador/{{ j.jogador_id }}.png" alt="" loading="lazy" onerror="this.remove()">{% endif %}
+            {% if escudo %}<img src="{{ escudo }}" alt="" class="foto-escudo" loading="lazy">{% endif %}
+        </span>
+    {% endmacro %}
+    {% macro dec(v, casas=0) %}{{ (('%.' ~ casas ~ 'f')|format(v)).replace('.', ',') }}{% endmacro %}
+    {% set escudos = {} %}{% for c in clubes %}{% set _ = escudos.update({c.nome: c.escudo_url}) %}{% endfor %}
 
-    <div class="grid-jogadores">
-        <div class="coluna-clubes">
-            <input type="text" class="busca" id="busca-time" placeholder="Buscar times..." onkeyup="filtrarTimes()">
-            <div id="lista-times">
-            {% if clubes %}
-                {% for c in clubes %}
-                <a href="/clube/{{ c.id }}" class="clube-btn item-time item-pagina">
-                    {% if c.escudo_url %}
-                    <img src="{{ c.escudo_url }}" alt="{{ c.nome }}" class="clube-selo" onerror="this.outerHTML='<div class=&quot;clube-selo&quot;></div>'">
-                    {% else %}
-                    <div class="clube-selo"></div>
-                    {% endif %}
-                    <div>
-                        <div class="clube-nome">{{ c.nome }}</div>
-                        <div class="clube-sub">Ver elenco e última escalação →</div>
-                    </div>
-                </a>
-                {% endfor %}
-            {% else %}
-                <div class="vazio">Nenhum clube rastreado ainda.</div>
-            {% endif %}
-            </div>
-            <div class="vazio" id="nenhum-resultado-time" style="display:none;">Nenhum time encontrado com esse nome.</div>
-            {% if clubes|length > 10 %}
-            <div class="paginacao">
-                <button class="btn-pagina" id="anterior-lista-times" onclick="mudarPagina('lista-times', -1)">← Anterior</button>
-                <span id="label-lista-times"></span>
-                <button class="btn-pagina" id="proximo-lista-times" onclick="mudarPagina('lista-times', 1)">Próxima →</button>
-            </div>
-            {% endif %}
+    <main class="conteudo">
+        <nav class="vidro fileira" aria-label="Escolher clube">
+            <a href="/jogadores?geral=1" class="fileira-todos ativo" aria-current="page">Todos os jogadores</a>
+            {% for c in clubes %}
+            <a href="/clube/{{ c.id }}" class="fileira-time" title="{{ c.nome }}" aria-label="{{ c.nome }}">
+                {% if c.escudo_url %}<img src="{{ c.escudo_url }}" alt="" class="escudo" loading="lazy">{% else %}<span class="rotulo">{{ c.nome[:3] }}</span>{% endif %}
+            </a>
+            {% endfor %}
+        </nav>
+
+        <div class="cabeca">
+            <h1>Jogadores</h1>
+            <p>Em quantos dos últimos jogos cada jogador passou de cada linha, entre todos os clubes rastreados. Clique num escudo para ver o elenco do clube e montar apostas. Estatística do time inteiro fica em <a href="/times">Times</a>.</p>
         </div>
 
-        <div class="coluna-jogadores">
-            <input type="text" class="busca" id="busca" placeholder="Buscar jogador por nome (ex: Yuri Alberto)..." onkeyup="filtrar()">
-            <div id="lista">
-            {% if jogadores %}
-                {% for j in jogadores %}
-                <div class="cartao jogador-card item-pagina">
-                    <div class="nome-jogador">{{ j.nome }} <span class="nome-jogador-time">· {{ j.time_nome }}</span></div>
-
-                    {% if j.cartao %}
-                    <div class="bloco">
-                        <div class="bloco-titulo">Cartão</div>
-                        <div class="binario-texto">Recebeu cartão em <b>{{ j.cartao.frequencia }}%</b> dos últimos
-                            {{ j.cartao.jogos_analisados }} jogos</div>
-                    </div>
-                    {% endif %}
-
-                    {% for bloco in j.blocos_linha %}
-                    <div class="bloco">
-                        <div class="bloco-titulo">{{ bloco.titulo }}</div>
-                        <div class="linhas-grid">
-                            {% for item in bloco.itens %}
-                            <div class="linha-item">+{{ item.linha }}: <b>{{ item.frequencia }}%</b></div>
+        <div class="grade">
+            <section aria-labelledby="t-lista">
+                <h2 class="secao-titulo" id="t-lista">Todos os jogadores <span class="rotulo" style="margin-left: 0.5rem">{{ jogadores|length }}</span></h2>
+                <input type="search" class="busca" id="busca" placeholder="Buscar jogador (ex: Yuri Alberto)" aria-label="Buscar jogador" oninput="filtrar()">
+                <div id="lista">
+                {% if jogadores %}
+                    {% for j in jogadores %}
+                    <article class="vidro jogador jogador-card item-pagina">
+                        <div class="jog-topo">
+                            <div class="jog-nome">
+                                {{ foto(j, escudos.get(j.time_nome)) }}
+                                <div><b class="nome-jogador">{{ j.nome }}</b><br><span>{{ j.time_nome }}</span></div>
+                            </div>
+                            <span class="regua{{ ' alerta' if j.cartoes_suspensao == 2 else '' }}" title="Cartões rumo à suspensão (zera depois de cumprir)">
+                                {% for k in range(3) %}<i class="{{ 'cheio' if k < j.cartoes_suspensao else '' }}"></i>{% endfor %}
+                                {{ 'a 1 cartão da suspensão' if j.cartoes_suspensao == 2 else (j.cartoes_suspensao ~ '/3 cartões') }}
+                            </span>
+                        </div>
+                        <div class="jog-linhas">
+                            {% if j.cartao or j.impedimento %}
+                            <div class="jog-linha">
+                                <span>Cartão · impedimento</span>
+                                <div class="celulas">
+                                    {% if j.cartao %}<span class="cel" style="--p: {{ j.cartao.frequencia }}" title="últimos {{ j.cartao.jogos_analisados }} jogos"><span>cartão</span><b>{{ dec(j.cartao.frequencia) }}%</b></span>{% endif %}
+                                    {% if j.impedimento %}<span class="cel" style="--p: {{ j.impedimento.frequencia }}" title="últimos {{ j.impedimento.jogos_analisados }} jogos"><span>impedimento</span><b>{{ dec(j.impedimento.frequencia) }}%</b></span>{% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            {% for bloco in j.blocos_linha|sort(attribute='titulo') %}
+                            <div class="jog-linha">
+                                <span>{{ bloco.titulo }}</span>
+                                <div class="celulas">
+                                    {% for item in bloco.itens %}<span class="cel{{ ' forte' if item.frequencia >= 60 else '' }}" style="--p: {{ item.frequencia }}"><span>+{{ dec(item.linha, 1) }}</span><b>{{ dec(item.frequencia) }}%</b></span>{% endfor %}
+                                </div>
+                            </div>
                             {% endfor %}
                         </div>
-                    </div>
+                    </article>
                     {% endfor %}
-
-                    {% if j.impedimento %}
-                    <div class="bloco">
-                        <div class="bloco-titulo">Impedimento</div>
-                        <div class="binario-texto">Ficou em impedimento em <b>{{ j.impedimento.frequencia }}%</b> dos
-                            últimos {{ j.impedimento.jogos_analisados }} jogos</div>
-                    </div>
-                    {% endif %}
-
-                    <div class="bloco">
-                        <div class="bloco-titulo">Cartões rumo à suspensão</div>
-                        <div class="binario-texto">
-                            {% if j.cartoes_suspensao == 2 %}
-                            <span style="color:#f85149; font-weight:700;">⚠️ 2/3 - a 1 cartão da suspensão</span>
-                            {% elif j.cartoes_suspensao == 1 %}
-                            <span style="color:#d29922; font-weight:700;">1/3</span>
-                            {% else %}
-                            <span style="color:#3fb950;">0/3</span>
-                            {% endif %}
-                            <span style="color:#8b949e;"> · zera após a suspensão ser cumprida (temporada atual)</span>
-                        </div>
-                    </div>
-                </div>
-                {% endfor %}
-            {% else %}
-                <div class="vazio">Ainda não há padrões calculados pra nenhum jogador ainda.</div>
-            {% endif %}
-            </div>
-            <div class="vazio nenhum-resultado" id="nenhum-resultado">Nenhum jogador encontrado com esse nome.</div>
-            {% if jogadores|length > 10 %}
-            <div class="paginacao">
-                <button class="btn-pagina" id="anterior-lista" onclick="mudarPagina('lista', -1)">← Anterior</button>
-                <span id="label-lista"></span>
-                <button class="btn-pagina" id="proximo-lista" onclick="mudarPagina('lista', 1)">Próxima →</button>
-            </div>
-            {% endif %}
-        </div>
-
-        <div class="coluna-lideres">
-            <div class="titulo-coluna">Líderes de Estatísticas do Campeonato</div>
-            {% for l in lideres %}
-            <div class="lider-card">
-                <div class="lider-titulo lider-cor-{{ loop.index0 % 6 }}">{{ l.titulo }}</div>
-                {% if l.jogador_nome %}
-                <table class="tabela-lider">
-                    <thead>
-                        <tr><th>Jogador</th><th>Últimos 5 jogos</th><th>Total</th></tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>{{ l.jogador_nome }}</td>
-                            <td>{{ l.media_5 }}</td>
-                            <td>{{ l.total }}</td>
-                        </tr>
-                    </tbody>
-                </table>
                 {% else %}
-                <div class="vazio-pequeno">Ainda não há dados suficientes pra essa categoria.</div>
+                    <div class="vazio">Ainda não há padrões calculados para nenhum jogador.</div>
                 {% endif %}
-            </div>
-            {% endfor %}
+                </div>
+                <div class="vazio" id="nenhum-resultado" hidden>Nenhum jogador encontrado com esse nome.</div>
+                {% if jogadores|length > 10 %}
+                <div class="paginacao">
+                    <button type="button" class="btn-pagina" id="anterior-lista" onclick="mudarPagina('lista', -1)">Anterior</button>
+                    <span id="label-lista"></span>
+                    <button type="button" class="btn-pagina" id="proximo-lista" onclick="mudarPagina('lista', 1)">Próxima</button>
+                </div>
+                {% endif %}
+            </section>
+
+            <aside class="lateral">
+                <section aria-labelledby="t-lideres">
+                    <h2 class="secao-titulo" id="t-lideres">Líderes do campeonato</h2>
+                    <p class="nota">Entre os jogadores dos clubes rastreados: o total somado e a média nos últimos 5 jogos.</p>
+                    <div class="lideres">
+                        {% for l in lideres %}
+                        <div class="vidro lider">
+                            <span class="rotulo">{{ l.titulo }}</span>
+                            {% if l.jogador_nome %}
+                            <div class="lider-quem">
+                                {% if l.time_nome and escudos.get(l.time_nome) %}<img src="{{ escudos.get(l.time_nome) }}" class="escudo" alt="" title="{{ l.time_nome }}">{% endif %}
+                                <span>{{ l.jogador_nome }}</span>
+                            </div>
+                            <div class="lider-valor"><b>{{ l.total }}</b><small>últimos 5: {{ dec(l.media_5 or 0, 1) }}</small></div>
+                            {% else %}
+                            <div class="lider-quem" style="color: var(--apagado); font-weight: 400">Ainda não há dados suficientes.</div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </section>
+            </aside>
         </div>
-    </div>
+    </main>
 
     <script>
         function filtrar() {
-            const termo = document.getElementById('busca').value.toLowerCase();
+            const termo = document.getElementById('busca').value.toLowerCase().trim();
             let visiveis = 0;
             document.querySelectorAll('.jogador-card').forEach(function(card) {
-                const nome = card.querySelector('.nome-jogador').textContent.toLowerCase();
-                const bate = nome.includes(termo);
+                const bate = card.querySelector('.nome-jogador').textContent.toLowerCase().includes(termo);
                 card.dataset.escondidoBusca = bate ? '0' : '1';
                 if (bate) visiveis++;
             });
-            document.getElementById('nenhum-resultado').style.display =
-                (termo && visiveis === 0) ? '' : 'none';
+            document.getElementById('nenhum-resultado').hidden = !(termo && visiveis === 0);
             paginaAtual['lista'] = 0;
             renderizarPagina('lista');
         }
 
-        function filtrarTimes() {
-            const termo = document.getElementById('busca-time').value.toLowerCase();
-            let visiveis = 0;
-            document.querySelectorAll('.item-time').forEach(function(card) {
-                const nome = card.querySelector('.clube-nome').textContent.toLowerCase();
-                const bate = nome.includes(termo);
-                card.dataset.escondidoBusca = bate ? '0' : '1';
-                if (bate) visiveis++;
-            });
-            document.getElementById('nenhum-resultado-time').style.display = (termo && visiveis === 0) ? '' : 'none';
-            paginaAtual['lista-times'] = 0;
-            renderizarPagina('lista-times');
-        }
-
         const TAMANHO_PAGINA = 10;
         const paginaAtual = {};
-
         function salvarPaginaNoNavegador(listaId, pagina) {
             try { localStorage.setItem('pagina:' + window.location.pathname + ':' + listaId, String(pagina)); } catch (e) {}
         }
@@ -5515,7 +5509,6 @@ PAGINA_JOGADORES = """
                 return v !== null ? parseInt(v, 10) : 0;
             } catch (e) { return 0; }
         }
-
         function totalPaginas(listaId) {
             let n = 0;
             document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
@@ -5523,7 +5516,6 @@ PAGINA_JOGADORES = """
             });
             return Math.max(1, Math.ceil(n / TAMANHO_PAGINA));
         }
-
         function renderizarPagina(listaId) {
             if (!(listaId in paginaAtual)) { paginaAtual[listaId] = carregarPaginaDoNavegador(listaId); }
             const total = totalPaginas(listaId);
@@ -5533,31 +5525,25 @@ PAGINA_JOGADORES = """
             let visivelIndice = 0;
             document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
                 if (item.dataset.escondidoBusca === '1') { item.style.display = 'none'; return; }
-                const paginaDoItem = Math.floor(visivelIndice / TAMANHO_PAGINA);
-                item.style.display = (paginaDoItem === pagina) ? '' : 'none';
+                item.style.display = (Math.floor(visivelIndice / TAMANHO_PAGINA) === pagina) ? '' : 'none';
                 visivelIndice++;
             });
             const label = document.getElementById('label-' + listaId);
             if (label) label.textContent = 'Página ' + (pagina + 1) + ' de ' + total;
-            const btnAnterior = document.getElementById('anterior-' + listaId);
-            const btnProximo = document.getElementById('proximo-' + listaId);
-            if (btnAnterior) btnAnterior.disabled = (pagina === 0);
-            if (btnProximo) btnProximo.disabled = (pagina >= total - 1);
+            const a = document.getElementById('anterior-' + listaId), p = document.getElementById('proximo-' + listaId);
+            if (a) a.disabled = (pagina === 0);
+            if (p) p.disabled = (pagina >= total - 1);
         }
-
         function mudarPagina(listaId, direcao) {
             const total = totalPaginas(listaId);
-            let pagina = (paginaAtual[listaId] || 0) + direcao;
-            pagina = Math.max(0, Math.min(total - 1, pagina));
+            const pagina = Math.max(0, Math.min(total - 1, (paginaAtual[listaId] || 0) + direcao));
             paginaAtual[listaId] = pagina;
             salvarPaginaNoNavegador(listaId, pagina);
             renderizarPagina(listaId);
         }
-
-        renderizarPagina('lista-times');
         renderizarPagina('lista');
     </script>
-</body>
+""" + SCRIPT_FUNDO_VIVO + """</body>
 </html>
 """
 
@@ -5570,533 +5556,491 @@ PAGINA_CLUBE = """
     <link rel="apple-touch-icon" href="/static/marca/apple-touch-icon.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ nome_clube }} - Achismo Zero</title>
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-            background: #0d1117; color: #e6edf3; max-width: 1500px;
-            margin: 0 auto; padding: 32px 24px 80px;
+    <title>{{ nome_clube }} · Jogadores - Achismo Zero</title>
+""" + FONTES_VISUAL_NOVO + """    <style>
+        /* REDESIGN (16/10/2026): jogadores de um clube no visual novo. Dados
+           e comportamento são os de antes: escalação, próximo jogo, contexto,
+           régua de cartões, seleção de estatísticas para aposta manual
+           (carrinho, modal e "3 apostas automáticas", mesmos campos e a mesma
+           rota /salvar-aposta), últimos 5 jogos de cada jogador, elenco e
+           líderes do time. */
+        """ + NAV_CSS + """
+""" + CSS_VISUAL_NOVO + """
+        .conteudo { width: var(--degrau1); margin: 0 auto; }
+        .rotulo {
+            font-family: var(--f-dado); font-size: 0.625rem; letter-spacing: .08em; text-transform: uppercase;
+            color: var(--apagado);
         }
-        h1 { font-size: 1.6rem; margin: 0 0 4px; text-align: center; }
-        .selo-titulo {
-            width: 34px; height: 34px; border-radius: 50%;
-            background: transparent;
-            flex-shrink: 0; object-fit: contain;
+        .secao-titulo {
+            margin: 0 0 0.875rem; font-family: var(--f-corpo); font-weight: 300;
+            font-size: clamp(1.125rem, 1.5vw, 1.4375rem); letter-spacing: -.025em; line-height: 1.1;
         }
-        .subtitulo { color: #8b949e; margin: 0 0 16px; font-size: 0.88rem; text-align: center; }
-        .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
-        .link-voltar:hover { text-decoration: underline; }
-        .titulo-coluna { font-size: 1.05rem; font-weight: 700; margin: 0 0 14px; text-align: center; }
-
-        .grid-clube {
-            display: grid; grid-template-columns: 1fr 1.6fr 1fr; gap: 22px; align-items: start; margin-top: 12px;
-        }
-        @media (max-width: 1000px) {
-            .grid-clube { grid-template-columns: 1fr; }
-        }
-
-        /* coluna 1: geral + elenco por posição */
-        .btn-geral {
-            display: block; text-align: center; background: #161b22; border: 1px solid #30363d;
-            color: #c9d1d9; border-radius: 10px; padding: 10px; margin-bottom: 16px;
-            text-decoration: none; font-weight: 600; font-size: 0.85rem;
-        }
-        .btn-geral:hover { border-color: #58a6ff; }
-        .grupo-posicao { margin-bottom: 20px; }
-        .grupo-posicao-titulo { font-weight: 700; font-size: 0.95rem; margin-bottom: 8px; }
-        .paginacao {
-            display: flex; align-items: center; justify-content: center; gap: 14px;
-            margin: 14px 0 4px; font-size: 0.82rem; color: #8b949e;
-        }
-        .btn-pagina {
-            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
-            border-radius: 8px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer;
-        }
-        .btn-pagina:hover:not(:disabled) { border-color: #58a6ff; }
-        .btn-pagina:disabled { opacity: 0.35; cursor: default; }
-        .lista-elenco { list-style: none; margin: 0; padding: 0; }
-        .lista-elenco li {
-            padding: 6px 0 6px 8px; font-size: 0.88rem; color: #c9d1d9;
-            border-left: 2px solid #30363d; margin-bottom: 2px;
-        }
-
-        /* coluna 2: cabeçalho do clube */
-        .cabecalho-clube {
-            display: flex; align-items: center; gap: 14px;
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 18px 22px; margin-bottom: 14px; font-size: 1.15rem; font-weight: 700;
-        }
-
-        /* coluna 3: líderes de estatística do time */
-        .lider-card {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 16px; margin-bottom: 16px;
-        }
-        .lider-titulo {
-            display: inline-block; padding: 4px 14px; border-radius: 999px;
-            font-size: 0.78rem; font-weight: 700; margin-bottom: 12px;
-        }
-        .lider-cor-0 { background: #9e6a0322; color: #d29922; }
-        .lider-cor-1 { background: #a371f722; color: #a371f7; }
-        .lider-cor-2 { background: #39c5cf22; color: #39c5cf; }
-        .lider-cor-3 { background: #3fb95022; color: #3fb950; }
-        .lider-cor-4 { background: #f8514922; color: #f85149; }
-        .lider-cor-5 { background: #db61a222; color: #db61a2; }
-        .tabela-lider { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-        .tabela-lider th { text-align: left; color: #8b949e; font-weight: 600; padding: 4px 6px; }
-        .tabela-lider th:not(:first-child), .tabela-lider td:not(:first-child) { text-align: right; }
-        .tabela-lider td { padding: 6px; font-weight: 600; border-top: 1px solid #21262d; }
-        .vazio-pequeno { color: #8b949e; font-size: 0.8rem; font-style: italic; }
-
-        /* NOVO (Últimos 5 jogos do jogador) */
-        .ultimos-jogos-jogador-toggle {
-            display: flex; justify-content: space-between; align-items: center;
-            cursor: pointer; font-weight: 600; font-size: 0.85rem; padding: 4px 0;
-        }
-        .jogo-seta { color: #8b949e; transition: transform 0.15s; }
-        .ultimos-jogos-jogador-lista {
-            display: none; margin-top: 8px;
-        }
-        .ultimos-jogos-jogador-lista.aberto { display: block; }
-        .jogo-jogador-card {
-            background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
-            padding: 8px 10px; margin-bottom: 6px; cursor: pointer;
-        }
-        .jogo-jogador-linha {
-            display: flex; justify-content: space-between; align-items: center;
-            font-size: 0.8rem; gap: 8px;
-        }
-        .jogo-jogador-data { color: #8b949e; font-size: 0.74rem; white-space: nowrap; }
-        .jogo-jogador-detalhe { display: none; margin-top: 8px; }
-        .jogo-jogador-card.aberto .jogo-jogador-detalhe { display: block; }
-        .tabela-detalhe-jogo { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-        .tabela-detalhe-jogo td { padding: 5px 4px; border-top: 1px solid #21262d; }
-        .tabela-detalhe-jogo td:first-child { color: #8b949e; }
-        .tabela-detalhe-jogo td:last-child { text-align: right; font-weight: 600; }
-
-            border-radius: 8px; font-size: 0.9rem;
-        }
-        .cartao {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 16px 20px; margin-bottom: 12px;
-        }
-        /* NOVO: card de jogador com separação bem mais forte que o .cartao
-           genérico - cada jogador tem bastante conteúdo empilhado
-           (cartão, faltas, chutes, desarmes...), então a borda sutil de
-           1px do .cartao normal se perdia de vista ao rolar a página.
-           Mais espaço entre um jogador e outro (28px) + borda mais clara
-           + fundo levemente diferente do resto da página, pra ficar
-           óbvio onde um jogador termina e o outro começa. */
-        .jogador-card {
-            background: #161b22; border: 1px solid #3d444d; border-radius: 14px;
-            padding: 20px 22px; margin-bottom: 28px;
-            box-shadow: 0 0 0 1px #ffffff08, 0 4px 12px #00000033;
-        }
-        .nome-jogador {
-            display: inline-block; font-weight: 700; font-size: 1rem;
-            background: #1f6feb1f; color: #79c0ff; padding: 5px 14px;
-            border-radius: 999px; margin-bottom: 14px;
-        }
-        .busca {
-            width: 100%; padding: 10px 14px; margin-bottom: 14px;
-            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
-            border-radius: 8px; font-size: 0.9rem;
-        }
-        .bloco { margin-bottom: 10px; }
-        .bloco-titulo { color: #8b949e; font-size: 0.78rem; text-transform: uppercase;
-            letter-spacing: 0.03em; margin-bottom: 6px; }
-        .linhas-grid { display: flex; gap: 10px; flex-wrap: wrap; }
-        .linha-item {
-            background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
-            padding: 6px 12px; font-size: 0.82rem;
-        }
-        .linha-item b { color: #3fb950; }
-        .binario-texto { font-size: 0.88rem; color: #c9d1d9; }
-        .binario-texto b { color: #3fb950; }
+        .nota { color: var(--apagado); font-size: 0.75rem; line-height: 1.6; margin: -0.375rem 0 1rem; max-width: 52rem; }
+        .nota b { color: var(--texto); font-weight: 600; }
+        .vidro { background: var(--vidro); border: 1px solid var(--vidro-borda); box-shadow: var(--vidro-sombra); border-radius: var(--raio); }
         .vazio {
-            text-align: center; color: #8b949e; padding: 32px 24px;
-            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
+            text-align: center; color: var(--apagado); padding: 2rem 1.5rem; font-size: 0.8125rem;
+            background: rgba(3, 12, 32, .4); border: 1px dashed var(--linha); border-radius: var(--raio);
         }
-        .proximo-jogo {
-            background: #1f6feb18; border: 1px solid #1f6feb44; border-radius: 12px;
-            padding: 12px 18px; margin-bottom: 20px; font-size: 0.85rem;
+        .num { font-family: var(--f-dado); font-variant-numeric: tabular-nums; }
+        .escudo { object-fit: contain; flex-shrink: 0; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+
+        /* ---------- fileira de escudos (trocar de clube) ---------- */
+        .fileira {
+            display: flex; align-items: center; justify-content: space-between; gap: 0.25rem; padding: 0.375rem;
+            overflow-x: auto; scrollbar-width: thin; margin-bottom: 2rem;
         }
-        /* NOVO (Fase D, só exibição) */
-        .jogo-morto-aviso {
-            background: #f8514912; border: 1px solid #f8514944; border-radius: 12px;
-            padding: 10px 18px; margin: -12px 0 20px; font-size: 0.8rem; color: #ffa198;
+        .fileira-todos {
+            flex-shrink: 0; padding: 0.4375rem 0.75rem; margin-right: 0.25rem; border-radius: 999px; white-space: nowrap;
+            font-size: 0.75rem; font-weight: 600; color: var(--azul-claro); text-decoration: none;
+            border: 1px solid rgba(180, 200, 242, .35);
         }
-        .contexto-jogo-aviso {
-            background: #16212e; border: 1px solid #21262d; border-radius: 12px;
-            padding: 10px 18px; margin: -12px 0 20px; font-size: 0.8rem; color: #c9d1d9;
+        .fileira-todos:hover { background: rgba(180, 200, 242, .1); }
+        .fileira-todos.ativo { color: var(--ouro); border-color: rgba(255, 210, 10, .5); background: rgba(255, 210, 10, .12); }
+        .fileira-time {
+            flex-shrink: 0; width: 2.375rem; height: 2.375rem; border-radius: 0.625rem; display: grid; place-items: center;
+            border: 1px solid transparent; transition: background .15s, border-color .15s, transform .15s;
         }
-        .botoes-topo { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
-        .btn-acao {
-            background: #21262d; color: #e6edf3; border: 1px solid #30363d;
-            border-radius: 8px; padding: 9px 16px; font-size: 0.85rem; font-weight: 600;
-            cursor: pointer;
+        .fileira-time img { width: 1.5rem; height: 1.5rem; }
+        .fileira-time:hover { background: rgba(255,255,255,.07); transform: translateY(-1px); }
+        .fileira-time.ativo { background: rgba(255, 210, 10, .12); border-color: rgba(255, 210, 10, .5); }
+
+        /* ---------- duas colunas ---------- */
+        .grade { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 21rem); gap: 2.5rem; align-items: start; }
+        .lateral > section { margin-bottom: 2.5rem; }
+
+        .busca {
+            width: 100%; margin: 0 0 0.875rem; padding: 0.5625rem 0.875rem;
+            background: rgba(1, 5, 15, .55); border: 1px solid var(--linha); color: var(--texto);
+            border-radius: 999px; font-family: var(--f-corpo); font-size: 0.8125rem;
+            transition: border-color .15s, box-shadow .15s;
         }
-        .btn-acao:hover { border-color: #58a6ff; }
-        .item-linha-label {
-            display: inline-flex; align-items: center; gap: 6px;
-            background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
-            padding: 6px 12px; font-size: 0.82rem; cursor: pointer;
+        .busca::placeholder { color: #7d849c; }
+        .busca:focus { outline: none; border-color: var(--azul-claro); box-shadow: 0 0 0 3px rgba(180, 200, 242, .18); }
+
+        /* ---------- cartão do jogador ---------- */
+        .jogador { padding: 1rem 1.125rem 1.125rem; margin-bottom: 0.75rem; }
+        .jog-topo { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.875rem; }
+        .jog-nome { display: flex; align-items: center; gap: 0.625rem; min-width: 0; }
+        .jog-nome .escudo { width: 1.5rem; height: 1.5rem; }
+        .jog-nome b { font-size: 0.9375rem; font-weight: 700; }
+        .jog-nome span { font-size: 0.75rem; color: var(--apagado); }
+        .regua { display: inline-flex; align-items: center; gap: 0.375rem; font-size: 0.6875rem; color: var(--apagado); white-space: nowrap; }
+        .regua i { width: 0.5625rem; height: 0.75rem; border-radius: 0.125rem; border: 1px solid rgba(255, 210, 10, .5); display: inline-block; }
+        .regua i.cheio { background: var(--ouro); border-color: var(--ouro); }
+        .regua.alerta { color: var(--ouro); font-weight: 600; }
+        .jog-linhas { display: grid; gap: 0.375rem; }
+        .jog-linha { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); align-items: center; gap: 0.75rem; }
+        .jog-linha > span:first-child { font-size: 0.6875rem; color: var(--apagado); }
+        .celulas { display: flex; flex-wrap: wrap; gap: 0.3125rem; }
+        .cel {
+            --p: 0;
+            position: relative; display: inline-flex; align-items: baseline; gap: 0.375rem;
+            padding: 0.25rem 0.5rem; border-radius: 0.4375rem; font-size: 0.6875rem; white-space: nowrap;
+            border: 1px solid var(--linha-fraca);
+            background: linear-gradient(90deg, rgba(63, 111, 209, .32) calc(var(--p) * 1%), rgba(255,255,255,.03) calc(var(--p) * 1%));
         }
-        .item-linha-label:has(input:checked) { border-color: #3fb950; background: #3fb95018; }
-        .item-linha-label b { color: #3fb950; }
-        .item-linha-label input { accent-color: #3fb950; }
+        .cel.forte { background: linear-gradient(90deg, rgba(255, 210, 10, .26) calc(var(--p) * 1%), rgba(255,255,255,.03) calc(var(--p) * 1%)); }
+        .cel span { font-family: var(--f-dado); color: var(--apagado); }
+        .cel b { font-family: var(--f-dado); font-weight: 600; color: var(--texto); }
+        .jog-extra { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--linha-fraca); font-size: 0.6875rem; color: var(--apagado); line-height: 1.6; }
+        .jog-extra b { font-family: var(--f-dado); font-weight: 500; color: var(--texto); }
+
+        /* paginação */
+        .paginacao { display: flex; align-items: center; justify-content: center; gap: 0.875rem; margin-top: 1rem; font-family: var(--f-dado); font-size: 0.6875rem; color: var(--apagado); }
+        .btn-pagina {
+            background: rgba(255,255,255,.05); border: 1px solid var(--linha); color: var(--texto);
+            border-radius: 999px; padding: 0.3125rem 0.75rem; font-family: var(--f-corpo); font-size: 0.75rem; font-weight: 600; cursor: pointer;
+        }
+        .btn-pagina:hover:not(:disabled) { border-color: var(--azul-claro); background: rgba(180, 200, 242, .1); }
+        .btn-pagina:disabled { opacity: .35; cursor: default; }
+
+        /* líderes (lateral) */
+        .lideres { display: grid; gap: 0.5rem; }
+        .lider { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.25rem 0.75rem; padding: 0.75rem 0.875rem; }
+        .lider .rotulo { grid-column: 1 / -1; }
+        .lider-quem { display: flex; align-items: center; gap: 0.5rem; min-width: 0; font-size: 0.8125rem; font-weight: 600; }
+        .lider-quem span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .lider-quem .escudo { width: 1.25rem; height: 1.25rem; }
+        .lider-valor { text-align: right; }
+        .lider-valor b { font-family: var(--f-dado); font-weight: 500; font-size: 1.25rem; display: block; line-height: 1; }
+        .lider-valor small { font-size: 0.625rem; color: var(--apagado); }
+
+        @media (max-width: 1099px) {
+            :root { --degrau1: 100%; --degrau2: 100%; }
+            .grade { grid-template-columns: minmax(0, 1fr); }
+        }
+        @media (max-width: 560px) {
+            .jog-linha { grid-template-columns: minmax(0, 1fr); gap: 0.25rem; }
+        }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+        /* foto do jogador (pelo servidor; sem foto, ficam as iniciais) */
+        .foto {
+            position: relative; flex-shrink: 0; width: 2.75rem; height: 2.75rem; border-radius: 50%;
+            display: grid; place-items: center; background: linear-gradient(150deg, #1d3a7a, #0a1a3f);
+            box-shadow: 0 0 0 1px rgba(180, 200, 242, .35), 0 0.25rem 0.75rem -0.25rem rgba(0,0,0,.6);
+        }
+        .foto .foto-iniciais { font-family: var(--f-titulo); font-size: 0.75rem; font-weight: 700; color: var(--azul-claro); letter-spacing: .02em; }
+        .foto > img:not(.foto-escudo) { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; object-position: center top; background: #e9edf5; }
+        .foto-escudo { position: absolute; right: -0.25rem; bottom: -0.25rem; width: 1.125rem; height: 1.125rem; object-fit: contain; filter: drop-shadow(0 1px 2px rgba(0,0,0,.7)); }
+        button {
+            background: var(--ouro); color: var(--cta-texto); border: 1px solid transparent; border-radius: 999px;
+            padding: 0.5rem 1rem; font-family: var(--f-corpo); font-size: 0.8125rem; font-weight: 600;
+            cursor: pointer; transition: background .15s, transform .1s;
+        }
+        button:hover { background: var(--ouro-claro); }
+        button:active { transform: translateY(1px); }
+
+        /* cabeçalho do clube */
+        .heroi { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+        .heroi .escudo-grande { width: 4.5rem; height: 4.5rem; }
+        .heroi h1 { margin: 0; font-family: var(--f-corpo); font-weight: 300; font-size: clamp(2rem, 3.2vw, 3rem); letter-spacing: -.035em; line-height: 1; }
+        .heroi h1 small { display: block; font-size: 0.8125rem; color: var(--apagado); letter-spacing: 0; margin-top: 0.375rem; }
+
+        /* faixa de cima: próximo jogo, contexto, avisos */
+        .faixa { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0.75rem; margin-bottom: 1.25rem; }
+        .faixa > div { padding: 0.875rem 1rem; }
+        .faixa .rotulo { display: block; margin-bottom: 0.375rem; }
+        .faixa-valor { font-size: 0.875rem; font-weight: 600; }
+        .confronto { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+        .confronto .escudo { width: 1.75rem !important; height: 1.75rem !important; margin: 0 !important; vertical-align: 0 !important; }
+        .confronto i { font-style: normal; font-family: var(--f-dado); font-weight: 400; color: var(--apagado); font-size: 0.75rem; }
+        .faixa-valor .escudo { width: 1.25rem; height: 1.25rem; vertical-align: -0.3125rem; margin: 0 0.25rem; }
+        .faixa-detalhe { font-size: 0.6875rem; color: var(--apagado); margin-top: 0.25rem; line-height: 1.5; }
+        .faixa-detalhe b { color: var(--texto); font-family: var(--f-dado); font-weight: 500; }
+        .aviso-ouro { border-color: rgba(255, 210, 10, .45) !important; background: linear-gradient(140deg, rgba(255, 210, 10, .12), rgba(255, 210, 10, .03)), rgba(4, 14, 38, .42) !important; }
+        .aviso-ouro .faixa-valor { color: var(--ouro); }
+        .escalacao { display: flex; flex-wrap: wrap; gap: 0.3125rem; margin-top: 0.25rem; }
+        .escalacao span { font-size: 0.6875rem; padding: 0.1875rem 0.5rem; border-radius: 999px; background: rgba(255,255,255,.06); border: 1px solid var(--linha-fraca); }
+
+        .acoes { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.5rem; }
+        .acoes p { margin: 0 0 0 0.25rem; font-size: 0.6875rem; color: var(--apagado); }
+        .btn-contorno { background: transparent; color: var(--azul-claro); border: 1px solid rgba(180, 200, 242, .55); }
+        .btn-contorno:hover { background: rgba(180, 200, 242, .1); }
+
+        /* células que se escolhem (com próximo jogo) */
+        label.cel { cursor: pointer; user-select: none; transition: border-color .15s, box-shadow .15s; }
+        label.cel:hover { border-color: rgba(180, 200, 242, .55); }
+        label.cel input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+        label.cel:has(input:checked) { border-color: var(--ouro); box-shadow: 0 0 0 1px var(--ouro) inset; }
+        label.cel:has(input:focus-visible) { outline: 2px solid var(--azul-claro); outline-offset: 2px; }
+        label.cel:has(input:checked) b { color: var(--ouro); }
+
+        /* últimos 5 jogos do jogador */
+        .ult-botao {
+            margin-top: 0.75rem; padding: 0; background: none; border: 0; color: var(--azul-claro);
+            font-size: 0.6875rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.375rem; cursor: pointer;
+        }
+        .ult-botao:hover { background: none; color: var(--texto); }
+        .seta {
+            width: 0.4375rem; height: 0.4375rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+            transform: translateY(-0.125rem) rotate(45deg); transition: transform .2s; display: inline-block;
+        }
+        .ultimos-jogos-jogador-lista { display: none; margin-top: 0.625rem; }
+        .ultimos-jogos-jogador-lista.aberto { display: grid; gap: 0.375rem; }
+        .ult-jogo { border: 1px solid var(--linha-fraca); border-radius: 0.5rem; background: rgba(1, 5, 15, .35); cursor: pointer; }
+        .ult-linha { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.4375rem 0.625rem; font-size: 0.6875rem; }
+        .ult-linha .data { font-family: var(--f-dado); color: var(--apagado); white-space: nowrap; }
+        .ult-detalhe { display: none; padding: 0 0.625rem 0.5rem; }
+        .ult-jogo.aberto .ult-detalhe { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.25rem 0.75rem; }
+        .ult-detalhe div { font-size: 0.625rem; color: var(--apagado); }
+        .ult-detalhe b { display: block; font-family: var(--f-dado); font-size: 0.8125rem; font-weight: 500; color: var(--texto); }
+
+        /* elenco */
+        .elenco { padding: 0.875rem 1rem; }
+        .elenco-grupo + .elenco-grupo { margin-top: 0.875rem; padding-top: 0.875rem; border-top: 1px solid var(--linha-fraca); }
+        .elenco-grupo .rotulo { display: block; margin-bottom: 0.4375rem; }
+        .elenco-nomes { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; font-size: 0.75rem; }
+        .elenco-nomes span.regua-2 { color: var(--ouro); }
+
+        /* carrinho e janelas */
         .carrinho-flutuante {
-            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-            background: #161b22; border: 1px solid #3fb950; border-radius: 12px;
-            padding: 12px 20px; display: none; align-items: center; gap: 16px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.4); z-index: 90;
+            position: fixed; left: 50%; transform: translateX(-50%);
+            bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px)); z-index: 90;
+            display: none; align-items: center; gap: 1rem; padding: 0.625rem 0.625rem 0.625rem 1.125rem; border-radius: 999px;
+            background: linear-gradient(140deg, rgba(255,255,255,.16), rgba(255,255,255,.05)), rgba(4, 14, 38, .92);
+            border: 1px solid rgba(255, 210, 10, .55); box-shadow: 0 1rem 3rem -0.75rem rgba(0,0,0,.8);
         }
         .carrinho-flutuante.ativo { display: flex; }
-        .carrinho-contagem { font-size: 0.85rem; }
-        .carrinho-contagem b { color: #3fb950; }
-        .btn-carrinho {
-            background: #3fb950; color: #0d1117; border: none; border-radius: 8px;
-            padding: 8px 16px; font-size: 0.85rem; font-weight: 700; cursor: pointer;
-        }
-        .modal-form-linha {
-            display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap;
-        }
-        .modal-form-linha input {
-            flex: 1; min-width: 120px; padding: 8px 12px;
-            background: #0d1117; border: 1px solid #30363d; color: #e6edf3; border-radius: 8px;
-            font-size: 0.85rem;
-        }
-        .modal-pernas-lista { font-size: 0.78rem; color: #8b949e; margin-top: 10px; max-height: 150px; overflow-y: auto; }
+        .carrinho-contagem { font-size: 0.8125rem; }
+        .carrinho-contagem b { font-family: var(--f-dado); color: var(--ouro); }
         .modal-fundo {
-            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center;
+            display: none; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center;
+            background: rgba(1, 5, 15, .72); padding: 1rem;
         }
         .modal-caixa {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 20px 24px; max-width: 420px; width: 90%; max-height: 80vh; overflow-y: auto;
+            width: 100%; max-width: 28rem; max-height: 85vh; overflow-y: auto; padding: 1.25rem 1.375rem;
+            border-radius: var(--raio); border: 1px solid var(--vidro-borda); box-shadow: var(--vidro-sombra);
+            background: linear-gradient(140deg, rgba(255,255,255,.1), rgba(255,255,255,.03)), #06122e;
         }
-        .modal-topo { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
-        .modal-titulo { font-weight: 700; font-size: 0.95rem; }
-        .modal-fechar { cursor: pointer; color: #8b949e; font-size: 1.1rem; }
-        .modal-fechar:hover { color: #e6edf3; }
-        .btn-salvar {
-            background: #1f6feb; color: white; border: none; border-radius: 8px;
-            padding: 10px 16px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
-            display: inline-flex; align-items: center; gap: 6px;
+        .modal-caixa-grande { max-width: 46rem; }
+        .modal-topo { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.875rem; }
+        .modal-titulo { font-size: 1.125rem; font-weight: 300; letter-spacing: -.02em; }
+        .modal-fechar { background: none; border: 0; color: var(--apagado); font-size: 0.75rem; font-weight: 600; padding: 0.25rem; cursor: pointer; }
+        .modal-fechar:hover { background: none; color: var(--texto); }
+        .modal-pernas-lista, .retangulo-pernas { font-size: 0.75rem; color: var(--apagado); line-height: 1.7; max-height: 10rem; overflow-y: auto; }
+        .retangulo-prob { font-family: var(--f-dado); font-size: 0.8125rem; color: var(--ouro); margin: 0.625rem 0; }
+        .modal-form-linha { display: flex; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
+        .modal-form-linha input[type=number] {
+            flex: 1; min-width: 7rem; padding: 0.5rem 0.75rem; border-radius: 0.5rem;
+            background: rgba(1, 5, 15, .55); border: 1px solid var(--linha); color: var(--texto);
+            font-family: var(--f-dado); font-size: 0.8125rem;
         }
-        .btn-salvar:hover { background: #388bfd; }
-        .modal-caixa-grande { max-width: 720px; }
-        .aviso-tres-apostas { color: #8b949e; font-size: 0.8rem; margin-bottom: 16px; }
-        .retangulo-aposta {
-            background: #0d1117; border: 1px solid #30363d; border-radius: 12px;
-            padding: 16px 18px; margin-bottom: 16px;
+        .modal-form-linha input[type=number]:focus { outline: none; border-color: var(--azul-claro); box-shadow: 0 0 0 3px rgba(180, 200, 242, .18); }
+        .btn-salvar { width: 100%; background: var(--azul); color: #fff; }
+        .btn-salvar:hover { background: #5683dd; }
+        .aviso-tres-apostas { color: var(--apagado); font-size: 0.75rem; margin: 0 0 1rem; }
+        .retangulo-aposta { padding: 1rem 1.125rem; margin-bottom: 0.75rem; border-radius: 0.75rem; border: 1px solid var(--linha); background: rgba(1, 5, 15, .4); }
+        .retangulo-titulo { font-weight: 600; font-size: 0.875rem; margin-bottom: 0.375rem; }
+        .retangulo-vazio { color: var(--apagado); font-size: 0.75rem; font-style: italic; }
+        .flash { padding: 0.625rem 0.875rem; border-radius: 0.625rem; margin-bottom: 1.25rem; font-size: 0.75rem; }
+        .flash-erro { background: rgba(255, 122, 122, .12); color: var(--vermelho); border: 1px solid rgba(255, 122, 122, .4); }
+        .flash-sucesso { background: rgba(95, 211, 141, .12); color: var(--verde); border: 1px solid rgba(95, 211, 141, .4); }
+        @media (max-width: 1099px) { .lateral { order: 2; } }
+        @media (max-width: 640px) {
+            .ult-jogo.aberto .ult-detalhe { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .heroi .escudo-grande { width: 3.25rem; height: 3.25rem; }
         }
-        .retangulo-titulo { font-weight: 700; font-size: 0.95rem; margin-bottom: 8px; }
-        .retangulo-pernas { font-size: 0.8rem; color: #c9d1d9; margin-bottom: 8px; line-height: 1.6; }
-        .retangulo-prob {
-            font-size: 0.82rem; color: #3fb950; font-weight: 700; margin-bottom: 10px;
-        }
-        .retangulo-vazio { color: #8b949e; font-size: 0.82rem; font-style: italic; }
-        .flash {
-            padding: 12px 16px; border-radius: 10px; margin-bottom: 18px; font-size: 0.85rem;
-        }
-        .flash-erro { background: #f8514922; color: #f85149; border: 1px solid #f8514955; }
-        .flash-sucesso { background: #23863622; color: #3fb950; border: 1px solid #23863655; }
-        """ + NAV_CSS + """
     </style>
 </head>
 <body>
-    <h1>📈 Estatísticas de Jogadores</h1>
-    <p class="subtitulo">Elenco completo, última escalação titular confirmada e líderes de estatística do time.</p>
-    {{ nav_html|safe }}
+""" + FUNDO_VISUAL_NOVO + """    {{ nav_html|safe }}
     <script>
         try { localStorage.setItem('ultimo_clube_id', '{{ time_id }}'); } catch (e) {}
     </script>
+    {% macro foto(j, escudo=None) %}
+        {%- set partes = j.nome.replace('.', ' ').split() -%}
+        <span class="foto" aria-hidden="true">
+            <span class="foto-iniciais">{{ (partes[0][0] ~ (partes[-1][0] if partes|length > 1 else '')) | upper }}</span>
+            {% if j.jogador_id %}<img src="/foto-jogador/{{ j.jogador_id }}.png" alt="" loading="lazy" onerror="this.remove()">{% endif %}
+            {% if escudo %}<img src="{{ escudo }}" alt="" class="foto-escudo" loading="lazy">{% endif %}
+        </span>
+    {% endmacro %}
+    {% macro dec(v, casas=0) %}{{ (('%.' ~ casas ~ 'f')|format(v)).replace('.', ',') }}{% endmacro %}
+    {% macro data_br(d) %}{% if d is string %}{{ d[8:10] }}/{{ d[5:7] }}/{{ d[0:4] }}{% elif d %}{{ d.strftime('%d/%m/%Y') }}{% endif %}{% endmacro %}
+    {% macro celula(j, tipo, linha, direcao, freq, desc, rotulo, forte=false) %}
+        {% if proximo_jogo %}
+        <label class="cel{{ ' forte' if forte else '' }}" style="--p: {{ freq }}">
+            <input type="checkbox" class="item-selecionavel"
+                data-jogador-id="{{ j.jogador_id }}" data-jogador-nome="{{ j.nome }}"
+                data-tipo="{{ tipo }}" data-linha="{{ linha }}" data-direcao="{{ direcao }}"
+                data-frequencia="{{ freq }}" data-descricao="{{ desc }}"
+                onchange="atualizarCarrinho()">
+            <span>{{ rotulo }}</span><b>{{ dec(freq) }}%</b>
+        </label>
+        {% else %}
+        <span class="cel{{ ' forte' if forte else '' }}" style="--p: {{ freq }}"><span>{{ rotulo }}</span><b>{{ dec(freq) }}%</b></span>
+        {% endif %}
+    {% endmacro %}
+    {% set na_regua = jogadores_na_regua or [] %}
 
-    {% with mensagens = get_flashed_messages(with_categories=true) %}
-        {% for categoria, texto in mensagens %}
-        <div class="flash flash-{{ categoria }}">{{ texto }}</div>
-        {% endfor %}
-    {% endwith %}
-
-    <div class="grid-clube">
-        <div class="coluna-elenco">
-            <a href="/jogadores?geral=1" class="btn-geral">📊 Estatísticas Gerais</a>
-            {% if elenco_por_posicao %}
-                {% for grupo in elenco_por_posicao %}
-                <div class="grupo-posicao">
-                    <div class="grupo-posicao-titulo">{{ grupo.icone }} {{ grupo.titulo }}</div>
-                    <ul class="lista-elenco">
-                        {% for nome in grupo.jogadores %}
-                        <li>{{ nome }}</li>
-                        {% endfor %}
-                    </ul>
-                </div>
-                {% endfor %}
-            {% else %}
-                <div class="vazio">Elenco ainda não disponível.</div>
-            {% endif %}
-        </div>
-
-        <div class="coluna-principal">
-            <div class="cabecalho-clube">
-                {% if escudo_url %}
-                <img src="{{ escudo_url }}" alt="{{ nome_clube }}" class="selo-titulo" onerror="this.outerHTML='<span class=&quot;selo-titulo&quot;></span>'">
-                {% else %}
-                <span class="selo-titulo"></span>
-                {% endif %}
-                {{ nome_clube }}
-            </div>
-
-    {% if ultima_escalacao %}
-    <div class="cartao">
-        <div class="nome-jogador">🟢 Última escalação titular</div>
-        <div class="bloco-titulo">{{ ultima_escalacao.data_jogo }} · {{ nome_clube }} x {{ ultima_escalacao.adversario }}</div>
-        <div class="linhas-grid">
-            {% for nome in ultima_escalacao.titulares %}
-            <div class="linha-item">{{ nome }}</div>
+    <main class="conteudo">
+        {% with mensagens = get_flashed_messages(with_categories=true) %}
+            {% for categoria, texto in mensagens %}
+            <div class="flash flash-{{ categoria }}">{{ texto }}</div>
             {% endfor %}
-        </div>
-    </div>
-    {% endif %}
+        {% endwith %}
 
-    {% if proximo_jogo %}
-    <div class="proximo-jogo">
-        📅 Próximo jogo: <b>{{ proximo_jogo.data_jogo }} · {{ nome_clube }} x {{ proximo_jogo.adversario }}</b> -
-        as apostas manuais criadas abaixo são pra esse jogo.
-    </div>
-    {% if jogo_morto and jogo_morto.morto %}
-    <div class="jogo-morto-aviso">
-        ⚠️ Jogo sem nada em jogo pro {{ nome_clube }} - matematicamente não pode mais alcançar o G4 nem cair no Z4
-        ({{ jogo_morto.rodadas_restantes }} rodada(s) restante(s), atualmente na {{ jogo_morto.posicao_atual }}ª
-        posição). Cenário simplificado (não considera Libertadores/Sul-Americana ainda) - só informativo.
-    </div>
-    {% endif %}
-    {% if contexto_jogo %}
-    <div class="contexto-jogo-aviso">
-        📊 Contexto: {{ nome_clube }} está na {{ contexto_jogo.posicao }}ª posição ({{ contexto_jogo.pontos }} pts)
-        {% if contexto_jogo.distancia_objetivo is not none and contexto_jogo.distancia_objetivo > 0 %}
-            · a {{ contexto_jogo.distancia_objetivo }} ponto(s) de {{ contexto_jogo.objetivo }}
-        {% elif contexto_jogo.zona == 'g4' %}
-            · já está no G4
-        {% endif %}
-        {% if contexto_jogo.distancia_z4 is not none %}
-            · {{ contexto_jogo.distancia_z4 }} ponto(s) acima da saída do Z4
-        {% endif %}
-        · adversário ({{ proximo_jogo.adversario }}) está na {{ contexto_jogo.adversario_posicao }}ª posição
-        {% if contexto_jogo.adversario_forca %}(considerado <b>{{ contexto_jogo.adversario_forca }}</b>){% endif %}.
-    </div>
-    {% endif %}
-    <div class="botoes-topo">
-        <button class="btn-acao" onclick="gerarTresApostas()">🎯 Gerar 3 apostas automáticas</button>
-        <button class="btn-acao" onclick="limparSelecao()">🧹 Limpar seleção</button>
-    </div>
-    {% endif %}
+        <nav class="vidro fileira" aria-label="Escolher clube">
+            <a href="/jogadores?geral=1" class="fileira-todos">Todos os jogadores</a>
+            {% for c in clubes %}
+            <a href="/clube/{{ c.id }}" class="fileira-time{{ ' ativo' if c.id == time_id else '' }}" title="{{ c.nome }}" aria-label="{{ c.nome }}"{{ ' aria-current="page"'|safe if c.id == time_id else '' }}>
+                {% if c.escudo_url %}<img src="{{ c.escudo_url }}" alt="" class="escudo" loading="lazy">{% else %}<span class="rotulo">{{ c.nome[:3] }}</span>{% endif %}
+            </a>
+            {% endfor %}
+        </nav>
 
-    {% if jogadores_na_regua %}
-    <div class="cartao" style="border-color:#f8514966; background:#f8514912; margin-bottom: 16px;">
-        <b style="color:#f85149;">⚠️ {{ jogadores_na_regua|length }} jogador(es) a 1 cartão da suspensão:</b>
-        <span style="color:#c9d1d9;">{{ jogadores_na_regua|join(", ") }}</span>
-        <div style="color:#8b949e; font-size:0.8rem; margin-top:6px;">
-            Com tanta gente na régua, o time tende a evitar risco - considera isso ao olhar previsão de cartões desse jogo.
-        </div>
-    </div>
-    {% endif %}
+        <header class="heroi">
+            {% if escudo_url %}<img src="{{ escudo_url }}" alt="" class="escudo escudo-grande" onerror="this.style.display='none'">{% endif %}
+            <h1>{{ nome_clube }}<small>Jogadores · {{ jogadores|length }} com histórico</small></h1>
+        </header>
 
-    <input type="text" class="busca" id="busca" placeholder="Buscar jogador..." onkeyup="filtrar()">
-
-    <div id="lista">
-    {% if jogadores %}
-        {% for j in jogadores %}
-        <div class="cartao jogador-card item-pagina">
-            <div class="nome-jogador">{{ j.nome }}</div>
-
-            {% if j.cartao %}
-            <div class="bloco">
-                <div class="bloco-titulo">Cartão</div>
-                {% if proximo_jogo %}
-                <label class="item-linha-label">
-                    <input type="checkbox" class="item-selecionavel"
-                        data-jogador-id="{{ j.jogador_id }}" data-jogador-nome="{{ j.nome }}"
-                        data-tipo="cartao" data-linha="" data-direcao="sim"
-                        data-frequencia="{{ j.cartao.frequencia }}"
-                        data-descricao="{{ j.nome }} - Receberá cartão"
-                        onchange="atualizarCarrinho()">
-                    Receberá cartão: <b>{{ j.cartao.frequencia }}%</b> (últimos {{ j.cartao.jogos_analisados }} jogos)
-                </label>
-                {% else %}
-                <div class="binario-texto">Recebeu cartão em <b>{{ j.cartao.frequencia }}%</b> dos últimos
-                    {{ j.cartao.jogos_analisados }} jogos</div>
-                {% endif %}
+        <div class="faixa">
+            {% if proximo_jogo %}
+            <div class="vidro">
+                <span class="rotulo">Próximo jogo</span>
+                <div class="faixa-valor confronto">
+                    {% if escudo_url %}<img src="{{ escudo_url }}" alt="" class="escudo" onerror="this.style.visibility='hidden'">{% endif %}
+                    <span>{{ nome_clube }}</span><i>x</i><span>{{ proximo_jogo.adversario }}</span>
+                    {% if proximo_jogo.adversario_api_id %}<img src="/escudo/{{ proximo_jogo.adversario_api_id }}.png" alt="" class="escudo" onerror="this.style.visibility='hidden'">{% endif %}
+                </div>
+                <div class="faixa-detalhe"><b>{{ data_br(proximo_jogo.data_jogo) }}</b>{% if proximo_jogo.rodada_numero %} · rodada {{ proximo_jogo.rodada_numero }}{% endif %} · as apostas manuais desta página são para esse jogo</div>
             </div>
             {% endif %}
+            {% if contexto_jogo %}
+            <div class="vidro">
+                <span class="rotulo">Contexto</span>
+                <div class="faixa-valor">{{ contexto_jogo.posicao }}º · {{ contexto_jogo.pontos }} pts</div>
+                <div class="faixa-detalhe">
+                    {% if contexto_jogo.distancia_objetivo is not none and contexto_jogo.distancia_objetivo > 0 %}a <b>{{ contexto_jogo.distancia_objetivo }}</b> pts de {{ contexto_jogo.objetivo }}{% elif contexto_jogo.zona == 'g4' %}já está no G4{% endif %}{% if contexto_jogo.distancia_z4 is not none %} · <b>{{ contexto_jogo.distancia_z4 }}</b> pts acima do Z4{% endif %}
+                    · adversário em {{ contexto_jogo.adversario_posicao }}º{% if contexto_jogo.adversario_forca %} ({{ contexto_jogo.adversario_forca }}){% endif %}
+                </div>
+            </div>
+            {% endif %}
+            {% if jogo_morto and jogo_morto.morto %}
+            <div class="vidro aviso-ouro">
+                <span class="rotulo">Jogo sem nada em jogo</span>
+                <div class="faixa-valor">Não alcança mais o G4 nem cai</div>
+                <div class="faixa-detalhe">{{ jogo_morto.rodadas_restantes }} rodada(s) restante(s), hoje em {{ jogo_morto.posicao_atual }}º. Cenário simplificado, só informativo.</div>
+            </div>
+            {% endif %}
+            {% if na_regua %}
+            <div class="vidro aviso-ouro">
+                <span class="rotulo">A 1 cartão da suspensão</span>
+                <div class="faixa-valor">{{ na_regua|length }} jogador{{ 'es' if na_regua|length != 1 else '' }}</div>
+                <div class="faixa-detalhe">{{ na_regua|join(', ') }}. Com muita gente na régua, o time tende a evitar cartão.</div>
+            </div>
+            {% endif %}
+            {% if ultima_escalacao %}
+            <div class="vidro" style="grid-column: 1 / -1">
+                <span class="rotulo">Última escalação titular · {{ data_br(ultima_escalacao.data_jogo) }} · {{ nome_clube }} x {{ ultima_escalacao.adversario }}</span>
+                <div class="escalacao">{% for nome in ultima_escalacao.titulares %}<span>{{ nome }}</span>{% endfor %}</div>
+            </div>
+            {% endif %}
+        </div>
 
-            {% for bloco in j.blocos_linha %}
-            <div class="bloco">
-                <div class="bloco-titulo">{{ bloco.titulo }}</div>
-                <div class="linhas-grid">
-                    {% for item in bloco.itens %}
-                        {% if proximo_jogo %}
-                        <label class="item-linha-label">
-                            <input type="checkbox" class="item-selecionavel"
-                                data-jogador-id="{{ j.jogador_id }}" data-jogador-nome="{{ j.nome }}"
-                                data-tipo="{{ bloco.tipo }}" data-linha="{{ item.linha }}" data-direcao="mais"
-                                data-frequencia="{{ item.frequencia }}"
-                                data-descricao="{{ j.nome }} - {{ bloco.titulo }} - Mais de {{ item.linha }}"
-                                onchange="atualizarCarrinho()">
-                            +{{ item.linha }}: <b>{{ item.frequencia }}%</b>
-                        </label>
-                        {% else %}
-                        <div class="linha-item">+{{ item.linha }}: <b>{{ item.frequencia }}%</b></div>
+        {% if proximo_jogo %}
+        <div class="acoes">
+            <button type="button" onclick="gerarTresApostas()">Gerar 3 apostas automáticas</button>
+            <button type="button" class="btn-contorno" onclick="limparSelecao()">Limpar seleção</button>
+            <p>Toque nas linhas dos jogadores para montar uma aposta manual.</p>
+        </div>
+        {% endif %}
+
+        <div class="grade">
+            <section aria-labelledby="t-lista">
+                <h2 class="secao-titulo" id="t-lista">Jogadores</h2>
+                <input type="search" class="busca" id="busca" placeholder="Buscar jogador" aria-label="Buscar jogador" oninput="filtrar()">
+                <div id="lista">
+                {% if jogadores %}
+                    {% for j in jogadores %}
+                    <article class="vidro jogador jogador-card item-pagina">
+                        <div class="jog-topo">
+                            <div class="jog-nome">
+                                {{ foto(j) }}
+                                <b class="nome-jogador">{{ j.nome }}</b>
+                            </div>
+                            <span class="regua{{ ' alerta' if j.cartoes_suspensao == 2 else '' }}" title="Cartões rumo à suspensão (zera depois de cumprir)">
+                                {% for k in range(3) %}<i class="{{ 'cheio' if k < j.cartoes_suspensao else '' }}"></i>{% endfor %}
+                                {{ 'a 1 cartão da suspensão' if j.cartoes_suspensao == 2 else (j.cartoes_suspensao ~ '/3 cartões') }}
+                            </span>
+                        </div>
+                        <div class="jog-linhas">
+                            {% if j.cartao or j.impedimento %}
+                            <div class="jog-linha">
+                                <span>Cartão · impedimento</span>
+                                <div class="celulas">
+                                    {% if j.cartao %}{{ celula(j, 'cartao', '', 'sim', j.cartao.frequencia, j.nome ~ ' - Receberá cartão', 'cartão') }}{% endif %}
+                                    {% if j.impedimento %}{{ celula(j, 'impedimento', '', 'sim', j.impedimento.frequencia, j.nome ~ ' - Ficará em impedimento', 'impedimento') }}{% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            {% for bloco in j.blocos_linha|sort(attribute='titulo') %}
+                            <div class="jog-linha">
+                                <span>{{ bloco.titulo }}</span>
+                                <div class="celulas">
+                                    {% for item in bloco.itens %}{{ celula(j, bloco.tipo, item.linha, 'mais', item.frequencia, j.nome ~ ' - ' ~ bloco.titulo ~ ' - Mais de ' ~ item.linha, '+' ~ dec(item.linha, 1), item.frequencia >= 60) }}{% endfor %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% if j.correlacao_jogador %}
+                        {% set cj = j.correlacao_jogador %}
+                        <div class="jog-extra">
+                            Sofre em média <b>{{ dec(cj.media_pessoal, 1) }}</b> falta(s) por jogo. Quando sofre mais que isso, os defensores do adversário levam
+                            <b>{{ dec(cj.valor_acima, 2) }}</b> cartão(ões) por jogo; quando sofre menos, <b>{{ dec(cj.valor_abaixo, 2) }}</b>. {{ cj.jogos_total }} jogos (a API não diz qual defensor marcou).
+                        </div>
                         {% endif %}
+                        {% if j.ultimos_jogos is not none %}
+                        <button type="button" class="ult-botao" onclick="toggleUltimosJogosJogador({{ j.jogador_id }}); this.querySelector('.seta').style.transform = document.getElementById('ultimos-jogos-jogador-{{ j.jogador_id }}').classList.contains('aberto') ? 'translateY(0.0625rem) rotate(-135deg)' : ''">Últimos 5 jogos <span class="seta" aria-hidden="true"></span></button>
+                        <div class="ultimos-jogos-jogador-lista" id="ultimos-jogos-jogador-{{ j.jogador_id }}">
+                            {% if j.ultimos_jogos %}
+                                {% for jg in j.ultimos_jogos %}
+                                <div class="ult-jogo" id="jogo-jogador-{{ j.jogador_id }}-{{ jg.jogo_id }}" onclick="toggleJogoJogador({{ j.jogador_id }}, {{ jg.jogo_id }})">
+                                    <div class="ult-linha">
+                                        <span>{% if jg.mandante %}{{ jg.nosso_time_nome }} <b class="num">{{ jg.placar_nosso }} x {{ jg.placar_adversario }}</b> {{ jg.adversario }}{% else %}{{ jg.adversario }} <b class="num">{{ jg.placar_adversario }} x {{ jg.placar_nosso }}</b> {{ jg.nosso_time_nome }}{% endif %}</span>
+                                        <span class="data">{{ data_br(jg.data_jogo) }}</span>
+                                    </div>
+                                    <div class="ult-detalhe">
+                                        {% if jg.estatisticas %}
+                                        {% set e = jg.estatisticas %}
+                                        {% for chave, rotulo in [('minutos', 'Minutos'), ('cartoes', 'Cartões'), ('faltas_cometidas', 'Faltas cometidas'), ('faltas_sofridas', 'Faltas sofridas'), ('chutes', 'Chutes'), ('chutes_no_gol', 'Chutes no gol'), ('desarmes', 'Desarmes'), ('impedimentos', 'Impedimentos')] %}
+                                        <div>{{ rotulo }}<b>{{ e[chave] if e[chave] is not none else '-' }}</b></div>
+                                        {% endfor %}
+                                        {% else %}
+                                        <div>Sem dado detalhado desse jogo.</div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            {% else %}
+                                <div class="vazio" style="padding: 0.75rem">Nenhum jogo com dado ainda para esse jogador.</div>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </article>
                     {% endfor %}
-                </div>
-            </div>
-            {% endfor %}
-
-            {% if j.impedimento %}
-            <div class="bloco">
-                <div class="bloco-titulo">Impedimento</div>
-                {% if proximo_jogo %}
-                <label class="item-linha-label">
-                    <input type="checkbox" class="item-selecionavel"
-                        data-jogador-id="{{ j.jogador_id }}" data-jogador-nome="{{ j.nome }}"
-                        data-tipo="impedimento" data-linha="" data-direcao="sim"
-                        data-frequencia="{{ j.impedimento.frequencia }}"
-                        data-descricao="{{ j.nome }} - Ficará em impedimento"
-                        onchange="atualizarCarrinho()">
-                    Impedimento: <b>{{ j.impedimento.frequencia }}%</b> (últimos {{ j.impedimento.jogos_analisados }} jogos)
-                </label>
                 {% else %}
-                <div class="binario-texto">Ficou em impedimento em <b>{{ j.impedimento.frequencia }}%</b> dos
-                    últimos {{ j.impedimento.jogos_analisados }} jogos</div>
+                    <div class="vazio">Ainda não há padrões calculados para nenhum jogador desse clube.</div>
                 {% endif %}
-            </div>
-            {% endif %}
-
-            <div class="bloco">
-                <div class="bloco-titulo">Cartões rumo à suspensão</div>
-                <div class="binario-texto">
-                    {% if j.cartoes_suspensao == 2 %}
-                    <span style="color:#f85149; font-weight:700;">⚠️ 2/3 - a 1 cartão da suspensão</span>
-                    {% elif j.cartoes_suspensao == 1 %}
-                    <span style="color:#d29922; font-weight:700;">1/3</span>
-                    {% else %}
-                    <span style="color:#3fb950;">0/3</span>
-                    {% endif %}
                 </div>
-            </div>
-
-            {% if j.correlacao_jogador %}
-            <div class="bloco">
-                <div class="bloco-titulo">🧩 Efeito no adversário quando sofre muita falta</div>
-                <div class="binario-texto" style="line-height:1.5;">
-                    Média pessoal: <b>{{ j.correlacao_jogador.media_pessoal }}</b> falta(s) sofrida(s)/jogo.
-                    Nos jogos em que sofreu <b>acima</b> dessa média, os defensores do adversário levaram
-                    <b class="{{ 'acima' if j.correlacao_jogador.sobe_junto else 'abaixo' }}">{{ j.correlacao_jogador.valor_acima }} cartão(ões)/jogo</b>
-                    · abaixo da média: <b class="{{ 'abaixo' if j.correlacao_jogador.sobe_junto else 'acima' }}">{{ j.correlacao_jogador.valor_abaixo }}</b>.
-                    <span style="color:#8b949e; font-size:0.75rem;">({{ j.correlacao_jogador.jogos_total }} jogo(s) - não indica QUAL defensor especificamente, a API não informa quem marcou quem.)</span>
+                {% if jogadores|length > 10 %}
+                <div class="paginacao">
+                    <button type="button" class="btn-pagina" id="anterior-lista" onclick="mudarPagina('lista', -1)">Anterior</button>
+                    <span id="label-lista"></span>
+                    <button type="button" class="btn-pagina" id="proximo-lista" onclick="mudarPagina('lista', 1)">Próxima</button>
                 </div>
-            </div>
-            {% endif %}
+                {% endif %}
+            </section>
 
-            {% if j.ultimos_jogos is not none %}
-            <div class="bloco">
-                <div class="ultimos-jogos-jogador-toggle" onclick="toggleUltimosJogosJogador({{ j.jogador_id }})">
-                    🗓️ Últimos 5 jogos <span class="jogo-seta">▾</span>
-                </div>
-                <div class="ultimos-jogos-jogador-lista" id="ultimos-jogos-jogador-{{ j.jogador_id }}">
-                    {% if j.ultimos_jogos %}
-                        {% for jg in j.ultimos_jogos %}
-                        <div class="jogo-jogador-card" id="jogo-jogador-{{ j.jogador_id }}-{{ jg.jogo_id }}"
-                             onclick="toggleJogoJogador({{ j.jogador_id }}, {{ jg.jogo_id }})">
-                            <div class="jogo-jogador-linha">
-                                {% if jg.mandante %}
-                                    <span>{{ jg.nosso_time_nome }} {{ jg.placar_nosso }} x {{ jg.placar_adversario }} {{ jg.adversario }}</span>
-                                {% else %}
-                                    <span>{{ jg.adversario }} {{ jg.placar_adversario }} x {{ jg.placar_nosso }} {{ jg.nosso_time_nome }}</span>
-                                {% endif %}
-                                <span class="jogo-jogador-data">{{ jg.data_jogo }}</span>
-                            </div>
-                            <div class="jogo-jogador-detalhe">
-                                {% if jg.estatisticas %}
-                                <table class="tabela-detalhe-jogo">
-                                    <tbody>
-                                        <tr><td>Minutos jogados</td><td>{{ jg.estatisticas.minutos if jg.estatisticas.minutos is not none else "-" }}</td></tr>
-                                        <tr><td>Cartões</td><td>{{ jg.estatisticas.cartoes }}</td></tr>
-                                        <tr><td>Faltas cometidas</td><td>{{ jg.estatisticas.faltas_cometidas if jg.estatisticas.faltas_cometidas is not none else "-" }}</td></tr>
-                                        <tr><td>Faltas sofridas</td><td>{{ jg.estatisticas.faltas_sofridas if jg.estatisticas.faltas_sofridas is not none else "-" }}</td></tr>
-                                        <tr><td>Chutes (total)</td><td>{{ jg.estatisticas.chutes if jg.estatisticas.chutes is not none else "-" }}</td></tr>
-                                        <tr><td>Chutes no gol</td><td>{{ jg.estatisticas.chutes_no_gol if jg.estatisticas.chutes_no_gol is not none else "-" }}</td></tr>
-                                        <tr><td>Desarmes</td><td>{{ jg.estatisticas.desarmes if jg.estatisticas.desarmes is not none else "-" }}</td></tr>
-                                        <tr><td>Impedimentos</td><td>{{ jg.estatisticas.impedimentos if jg.estatisticas.impedimentos is not none else "-" }}</td></tr>
-                                    </tbody>
-                                </table>
-                                {% else %}
-                                <div class="vazio-pequeno">Sem dado detalhado desse jogo.</div>
-                                {% endif %}
-                            </div>
+            <aside class="lateral">
+                <section aria-labelledby="t-lideres">
+                    <h2 class="secao-titulo" id="t-lideres">Líderes do time</h2>
+                    <div class="lideres">
+                        {% for l in lideres_time %}
+                        <div class="vidro lider">
+                            <span class="rotulo">{{ l.titulo }}</span>
+                            {% if l.jogador_nome %}
+                            <div class="lider-quem"><span>{{ l.jogador_nome }}</span></div>
+                            <div class="lider-valor"><b>{{ l.total }}</b><small>últimos 5: {{ dec(l.media_5 or 0, 1) }}</small></div>
+                            {% else %}
+                            <div class="lider-quem" style="color: var(--apagado); font-weight: 400">Ainda não há dados suficientes.</div>
+                            {% endif %}
                         </div>
                         {% endfor %}
+                    </div>
+                </section>
+                <section aria-labelledby="t-elenco">
+                    <h2 class="secao-titulo" id="t-elenco">Elenco</h2>
+                    {% if elenco_por_posicao %}
+                    <div class="vidro elenco">
+                        {% for grupo in elenco_por_posicao %}
+                        <div class="elenco-grupo">
+                            <span class="rotulo">{{ grupo.titulo }} · {{ grupo.jogadores|length }}</span>
+                            <div class="elenco-nomes">{% for nome in grupo.jogadores %}<span class="{{ 'regua-2' if nome in na_regua else '' }}"{{ (' title="a 1 cartão da suspensão"')|safe if nome in na_regua else '' }}>{{ nome }}</span>{% endfor %}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
                     {% else %}
-                        <div class="vazio-pequeno">Nenhum jogo com dado ainda pra esse jogador.</div>
+                    <div class="vazio">Elenco ainda não disponível.</div>
                     {% endif %}
-                </div>
-            </div>
-            {% endif %}
+                </section>
+            </aside>
         </div>
-        {% endfor %}
-    {% else %}
-        <div class="vazio">Ainda não há padrões calculados pra nenhum jogador desse clube.</div>
-    {% endif %}
-    </div>
-    {% if jogadores|length > 10 %}
-    <div class="paginacao">
-        <button class="btn-pagina" id="anterior-lista" onclick="mudarPagina('lista', -1)">← Anterior</button>
-        <span id="label-lista"></span>
-        <button class="btn-pagina" id="proximo-lista" onclick="mudarPagina('lista', 1)">Próxima →</button>
-    </div>
-    {% endif %}
-        </div>
-
-        <div class="coluna-lideres">
-            <div class="titulo-coluna">Líderes de Estatísticas do Time</div>
-            {% for l in lideres_time %}
-            <div class="lider-card">
-                <div class="lider-titulo lider-cor-{{ loop.index0 % 6 }}">{{ l.titulo }}</div>
-                {% if l.jogador_nome %}
-                <table class="tabela-lider">
-                    <thead>
-                        <tr><th>Jogador</th><th>Últimos 5 jogos</th><th>Total</th></tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>{{ l.jogador_nome }}</td>
-                            <td>{{ l.media_5 }}</td>
-                            <td>{{ l.total }}</td>
-                        </tr>
-                    </tbody>
-                </table>
-                {% else %}
-                <div class="vazio-pequeno">Ainda não há dados suficientes pra essa categoria.</div>
-                {% endif %}
-            </div>
-            {% endfor %}
-        </div>
-    </div>
+    </main>
 
     {% if proximo_jogo %}
     <div class="carrinho-flutuante" id="carrinho">
         <span class="carrinho-contagem"><b id="carrinho-count">0</b> estatística(s) selecionada(s)</span>
-        <button class="btn-carrinho" onclick="abrirModalAposta()">💾 Criar Aposta</button>
+        <button type="button" onclick="abrirModalAposta()">Criar aposta</button>
     </div>
 
     <div id="modal-aposta" class="modal-fundo" onclick="if(event.target===this) this.style.display='none'">
-        <div class="modal-caixa">
+        <div class="modal-caixa" role="dialog" aria-modal="true" aria-labelledby="titulo-modal-aposta">
             <div class="modal-topo">
-                <span class="modal-titulo">Criar aposta manual</span>
-                <span class="modal-fechar" onclick="document.getElementById('modal-aposta').style.display='none'">✕</span>
+                <span class="modal-titulo" id="titulo-modal-aposta">Criar aposta manual</span>
+                <button type="button" class="modal-fechar" onclick="document.getElementById('modal-aposta').style.display='none'">Fechar</button>
             </div>
             <div class="modal-pernas-lista" id="modal-pernas-lista"></div>
             <div class="retangulo-prob" id="modal-prob-combinada"></div>
@@ -6112,19 +6056,19 @@ PAGINA_CLUBE = """
                     <input type="number" step="0.01" min="1.01" id="input-odd" placeholder="Odd dada pela casa" required>
                 </div>
                 <div class="modal-form-linha">
-                    <button type="submit" class="btn-salvar" style="width:100%; justify-content:center;">💾 Salvar aposta</button>
+                    <button type="submit" class="btn-salvar">Salvar aposta</button>
                 </div>
             </form>
         </div>
     </div>
     <div id="modal-tres-apostas" class="modal-fundo" onclick="if(event.target===this) this.style.display='none'">
-        <div class="modal-caixa modal-caixa-grande">
+        <div class="modal-caixa modal-caixa-grande" role="dialog" aria-modal="true" aria-labelledby="titulo-modal-tres">
             <div class="modal-topo">
-                <span class="modal-titulo">3 apostas geradas automaticamente</span>
-                <span class="modal-fechar" onclick="document.getElementById('modal-tres-apostas').style.display='none'">✕</span>
+                <span class="modal-titulo" id="titulo-modal-tres">3 apostas geradas automaticamente</span>
+                <button type="button" class="modal-fechar" onclick="document.getElementById('modal-tres-apostas').style.display='none'">Fechar</button>
             </div>
             <p class="aviso-tres-apostas">No máximo 1 jogador pode se repetir entre as 3 apostas (sempre o de
-                maior probabilidade histórica) - os demais aparecem em só uma delas.</p>
+                maior probabilidade histórica); os demais aparecem em só uma delas.</p>
             <div id="tres-apostas-container"></div>
         </div>
     </div>
@@ -6133,7 +6077,6 @@ PAGINA_CLUBE = """
     <script>
         const TAMANHO_PAGINA = 10;
         const paginaAtual = {};
-
         function salvarPaginaNoNavegador(listaId, pagina) {
             try { localStorage.setItem('pagina:' + window.location.pathname + ':' + listaId, String(pagina)); } catch (e) {}
         }
@@ -6143,7 +6086,6 @@ PAGINA_CLUBE = """
                 return v !== null ? parseInt(v, 10) : 0;
             } catch (e) { return 0; }
         }
-
         function totalPaginas(listaId) {
             let n = 0;
             document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
@@ -6151,7 +6093,6 @@ PAGINA_CLUBE = """
             });
             return Math.max(1, Math.ceil(n / TAMANHO_PAGINA));
         }
-
         function renderizarPagina(listaId) {
             if (!(listaId in paginaAtual)) { paginaAtual[listaId] = carregarPaginaDoNavegador(listaId); }
             const total = totalPaginas(listaId);
@@ -6161,43 +6102,35 @@ PAGINA_CLUBE = """
             let visivelIndice = 0;
             document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item) {
                 if (item.dataset.escondidoBusca === '1') { item.style.display = 'none'; return; }
-                const paginaDoItem = Math.floor(visivelIndice / TAMANHO_PAGINA);
-                item.style.display = (paginaDoItem === pagina) ? '' : 'none';
+                item.style.display = (Math.floor(visivelIndice / TAMANHO_PAGINA) === pagina) ? '' : 'none';
                 visivelIndice++;
             });
             const label = document.getElementById('label-' + listaId);
             if (label) label.textContent = 'Página ' + (pagina + 1) + ' de ' + total;
-            const btnAnterior = document.getElementById('anterior-' + listaId);
-            const btnProximo = document.getElementById('proximo-' + listaId);
-            if (btnAnterior) btnAnterior.disabled = (pagina === 0);
-            if (btnProximo) btnProximo.disabled = (pagina >= total - 1);
+            const a = document.getElementById('anterior-' + listaId), p = document.getElementById('proximo-' + listaId);
+            if (a) a.disabled = (pagina === 0);
+            if (p) p.disabled = (pagina >= total - 1);
         }
-
         function mudarPagina(listaId, direcao) {
             const total = totalPaginas(listaId);
-            let pagina = (paginaAtual[listaId] || 0) + direcao;
-            pagina = Math.max(0, Math.min(total - 1, pagina));
+            const pagina = Math.max(0, Math.min(total - 1, (paginaAtual[listaId] || 0) + direcao));
             paginaAtual[listaId] = pagina;
             salvarPaginaNoNavegador(listaId, pagina);
             renderizarPagina(listaId);
         }
-
         function filtrar() {
-            const termo = document.getElementById('busca').value.toLowerCase();
+            const termo = document.getElementById('busca').value.toLowerCase().trim();
             document.querySelectorAll('.jogador-card').forEach(function(card) {
-                const nome = card.querySelector('.nome-jogador').textContent.toLowerCase();
-                card.dataset.escondidoBusca = nome.includes(termo) ? '0' : '1';
+                card.dataset.escondidoBusca = card.querySelector('.nome-jogador').textContent.toLowerCase().includes(termo) ? '0' : '1';
             });
             paginaAtual['lista'] = 0;
             renderizarPagina('lista');
         }
-
         renderizarPagina('lista');
 
         function itensSelecionados() {
             return Array.from(document.querySelectorAll('.item-selecionavel:checked'));
         }
-
         function atualizarCarrinho() {
             const itens = itensSelecionados();
             const carrinho = document.getElementById('carrinho');
@@ -6205,13 +6138,10 @@ PAGINA_CLUBE = """
             document.getElementById('carrinho-count').textContent = itens.length;
             carrinho.classList.toggle('ativo', itens.length > 0);
         }
-
         function limparSelecao() {
             document.querySelectorAll('.item-selecionavel').forEach(el => el.checked = false);
             atualizarCarrinho();
         }
-
-        // NOVO (Últimos 5 jogos do jogador)
         function toggleUltimosJogosJogador(jogadorId) {
             document.getElementById('ultimos-jogos-jogador-' + jogadorId).classList.toggle('aberto');
         }
@@ -6220,17 +6150,10 @@ PAGINA_CLUBE = """
         }
 
         function gerarTresApostas() {
-            // NOVO: em vez de uma única múltipla com 6 estatísticas (muito
-            // fácil de errar, já que uma múltipla só acerta se TODAS as
-            // pernas acertarem), monta 3 apostas separadas e menores
-            // (3-4 pernas cada), diversificando entre jogadores diferentes.
-            // Regra: no máximo 1 jogador pode aparecer em mais de uma das
-            // 3 apostas - e esse jogador tem que ser o de maior
-            // probabilidade histórica entre todos os candidatos. Os demais
-            // jogadores aparecem em, no máximo, uma aposta.
+            // 3 apostas menores (3-4 pernas) em vez de uma múltipla grande; no
+            // máximo 1 jogador (o de maior probabilidade) se repete entre elas
             const MAX_PERNAS_POR_APOSTA = 4;
             const PISO_FREQUENCIA = 85;
-
             const candidatos = Array.from(document.querySelectorAll('.item-selecionavel'))
                 .map(el => ({
                     jogadorId: el.dataset.jogadorId,
@@ -6243,23 +6166,18 @@ PAGINA_CLUBE = """
                 }))
                 .filter(c => c.frequencia < PISO_FREQUENCIA)
                 .sort((a, b) => b.frequencia - a.frequencia);
-
             if (candidatos.length === 0) {
                 alert('Nenhuma estatística disponível abaixo de 85% de probabilidade no momento.');
                 return;
             }
-
             const melhorJogadorId = candidatos[0].jogadorId;
             const apostas = [[], [], []];
             const jogadoresUsados = new Set();
             let melhorJogadorUsos = 0;
-
             for (const candidato of candidatos) {
                 const jaUsado = jogadoresUsados.has(candidato.jogadorId);
                 const podeRepetir = candidato.jogadorId === melhorJogadorId && melhorJogadorUsos < 2;
                 if (jaUsado && !podeRepetir) continue;
-
-                // acha a aposta com menos pernas que ainda não tem esse jogador e não está cheia
                 let destino = null;
                 for (const aposta of apostas) {
                     if (aposta.length >= MAX_PERNAS_POR_APOSTA) continue;
@@ -6267,7 +6185,6 @@ PAGINA_CLUBE = """
                     if (destino === null || aposta.length < destino.length) destino = aposta;
                 }
                 if (destino === null) continue;
-
                 destino.push(candidato);
                 if (!jaUsado) {
                     jogadoresUsados.add(candidato.jogadorId);
@@ -6276,7 +6193,6 @@ PAGINA_CLUBE = """
                     melhorJogadorUsos++;
                 }
             }
-
             renderizarTresApostas(apostas);
             document.getElementById('modal-tres-apostas').style.display = 'flex';
         }
@@ -6287,10 +6203,9 @@ PAGINA_CLUBE = """
                 if (aposta.length < 3) {
                     return `<div class="retangulo-aposta">
                         <div class="retangulo-titulo">Aposta ${i + 1}</div>
-                        <div class="retangulo-vazio">Não há candidatos suficientes pra montar essa aposta agora.</div>
+                        <div class="retangulo-vazio">Não há candidatos suficientes para montar essa aposta agora.</div>
                     </div>`;
                 }
-
                 let probCombinada = 1.0;
                 const pernas = aposta.map(c => {
                     probCombinada *= c.frequencia / 100;
@@ -6307,22 +6222,21 @@ PAGINA_CLUBE = """
                 const probPct = (probCombinada * 100).toFixed(2);
                 const descricaoCompleta = aposta.map(c => c.descricao).join(' + ');
                 const pernasJson = JSON.stringify(pernas).replace(/"/g, '&quot;');
-
                 return `<div class="retangulo-aposta">
                     <div class="retangulo-titulo">Aposta ${i + 1}</div>
                     <div class="retangulo-pernas">${aposta.map(c => `• ${c.descricao} (${c.frequencia}%)`).join('<br>')}</div>
-                    <div class="retangulo-prob">📐 Probabilidade histórica: ${probPct}%</div>
-                    <form method="POST" action="/salvar-aposta" class="modal-form-linha" style="flex-direction:column;">
+                    <div class="retangulo-prob">Probabilidade histórica: ${probPct}%</div>
+                    <form method="POST" action="/salvar-aposta">
                         <input type="hidden" name="descricao" value="${descricaoCompleta}">
                         <input type="hidden" name="casa_aposta" value="Anotado manualmente">
                         <input type="hidden" name="probabilidade_combinada" value="${probPct}">
                         <input type="hidden" name="pernas" value='${pernasJson}'>
                         <input type="hidden" name="voltar" value="/clube/{{ time_id }}">
-                        <div style="display:flex; gap:10px; width:100%;">
+                        <div class="modal-form-linha">
                             <input type="number" step="0.01" min="0.01" name="valor_apostado" placeholder="Valor (R$)" required>
                             <input type="number" step="0.01" min="1.01" name="odd_combinada" placeholder="Odd da casa" required>
                         </div>
-                        <button type="submit" class="btn-salvar" style="width:100%; justify-content:center; margin-top:8px;">💾 Salvar Aposta ${i + 1}</button>
+                        <div class="modal-form-linha"><button type="submit" class="btn-salvar">Salvar aposta ${i + 1}</button></div>
                     </form>
                 </div>`;
             }).join('');
@@ -6331,12 +6245,8 @@ PAGINA_CLUBE = """
         function abrirModalAposta() {
             const itens = itensSelecionados();
             if (itens.length === 0) return;
-
-            const lista = document.getElementById('modal-pernas-lista');
-            lista.innerHTML = itens.map(el => `• ${el.dataset.descricao} (${el.dataset.frequencia}%)`).join('<br>');
-
+            document.getElementById('modal-pernas-lista').innerHTML = itens.map(el => `• ${el.dataset.descricao} (${el.dataset.frequencia}%)`).join('<br>');
             document.getElementById('campo-descricao').value = itens.map(el => el.dataset.descricao).join(' + ');
-
             let probCombinada = 1.0;
             const pernas = itens.map(el => {
                 probCombinada *= parseFloat(el.dataset.frequencia) / 100;
@@ -6352,9 +6262,8 @@ PAGINA_CLUBE = """
             });
             document.getElementById('campo-probabilidade').value = (probCombinada * 100).toFixed(2);
             document.getElementById('modal-prob-combinada').textContent =
-                `📐 Probabilidade histórica combinada: ${(probCombinada * 100).toFixed(2)}%`;
+                `Probabilidade histórica combinada: ${(probCombinada * 100).toFixed(2)}%`;
             document.getElementById('campo-pernas').value = JSON.stringify(pernas);
-
             document.getElementById('modal-aposta').style.display = 'flex';
         }
 
@@ -6363,17 +6272,20 @@ PAGINA_CLUBE = """
             if (!form) return;
             form.addEventListener('submit', function() {
                 document.getElementById('campo-odd').value = document.getElementById('input-odd').value;
-                document.getElementById('campo-descricao').value += ''; // já preenchido
-                const valorInput = document.getElementById('input-valor');
                 const valorHidden = document.createElement('input');
                 valorHidden.type = 'hidden';
                 valorHidden.name = 'valor_apostado';
-                valorHidden.value = valorInput.value;
+                valorHidden.value = document.getElementById('input-valor').value;
                 form.appendChild(valorHidden);
             });
         });
+
+        (function () {
+            const ativo = document.querySelector('.fileira-time.ativo');
+            if (ativo) { const f = ativo.parentElement; f.scrollLeft = ativo.offsetLeft - f.clientWidth / 2 + ativo.clientWidth / 2; }
+        })();
     </script>
-</body>
+""" + SCRIPT_FUNDO_VIVO + """</body>
 </html>
 """
 
@@ -8266,6 +8178,51 @@ def escudo_liga(liga_id):
     return resposta
 
 
+# REDESIGN (16/10/2026): foto do jogador nas páginas de Jogadores, pelo mesmo
+# caminho do escudo (a CDN da API-Football recusa o pedido feito direto do
+# navegador). Recebe o id do NOSSO banco e procura o api_football_id. Só para
+# quem está logado (não começa com "escudo"). Guarda em memória até 1.500 fotos
+# e deixa o navegador guardar por 7 dias. Sem foto, a página mostra as iniciais.
+_fotos_jogador_cache = {}
+
+
+@app.route("/foto-jogador/<int:jogador_id>.png")
+def foto_jogador(jogador_id):
+    conteudo = _fotos_jogador_cache.get(jogador_id)
+    if conteudo is None:
+        api_id = None
+        try:
+            conn = psycopg2.connect(DATABASE_URL)
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT api_football_id FROM jogadores WHERE id = %s", (jogador_id,))
+                linha = cur.fetchone()
+                api_id = linha[0] if linha else None
+                cur.close()
+            finally:
+                conn.close()
+        except Exception:
+            api_id = None
+        if api_id:
+            try:
+                resp = requests.get(
+                    f"https://media.api-sports.io/football/players/{int(api_id)}.png",
+                    timeout=5,
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                if resp.status_code == 200 and resp.content:
+                    conteudo = resp.content
+                    if len(_fotos_jogador_cache) < 1500:
+                        _fotos_jogador_cache[jogador_id] = conteudo
+            except Exception:
+                pass
+    if conteudo is None:
+        return "", 404
+    resposta = Response(conteudo, mimetype="image/png")
+    resposta.headers["Cache-Control"] = "public, max-age=604800"
+    return resposta
+
+
 # ---------- Cartões acumulados rumo à suspensão automática ----------
 def buscar_cartoes_para_suspensao(cur):
     """Cartões amarelos acumulados rumo à suspensão automática (regra do
@@ -8605,7 +8562,7 @@ def jogadores():
 
     return render_template_string(
         PAGINA_JOGADORES, clubes=clubes, jogadores=jogadores_lista, lideres=lideres,
-        nav_html=barra_navegacao("jogadores", round(banca_atual, 2)),
+        nav_html=barra_navegacao_nova("jogadores", round(banca_atual, 2)),
     )
 
 
@@ -8634,6 +8591,12 @@ def clube(time_id):
         elenco_por_posicao = buscar_elenco_por_posicao(cur, time_id)
         lideres_time = buscar_lideres_estatisticas_jogadores_time(cur, time_id)
         banca_atual = buscar_banca(cur, session["usuario_id"])
+        # REDESIGN (16/10/2026): a fileira de escudos do topo troca de clube
+        cur.execute("SELECT id, nome FROM times WHERE rastreado = TRUE ORDER BY nome")
+        clubes = [
+            {"id": c_id, "nome": c_nome, "escudo_url": buscar_escudo_url(cur, c_nome)}
+            for c_id, c_nome in cur.fetchall()
+        ]
 
         # NOVO (Fase D, só exibição - não afeta recomendação/VE): "jogo
         # morto" (o time já não tem mais nada em jogo matematicamente) e o
@@ -8669,7 +8632,8 @@ def clube(time_id):
         proximo_jogo=proximo_jogo, nome_clube=nome_clube, escudo_url=escudo_url,
         time_id=time_id, elenco_por_posicao=elenco_por_posicao, lideres_time=lideres_time,
         jogadores_na_regua=jogadores_na_regua, jogo_morto=jogo_morto, contexto_jogo=contexto_jogo,
-        nav_html=barra_navegacao("jogadores", round(banca_atual, 2)),
+        clubes=clubes,
+        nav_html=barra_navegacao_nova("jogadores", round(banca_atual, 2)),
     )
 
 
