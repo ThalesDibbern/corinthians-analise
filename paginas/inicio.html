@@ -1,4 +1,4 @@
-<title>Análise de Apostas</title>
+<title>Achismo Zero · só o que os números dizem</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -86,6 +86,7 @@ button{font:inherit;color:inherit}
 .chamada .eyebrow{font-family:var(--f-dado);font-size:0.7188rem;letter-spacing:.16em;text-transform:uppercase;color:var(--azul-claro)}
 .chamada h1{font-family:var(--f-corpo);font-weight:700;font-size:1.25rem;line-height:1.25;margin:.6em 0 .35em;text-wrap:balance}
 .chamada p{color:var(--apagado);margin:0}
+.chamada .slogan{font-family:var(--f-corpo);font-weight:300;font-size:clamp(0.9375rem,1.3vw,1.1875rem);letter-spacing:-.005em;color:var(--texto);opacity:.82;margin:-0.375rem 0 1.125rem}
 
 .legenda{position:absolute;z-index:6;left:max(1.75rem,env(safe-area-inset-left,0px));bottom:calc(1.625rem + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:0.5rem;font-size:0.8125rem;color:var(--apagado);pointer-events:none}
 .legenda span{display:flex;align-items:center;gap:0.5625rem}
@@ -494,7 +495,7 @@ dialog .botoes{display:flex;gap:0.625rem;justify-content:flex-end;flex-wrap:wrap
   opacity:0;transform:scale(.96);transition:opacity .35s ease,transform .45s cubic-bezier(.2,.8,.2,1)}
 .legenda::before{inset:-0.75rem -0.875rem;border-radius:0.875rem}
 .chamada.recua::before,.legenda.recua::before{opacity:1;transform:none}
-.chamada .marca,.chamada .eyebrow,.chamada h1,.chamada p{transition:transform .45s cubic-bezier(.2,.8,.2,1)}
+.chamada .marca,.chamada .slogan,.chamada .eyebrow,.chamada h1,.chamada p{transition:transform .45s cubic-bezier(.2,.8,.2,1)}
 .chamada.recua .marca{transform:scale(.9);transform-origin:left bottom}
 
 /* ================= v12: largura que acompanha a tela + desempenho ================= */
@@ -741,7 +742,8 @@ html.trava{overflow:hidden}
   <div class="palco" id="palco">
     <div class="caixa-globo" id="caixa-globo"><div id="globo" role="application" aria-label="Planeta interativo com as ligas de futebol"></div></div>
     <div class="chamada" id="chamada">
-      <div class="marca" id="marca" aria-label="Análise de Apostas"><span class="letras" data-letras aria-hidden="true">Análise de</span> <span class="letras brilho" data-letras data-d="420" aria-hidden="true">Apostas</span></div>
+      <div class="marca" id="marca" aria-label="Achismo Zero"><span class="letras" data-letras aria-hidden="true">Achismo</span> <span class="letras brilho" data-letras data-d="420" aria-hidden="true">Zero</span></div>
+      <div class="slogan entra" id="slogan" style="--atraso:750ms">só o que os números dizem</div>
       <div class="eyebrow entra" style="--atraso:900ms">50 ligas · 6 disponíveis</div>
       <h1 class="entra" style="--atraso:1050ms">Escolha a liga no mapa</h1>
       <p class="entra" style="--atraso:1200ms">Passe o mouse sobre um país para ver a liga dele. Os países em azul já têm análise.</p>
@@ -919,7 +921,7 @@ html.trava{overflow:hidden}
     <div class="chips" id="chips"><div class="faixa"><div class="trilho" id="trilho1"></div></div><div class="faixa volta"><div class="trilho" id="trilho2"></div></div></div>
   </div>
 </section>
-<footer class="secao rodape"><div class="envolve"><span id="rodape-nome">Análise de Apostas</span><span>Projeto pessoal · 2026</span></div></footer>
+<footer class="secao rodape"><div class="envolve"><span id="rodape-nome">Achismo Zero · <span data-slogan>só o que os números dizem</span></span><span>Projeto pessoal · 2026</span></div></footer>
 
 <div class="pagina" id="pagina-tecnica" role="dialog" aria-modal="true" aria-labelledby="pt-titulo" hidden>
   <div class="pagina-barra">
@@ -1274,6 +1276,8 @@ let acendePedido = false;
 addEventListener("scroll", () => { if (!acendePedido) { acendePedido = true; requestAnimationFrame(() => { acendePedido = false; acender(); }); } }, { passive: true });
 acender();
 
+/* Marca: "Achismo Zero" em todas as línguas; só a frase de apoio muda. */
+const SLOGAN = { pt: "só o que os números dizem", en: "no guesswork, just numbers", es: "sin corazonadas, solo números" };
 let mudarFundo = () => {};
 /* ---------- fundo em WebGL (gradiente que flui devagar) ---------- */
 (function fundoVivo() {

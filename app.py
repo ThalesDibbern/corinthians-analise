@@ -215,6 +215,15 @@ LIGAS_POR_CHAVE = {chave: (nome, implementada, svg) for chave, nome, implementad
 # REDESIGN (15/10/2026): id da liga na API-Football, para a logo (servida
 # pelo próprio site em /escudo-liga/<id>.png - a CDN deles recusa o
 # pedido direto do navegador). Usado só pelas páginas no visual novo.
+# 15/10/2026: o site passa a se chamar "Achismo Zero" ("achismo" = opinião
+# sem base, chute; "Achismo Zero" = nada de chute, só o que os números
+# dizem). O nome NÃO se traduz; só a frase de apoio muda de língua (para o
+# futuro seletor de idioma).
+MARCA = "Achismo Zero"
+SLOGAN = {"pt": "só o que os números dizem",
+          "en": "no guesswork, just numbers",
+          "es": "sin corazonadas, solo números"}
+
 LIGA_API_ID = {"brasileirao": 71, "premier": 39, "laliga": 140,
                "bundesliga": 78, "ligue1": 61, "seriea": 135}
 
@@ -301,7 +310,7 @@ def barra_navegacao_nova(pagina_atual, banca_atual=None):
         banca = f'<a href="/minhas-apostas" class="topo-banca">Banca R$ {banca_atual:.2f}</a>'
     return (
         '<header class="topo">'
-        '<a href="/" class="topo-marca">Análise de Apostas</a>'
+        f'<a href="/" class="topo-marca" title="{MARCA}, {SLOGAN["pt"]}">{MARCA}</a>'
         f'<nav class="topo-nav" aria-label="Páginas">{links}</nav>'
         f'<div class="topo-direita">{banca}<a href="/minhas-apostas" class="topo-conta">Conta</a></div>'
         '</header>'
@@ -727,7 +736,7 @@ PAGINA = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Análise de Apostas</title>
+    <title>Recomendações - Achismo Zero</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Manrope:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -1736,7 +1745,7 @@ PAGINA_HISTORICO = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Histórico - Análise de Apostas</title>
+    <title>Histórico - Achismo Zero</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -3038,7 +3047,7 @@ PAGINA_LIGA_NAO_IMPLEMENTADA = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ liga_nome }} - Análise de Apostas</title>
+    <title>{{ liga_nome }} - Achismo Zero</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -3233,7 +3242,7 @@ PAGINA_LOGIN = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Análise de Apostas</title>
+    <title>Login - Achismo Zero</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -3276,7 +3285,7 @@ PAGINA_LOGIN = """
     </style>
 </head>
 <body>
-    <h1>⚫⚪ Análise de Apostas</h1>
+    <h1>Achismo Zero</h1>
     <p class="subtitulo">Selecione seu usuário pra entrar</p>
 
     {% if usuarios %}
@@ -3639,7 +3648,7 @@ PAGINA_ROI = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Minhas Apostas - Análise de Apostas</title>
+    <title>Minhas Apostas - Achismo Zero</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -4985,7 +4994,7 @@ PAGINA_JOGADORES = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jogadores - Análise de Apostas</title>
+    <title>Jogadores - Achismo Zero</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -5316,7 +5325,7 @@ PAGINA_CLUBE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ nome_clube }} - Análise de Apostas</title>
+    <title>{{ nome_clube }} - Achismo Zero</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -6129,7 +6138,7 @@ PAGINA_TIMES = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Estatísticas de Times - Análise de Apostas</title>
+    <title>Estatísticas de Times - Achismo Zero</title>
     <style>
         * { box-sizing: border-box; }
         body {
