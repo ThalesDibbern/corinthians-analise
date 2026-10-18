@@ -1899,17 +1899,20 @@ SCRIPT_FUNDO_VIVO = """    <script>
             gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
             const lp = gl.getAttribLocation(pr, "p"); gl.enableVertexAttribArray(lp); gl.vertexAttribPointer(lp, 2, gl.FLOAT, false, 0, 0);
             const ur = gl.getUniformLocation(pr, "r"), ut = gl.getUniformLocation(pr, "t");
-            const CORES = [[.004, .012, .04], [.01, .05, .14], [.03, .12, .3], [.07, .22, .48], [.13, .32, .6], [.42, .3, .02]];
-            CORES.forEach((c, i) => gl.uniform3f(gl.getUniformLocation(pr, "u" + i), c[0], c[1], c[2]));
+            const CORES = window.CORES_FUNDO || [[.004, .012, .04], [.01, .05, .14], [.03, .12, .3], [.07, .22, .48], [.13, .32, .6], [.42, .3, .02]];
+            const poeCores = cs => cs.forEach((c, i) => gl.uniform3f(gl.getUniformLocation(pr, "u" + i), c[0], c[1], c[2]));
+            poeCores(CORES);
             const reduz = matchMedia("(prefers-reduced-motion: reduce)").matches;
             const ESCALA = .28;
             const desenha = s => { gl.uniform1f(ut, s); gl.drawArrays(gl.TRIANGLES, 0, 3); };
+            const t0 = performance.now();
+            window.trocarCoresFundo = cs => { poeCores(cs); desenha((performance.now() - t0) / 1000 + 40); };
             function medir() {
                 cv.width = Math.max(2, Math.round(innerWidth * ESCALA)); cv.height = Math.max(2, Math.round(innerHeight * ESCALA));
                 gl.viewport(0, 0, cv.width, cv.height); gl.uniform2f(ur, cv.width, cv.height);
             }
             medir(); addEventListener("resize", () => { medir(); if (reduz) desenha(40); });
-            const t0 = performance.now(); let ult = 0;
+            let ult = 0;
             function quadro(agora) {
                 if (!document.hidden && agora - ult > 41) { ult = agora; desenha((agora - t0) / 1000 + 40); }
                 requestAnimationFrame(quadro);
@@ -1976,400 +1979,432 @@ PAGINA_HISTORICO = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Histórico - Achismo Zero</title>
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-            background: #0d1117;
-            color: #e6edf3;
-            max-width: 1500px;
-            margin: 0 auto;
-            padding: 32px 20px 80px;
-        }
-        h1 { font-size: 1.5rem; margin: 0 0 4px; text-align: center; }
-        .subtitulo { color: #8b949e; margin: 0 0 20px; text-align: center; }
-        .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
-        .link-voltar:hover { text-decoration: underline; }
-        .resumo-grid { display: flex; gap: 14px; margin: 20px 0 28px; flex-wrap: wrap; }
-        .resumo-card {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 16px 22px; flex: 1; min-width: 130px; text-align: center;
-        }
-        .resumo-numero { font-size: 1.6rem; font-weight: 700; }
-        .resumo-label { color: #8b949e; font-size: 0.78rem; margin-top: 4px; }
-        .calibracao {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 14px 20px; margin-bottom: 24px; cursor: pointer; transition: border-color 0.15s;
-        }
-        .calibracao:hover { border-color: #58a6ff; }
-        .calibracao-titulo { font-size: 0.88rem; font-weight: 700; margin-bottom: 6px; }
-        .calibracao-nota { color: #8b949e; font-size: 0.75rem; }
-        .modal-fundo {
-            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center;
-        }
-        .modal-caixa {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 20px 24px; max-width: 1100px; width: 92%; max-height: 80vh; overflow-y: auto;
-        }
-        .modal-topo { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
-        .modal-titulo { font-weight: 700; font-size: 0.95rem; }
-        .modal-fechar { cursor: pointer; color: #8b949e; font-size: 1.1rem; }
-        .modal-fechar:hover { color: #e6edf3; }
-        .modal-linha {
-            display: flex; justify-content: space-between; padding: 8px 0;
-            border-bottom: 1px solid #21262d; font-size: 0.85rem;
-        }
-        /* NOVO (17/08/2026): tabela expansível por faixa de probabilidade */
-        .calibracao-faixa { border-bottom: 1px solid #21262d; }
-        .calibracao-faixa .modal-linha { border-bottom: none; }
-        .modal-linha-clicavel { cursor: pointer; }
-        .modal-linha-clicavel:hover { background: #1c2128; }
-        .faixa-seta { display: inline-block; font-size: 0.7rem; color: #8b949e; transition: transform 0.15s; margin-left: 4px; }
-        .faixa-detalhe { padding: 4px 0 12px; }
-        .tabela-faixa-wrap { overflow-x: auto; max-width: 100%; }
-        .tabela-faixa { border-collapse: collapse; width: 100%; font-size: 0.74rem; white-space: nowrap; }
-        .tabela-faixa th {
-            text-align: left; color: #8b949e; font-weight: 600; padding: 6px 10px;
-            border-bottom: 1px solid #30363d; position: sticky; top: 0; background: #161b22;
-        }
-        .tabela-faixa td { padding: 6px 10px; border-bottom: 1px solid #21262d; color: #c9d1d9; }
-        .tabela-faixa tr.linha-acertou td:last-child { color: #3fb950; }
-        .tabela-faixa tr.linha-errou td:last-child { color: #f85149; }
-        .cartao {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 16px 20px; margin-bottom: 12px;
-        }
-        .cartao-topo {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 8px; flex-wrap: wrap; gap: 8px;
-        }
-        .jogo { font-weight: 600; font-size: 0.88rem; }
-        .descricao { color: #c9d1d9; font-size: 0.88rem; margin-bottom: 8px; line-height: 1.5; }
-        .metricas { display: flex; gap: 18px; font-size: 0.78rem; color: #8b949e; flex-wrap: wrap; }
-        .metricas b { color: #e6edf3; }
-        .badge {
-            font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 999px;
-            text-transform: uppercase; letter-spacing: 0.03em;
-        }
-        .badge-acertou { background: #23863622; color: #3fb950; }
-        .badge-errou { background: #f8514922; color: #f85149; }
-        .badge-pendente { background: #8b949e22; color: #8b949e; }
-        .vazio {
-            text-align: center; color: #8b949e; padding: 32px 24px;
-            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
-        }
-        .secao-titulo { font-size: 1.05rem; margin: 32px 0 4px; }
-        .secao-subtitulo { color: #8b949e; font-size: 0.82rem; margin: 0 0 16px; }
-        .salvar-linha {
-            display: flex; gap: 8px; align-items: center; margin-top: 10px;
-            padding-top: 10px; border-top: 1px solid #21262d;
-        }
-        .salvar-linha input[type=number] { width: 110px; padding: 7px 10px; font-size: 0.85rem;
-            background: #0d1117; border: 1px solid #30363d; color: #e6edf3; border-radius: 8px; }
-        .btn-salvar {
-            background: #1f6feb; color: white; border: none; border-radius: 8px;
-            padding: 8px 16px; font-size: 0.82rem; font-weight: 600; cursor: pointer;
-        }
-        .btn-salvar:hover { background: #388bfd; }
-        .ja-apostado { color: #d29922; font-size: 0.78rem; margin-top: 8px; }
-        .odd-tag {
-            background: #23863622; color: #3fb950; font-weight: 700; font-size: 1rem;
-            padding: 3px 12px; border-radius: 8px;
-        }
-        .casa {
-            background: #1f6feb22; color: #58a6ff; font-size: 0.72rem; padding: 3px 10px;
-            border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em;
-        }
-        .colunas-resultado {
-            display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start;
-            margin-bottom: 28px;
-        }
-        @media (max-width: 640px) {
-            .colunas-resultado { grid-template-columns: 1fr; }
-        }
-        .coluna-cabecalho {
-            border-radius: 10px; padding: 10px 16px; font-weight: 700; font-size: 0.92rem;
-            margin-bottom: 12px; text-align: center;
-        }
-        .coluna-verde { background: #23863633; color: #3fb950; border: 1px solid #3fb95055; }
-        .coluna-vermelha { background: #f8514933; color: #f85149; border: 1px solid #f8514955; }
-        .coluna-cinza { background: #8b949e22; color: #8b949e; border: 1px solid #8b949e55; }
-        .coluna-roxa { background: #a371f722; color: #a371f7; border: 1px solid #a371f755; }
-        .secao-pendentes { margin-bottom: 28px; }
-        .bloco-rodada {
-            margin-bottom: 20px; padding: 16px; background: #0d1117;
-            border: 1px solid #21262d; border-radius: 12px;
-        }
-        .rodada-titulo {
-            cursor: pointer; display: flex; justify-content: space-between; align-items: center;
-            font-weight: 700; font-size: 0.95rem; color: #e6edf3; margin-bottom: 0;
-        }
-        .rodada-titulo:hover { color: #58a6ff; }
-        .rodada-seta { color: #8b949e; transition: transform 0.15s; font-size: 0.85rem; }
-        .bloco-rodada.aberto .rodada-seta { transform: rotate(180deg); }
-        .bloco-rodada .colunas-resultado { display: none; margin-top: 14px; margin-bottom: 0; }
-        .bloco-rodada.aberto .colunas-resultado { display: grid; }
-        .btn-baixar {
-            display: inline-block; background: transparent; color: #58a6ff;
-            border: 1px solid #58a6ff; border-radius: 8px; padding: 6px 12px;
-            font-size: 0.78rem; font-weight: 600; text-decoration: none;
-            margin-bottom: 10px; cursor: pointer;
-        }
-        .btn-baixar:hover { background: #58a6ff22; }
-        .btn-carregar-mais {
-            background: transparent; color: #8b949e; border: 1px solid #8b949e;
-            border-radius: 8px; padding: 9px 20px; font-size: 0.85rem; font-weight: 600;
-            cursor: pointer;
-        }
-        .btn-carregar-mais:hover:not(:disabled) { background: #8b949e22; }
-        .btn-carregar-mais:disabled { opacity: 0.6; cursor: default; }
-        .carregar-mais-wrap { text-align: center; margin: 8px 0 28px; }
-        .paginacao {
-            display: flex; align-items: center; justify-content: center; gap: 14px;
-            margin-top: 4px; font-size: 0.82rem; color: #8b949e;
-        }
-        .btn-pagina {
-            background: #161b22; border: 1px solid #30363d; color: #e6edf3;
-            border-radius: 8px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer;
-        }
-        .btn-pagina:hover:not(:disabled) { border-color: #58a6ff; }
-        .btn-pagina:disabled { opacity: 0.35; cursor: default; }
+""" + FONTES_VISUAL_NOVO + """    <style>
+        /* REDESIGN (18/10/2026): Histórico no visual novo. Dados e rotas são
+           os de antes (mesmas listas, mesma paginação de 10, mesmos CSV por
+           rodada, mesmo "carregar mais rodadas" e as mesmas tabelas por
+           faixa de /api/calibracao e /api/calibracao-odd). O que muda é a
+           forma: as duas calibrações viraram barras "prometido x
+           acontecido" na própria página, e a tabela de cada faixa abre numa
+           janela só. */
         """ + NAV_CSS + """
+""" + CSS_VISUAL_NOVO + """
+        .conteudo { width: var(--degrau1); margin: 0 auto; }
+        .rotulo { font-family: var(--f-dado); font-size: 0.625rem; letter-spacing: .08em; text-transform: uppercase; color: var(--apagado); }
+        .vidro { background: var(--vidro); border: 1px solid var(--vidro-borda); box-shadow: var(--vidro-sombra); border-radius: var(--raio); }
+        .num { font-family: var(--f-dado); font-variant-numeric: tabular-nums; }
+        .secao { margin-bottom: 3.5rem; }
+        .secao-titulo {
+            margin: 0 0 0.5rem; font-family: var(--f-corpo); font-weight: 300;
+            font-size: clamp(1.25rem, 1.8vw, 1.75rem); letter-spacing: -.03em; line-height: 1.1;
+        }
+        .nota { color: var(--apagado); font-size: 0.75rem; line-height: 1.6; margin: 0 0 1.25rem; max-width: 56rem; }
+        .nota b { color: var(--texto); font-weight: 600; }
+        .vazio {
+            text-align: center; color: var(--apagado); padding: 1.75rem 1.25rem; font-size: 0.8125rem;
+            background: rgba(3, 12, 32, .4); border: 1px dashed var(--linha); border-radius: var(--raio);
+        }
+        .escudo { width: 1rem; height: 1rem; object-fit: contain; vertical-align: -0.1875rem; margin-right: 0.25rem; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+        button {
+            background: var(--ouro); color: var(--cta-texto); border: 1px solid transparent; border-radius: 999px;
+            padding: 0.5rem 1rem; font-family: var(--f-corpo); font-size: 0.8125rem; font-weight: 600; cursor: pointer;
+        }
+
+        /* ---------- cabeçalho + placar ---------- */
+        .cabeca { margin: 0.5rem 0 1.75rem; }
+        .cabeca h1 { margin: 0; font-family: var(--f-corpo); font-weight: 300; font-size: clamp(2rem, 3.2vw, 3rem); letter-spacing: -.035em; line-height: 1; }
+        .cabeca p { margin: 0.5rem 0 0; color: var(--apagado); font-size: 0.8125rem; }
+        .placar { padding: 1.25rem 1.5rem 1.375rem; margin-bottom: 3.5rem; }
+        .placar-numeros { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; }
+        .placar-numeros b { display: block; font-family: var(--f-dado); font-weight: 500; font-size: clamp(1.75rem, 2.6vw, 2.5rem); line-height: 1; margin-top: 0.375rem; font-variant-numeric: tabular-nums; }
+        .placar .ouro b { color: var(--ouro); }
+        .placar .azul b { color: var(--azul-claro); }
+        .placar-barra { display: flex; height: 0.5rem; border-radius: 999px; overflow: hidden; margin-top: 1.25rem; background: rgba(255,255,255,.06); }
+        .placar-barra i { display: block; height: 100%; }
+        .placar-barra .b-ac { background: var(--ouro); }
+        .placar-barra .b-er { background: rgba(180, 200, 242, .45); }
+
+        /* ---------- calibração: prometido x acontecido ---------- */
+        .calib { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+        .calib-painel { padding: 1.125rem 1.25rem 1.25rem; min-width: 0; }
+        .calib-painel h3 { margin: 0 0 0.25rem; font-size: 0.9375rem; font-weight: 600; }
+        .calib-destaque { font-size: 0.75rem; color: var(--apagado); margin: 0 0 1rem; line-height: 1.5; }
+        .calib-destaque b { color: var(--ouro); font-weight: 600; }
+        .legenda { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.625rem; color: var(--apagado); margin-bottom: 0.75rem; }
+        .legenda span { display: inline-flex; align-items: center; gap: 0.375rem; }
+        .leg-fx { width: 1rem; height: 0.5rem; border-radius: 0.125rem; background: rgba(180, 200, 242, .14); border: 1px dashed rgba(180, 200, 242, .5); }
+        .leg-real { width: 1rem; height: 0.375rem; border-radius: 999px; background: var(--azul); }
+        .leg-marca { width: 2px; height: 0.75rem; background: var(--azul-claro); }
+        .calib-linhas { display: grid; gap: 0.125rem; }
+        .calib-rolagem { max-height: 26rem; overflow-y: auto; padding-right: 0.375rem; scrollbar-width: thin; }
+        .faixa {
+            width: 100%; display: grid; grid-template-columns: 5.5rem minmax(0, 1fr) 7.25rem; gap: 0.75rem; align-items: center;
+            background: none; border: 0; border-radius: 0.5rem; padding: 0.4375rem 0.5rem; color: var(--texto);
+            font-family: var(--f-corpo); font-weight: 400; text-align: left; cursor: pointer; transition: background .15s;
+        }
+        .faixa:hover { background: rgba(255,255,255,.05); }
+        .faixa:focus-visible { outline: 2px solid var(--azul-claro); outline-offset: 1px; }
+        .faixa-rot { font-family: var(--f-dado); font-size: 0.6875rem; color: var(--apagado); white-space: nowrap; }
+        .trilho { position: relative; height: 0.875rem; border-radius: 0.25rem; background: rgba(255,255,255,.04); }
+        .trilho .fx { position: absolute; top: 0; bottom: 0; background: rgba(180, 200, 242, .12); border-left: 1px dashed rgba(180, 200, 242, .5); border-right: 1px dashed rgba(180, 200, 242, .5); }
+        .trilho .marca { position: absolute; top: -0.1875rem; bottom: -0.1875rem; width: 2px; margin-left: -1px; background: var(--azul-claro); }
+        .trilho .real { position: absolute; left: 0; top: 0.25rem; height: 0.375rem; border-radius: 999px; background: var(--azul); }
+        .trilho .real.bom { background: var(--ouro); }
+        .faixa-num { text-align: right; font-size: 0.6875rem; color: var(--apagado); white-space: nowrap; }
+        .faixa-num b { font-family: var(--f-dado); font-weight: 600; font-size: 0.8125rem; color: var(--texto); margin-right: 0.25rem; }
+
+        /* ---------- colunas acertou / errou ---------- */
+        .colunas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+        .coluna { min-width: 0; }
+        .coluna-topo { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.875rem; flex-wrap: wrap; }
+        .coluna-topo h3 { margin: 0; font-size: 1rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem; }
+        .coluna-topo h3 .ponto { width: 0.5rem; height: 0.5rem; border-radius: 50%; }
+        .c-ac .ponto { background: var(--ouro); }
+        .c-er .ponto { background: var(--azul-claro); }
+        .c-pe .ponto { background: var(--apagado); }
+        .coluna-topo h3 small { font-family: var(--f-dado); font-weight: 500; font-size: 0.8125rem; color: var(--apagado); }
+        .btn-baixar {
+            font-size: 0.6875rem; font-weight: 600; color: var(--azul-claro); text-decoration: none;
+            border: 1px solid rgba(180, 200, 242, .4); border-radius: 999px; padding: 0.25rem 0.75rem; white-space: nowrap;
+        }
+        .btn-baixar:hover { background: rgba(180, 200, 242, .1); }
+
+        /* cartão de uma recomendação */
+        .cartao {
+            background: var(--vidro); border: 1px solid var(--vidro-borda); box-shadow: var(--vidro-sombra);
+            border-radius: 0.75rem; padding: 0.75rem 0.9375rem 0.8125rem; margin-bottom: 0.5rem;
+            border-left: 3px solid var(--linha);
+        }
+        .cartao.r-acertou { border-left-color: var(--ouro); }
+        .cartao.r-errou { border-left-color: rgba(180, 200, 242, .55); }
+        .cartao-topo { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.375rem; }
+        .jogo { font-size: 0.6875rem; color: var(--apagado); min-width: 0; }
+        .jogo .data { font-family: var(--f-dado); margin-right: 0.375rem; }
+        .selo { font-family: var(--f-dado); font-size: 0.5625rem; letter-spacing: .08em; text-transform: uppercase; padding: 0.125rem 0.4375rem; border-radius: 999px; white-space: nowrap; }
+        .selo-acertou { color: var(--cta-texto); background: var(--ouro); }
+        .selo-errou { color: var(--azul-claro); border: 1px solid rgba(180, 200, 242, .5); }
+        .selo-pendente { color: var(--apagado); border: 1px solid var(--linha); }
+        .descricao { font-size: 0.8125rem; font-weight: 500; line-height: 1.45; margin-bottom: 0.4375rem; }
+        .metricas { display: flex; gap: 0.25rem 0.875rem; flex-wrap: wrap; align-items: center; font-size: 0.6875rem; color: var(--apagado); }
+        .metricas b { font-family: var(--f-dado); font-weight: 500; color: var(--texto); font-variant-numeric: tabular-nums; }
+        .casa { font-family: var(--f-dado); font-size: 0.5625rem; letter-spacing: .06em; text-transform: uppercase; color: var(--azul-claro); }
+
+        .paginacao { display: flex; align-items: center; justify-content: center; gap: 0.875rem; margin-top: 0.75rem; font-family: var(--f-dado); font-size: 0.6875rem; color: var(--apagado); }
+        .btn-pagina {
+            background: rgba(255,255,255,.05); border: 1px solid var(--linha); color: var(--texto);
+            padding: 0.3125rem 0.75rem; font-size: 0.75rem;
+        }
+        .btn-pagina:hover:not(:disabled) { border-color: var(--azul-claro); background: rgba(180, 200, 242, .1); }
+        .btn-pagina:disabled { opacity: .35; cursor: default; }
+
+        /* ---------- por rodada ---------- */
+        .bloco-rodada { margin-bottom: 0.625rem; padding: 0; overflow: hidden; }
+        .rodada-titulo {
+            width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 1rem; align-items: center;
+            padding: 0.875rem 1.125rem; background: none; border: 0; border-radius: 0; color: var(--texto);
+            font-family: var(--f-corpo); font-weight: 400; text-align: left; cursor: pointer;
+        }
+        .rodada-titulo:hover { background: rgba(255,255,255,.04); }
+        .rodada-nome { font-size: 0.9375rem; font-weight: 600; }
+        .rodada-resumo { display: flex; align-items: center; gap: 0.75rem; font-size: 0.6875rem; color: var(--apagado); white-space: nowrap; }
+        .rodada-resumo b { font-family: var(--f-dado); font-weight: 600; color: var(--texto); margin-right: 0.25rem; }
+        .mini-barra { display: flex; width: 6rem; height: 0.375rem; border-radius: 999px; overflow: hidden; background: rgba(255,255,255,.06); }
+        .mini-barra i { display: block; height: 100%; }
+        .rodada-seta {
+            width: 0.5rem; height: 0.5rem; border-right: 2px solid var(--apagado); border-bottom: 2px solid var(--apagado);
+            transform: translateY(-0.125rem) rotate(45deg); transition: transform .2s;
+        }
+        .bloco-rodada.aberto .rodada-seta { transform: translateY(0.125rem) rotate(-135deg); }
+        .bloco-rodada .colunas { display: none; padding: 0.25rem 1.125rem 1.125rem; }
+        .bloco-rodada.aberto .colunas { display: grid; }
+        .carregar-mais-wrap { text-align: center; margin-top: 1rem; }
+        .btn-carregar-mais { background: transparent; color: var(--azul-claro); border: 1px solid rgba(180, 200, 242, .55); }
+        .btn-carregar-mais:hover:not(:disabled) { background: rgba(180, 200, 242, .1); }
+        .btn-carregar-mais:disabled { opacity: .6; cursor: default; }
+
+        /* ---------- múltiplas ---------- */
+        .mult-resumo { display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: center; padding: 0.875rem 1.125rem; margin-bottom: 1.25rem; font-size: 0.75rem; color: var(--apagado); }
+        .mult-resumo b { font-family: var(--f-dado); font-weight: 600; font-size: 1rem; color: var(--texto); margin-right: 0.25rem; }
+        .mult-resumo .ouro b { color: var(--ouro); }
+        .mult-resumo .azul b { color: var(--azul-claro); }
+        .mult-resumo p { flex: 1 1 22rem; margin: 0; line-height: 1.5; }
+        .jogos-mult { display: grid; gap: 0.125rem; }
+
+        /* ---------- janela da tabela por faixa ---------- */
+        .modal-fundo { display: none; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; background: rgba(1, 5, 15, .72); padding: 1rem; }
+        .modal-caixa {
+            width: 100%; max-width: 72rem; max-height: 85vh; display: flex; flex-direction: column; padding: 1.125rem 1.25rem;
+            border-radius: var(--raio); border: 1px solid var(--vidro-borda); box-shadow: var(--vidro-sombra);
+            background: linear-gradient(140deg, rgba(255,255,255,.1), rgba(255,255,255,.03)), #06122e;
+        }
+        .modal-topo { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 0.875rem; }
+        .modal-titulo { font-size: 1.125rem; font-weight: 300; letter-spacing: -.02em; }
+        .modal-fechar { background: none; color: var(--apagado); font-size: 0.75rem; padding: 0.25rem; }
+        .modal-fechar:hover { color: var(--texto); }
+        #modal-faixa-corpo { overflow: auto; min-height: 0; }
+        .tabela-faixa { border-collapse: collapse; width: 100%; font-size: 0.6875rem; white-space: nowrap; }
+        .tabela-faixa th { text-align: left; font-family: var(--f-dado); font-weight: 500; font-size: 0.5625rem; letter-spacing: .08em; text-transform: uppercase; color: var(--apagado); padding: 0.375rem 0.625rem; border-bottom: 1px solid var(--linha); position: sticky; top: 0; background: #0a1838; }
+        .tabela-faixa td { padding: 0.375rem 0.625rem; border-bottom: 1px solid var(--linha-fraca); }
+        .tabela-faixa td.n { font-family: var(--f-dado); text-align: right; }
+        .tabela-faixa tr.linha-acertou td:last-child { color: var(--ouro); font-weight: 600; }
+        .tabela-faixa tr.linha-errou td:last-child { color: var(--azul-claro); }
+
+        @media (max-width: 1099px) {
+            :root { --degrau1: 100%; --degrau2: 100%; }
+            .calib { grid-template-columns: minmax(0, 1fr); }
+        }
+        @media (max-width: 760px) {
+            .colunas, .bloco-rodada.aberto .colunas { grid-template-columns: minmax(0, 1fr); }
+            .placar-numeros { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .faixa { grid-template-columns: 4.5rem minmax(0, 1fr) 6.25rem; gap: 0.5rem; }
+            .rodada-titulo { grid-template-columns: minmax(0, 1fr) auto; }
+            .rodada-resumo .mini-barra { display: none; }
+        }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
     </style>
 </head>
 <body>
-    <h1>📊 Histórico de Acertos e Erros</h1>
-    <p class="subtitulo">Recomendações já avaliadas contra o resultado real dos jogos</p>
-    {{ nav_html|safe }}
-
-    <div class="resumo-grid">
-        <div class="resumo-card">
-            <div class="resumo-numero" style="color:#3fb950">{{ resumo.acertou }}</div>
-            <div class="resumo-label">Acertou</div>
-        </div>
-        <div class="resumo-card">
-            <div class="resumo-numero" style="color:#f85149">{{ resumo.errou }}</div>
-            <div class="resumo-label">Errou</div>
-        </div>
-        <div class="resumo-card">
-            <div class="resumo-numero" style="color:#8b949e">{{ resumo.pendente }}</div>
-            <div class="resumo-label">Pendente</div>
-        </div>
-        <div class="resumo-card">
-            <div class="resumo-numero">{{ resumo.taxa }}%</div>
-            <div class="resumo-label">Taxa de acerto (avaliadas)</div>
-        </div>
-    </div>
-
-    {% if calibracao.melhor_faixa %}
-    <div class="calibracao" onclick="document.getElementById('modal-calibracao').style.display='flex'">
-        <div class="calibracao-titulo">📐 A maior taxa de acerto está entre {{ calibracao.melhor_faixa.inicio }}%
-            e {{ calibracao.melhor_faixa.fim }}% de probabilidade histórica</div>
-        <div class="calibracao-nota">{{ calibracao.melhor_faixa.taxa }}% de acerto nessa faixa
-            ({{ calibracao.melhor_faixa.total }} aposta(s) resolvida(s) nela) - clique pra ver o detalhamento
-            completo por probabilidade. Com poucas apostas resolvidas ainda, isso é instável - fica mais
-            confiável conforme o histórico crescer.</div>
-    </div>
-
-    <div id="modal-calibracao" class="modal-fundo" onclick="if(event.target===this) this.style.display='none'">
-        <div class="modal-caixa">
-            <div class="modal-topo">
-                <span class="modal-titulo">Acertos e erros por probabilidade histórica</span>
-                <span class="modal-fechar" onclick="document.getElementById('modal-calibracao').style.display='none'">✕</span>
-            </div>
-            {% for item in calibracao.detalhamento %}
-            <div class="calibracao-faixa">
-                <div class="modal-linha modal-linha-clicavel" onclick="toggleFaixaCalibracao({{ item.inicio }})">
-                    <span>{{ item.inicio }}% - {{ item.fim }}%
-                        <span class="faixa-seta" id="seta-faixa-{{ item.inicio }}">▾</span>
-                    </span>
-                    <span>
-                        <b style="color:{{ '#3fb950' if item.taxa >= 50 else '#f85149' }}">{{ item.taxa }}% de acerto</b>
-                        <span style="color:#8b949e; font-size: 0.85em;">
-                            ({{ item.acertou }} acerto(s) / {{ item.errou }} erro(s))
-                        </span>
-                    </span>
-                </div>
-                <div class="faixa-detalhe" id="detalhe-faixa-{{ item.inicio }}" style="display:none;"></div>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
-    {% if calibracao_odd.melhor_faixa %}
-    <div class="calibracao" onclick="document.getElementById('modal-calibracao-odd').style.display='flex'">
-        <div class="calibracao-titulo">📈 A maior taxa de acerto está na faixa de odd
-            {{ calibracao_odd.melhor_faixa.rotulo }}</div>
-        <div class="calibracao-nota">{{ calibracao_odd.melhor_faixa.taxa }}% de acerto nessa faixa
-            ({{ calibracao_odd.melhor_faixa.total }} aposta(s) resolvida(s) nela) - clique pra ver o detalhamento
-            completo por linha de odd. Com poucas apostas resolvidas ainda, isso é instável - fica mais
-            confiável conforme o histórico crescer.</div>
-    </div>
-
-    <div id="modal-calibracao-odd" class="modal-fundo" onclick="if(event.target===this) this.style.display='none'">
-        <div class="modal-caixa">
-            <div class="modal-topo">
-                <span class="modal-titulo">Acertos e erros por linha de odd</span>
-                <span class="modal-fechar" onclick="document.getElementById('modal-calibracao-odd').style.display='none'">✕</span>
-            </div>
-            {% for item in calibracao_odd.detalhamento %}
-            <div class="calibracao-faixa">
-                <div class="modal-linha modal-linha-clicavel" onclick="toggleFaixaCalibracaoOdd({{ item.indice }})">
-                    <span>{{ item.rotulo }}
-                        <span class="faixa-seta" id="seta-odd-faixa-{{ item.indice }}">▾</span>
-                    </span>
-                    <span>
-                        <b style="color:{{ '#3fb950' if item.taxa >= 50 else '#f85149' }}">{{ item.taxa }}% de acerto</b>
-                        <span style="color:#8b949e; font-size: 0.85em;">
-                            ({{ item.acertou }} acerto(s) / {{ item.errou }} erro(s))
-                        </span>
-                    </span>
-                </div>
-                <div class="faixa-detalhe" id="detalhe-odd-faixa-{{ item.indice }}" style="display:none;"></div>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
+""" + FUNDO_VISUAL_NOVO + """    {{ nav_html|safe }}
+    {% macro dec(v, casas=0) %}{{ (('%.' ~ casas ~ 'f')|format(v or 0)).replace('.', ',') }}{% endmacro %}
+    {% macro milhar(v) %}{{ '{:,}'.format(v).replace(',', '.') }}{% endmacro %}
+    {% macro data_curta(d) %}{% if d is string %}{{ d[8:10] }}/{{ d[5:7] }}{% elif d %}{{ d.strftime('%d/%m') }}{% endif %}{% endmacro %}
+    {% macro escudo(nome) %}{% set eid = escudos.get(nome) if escudos else None %}{% if eid %}<img class="escudo" src="/escudo/{{ eid }}.png" alt="" loading="lazy">{% endif %}{% endmacro %}
     {% macro cartao_item(i) %}
-        <div class="cartao item-pagina">
+        <article class="cartao item-pagina r-{{ i.resultado }}">
             <div class="cartao-topo">
-                <span class="jogo">{{ i.data_jogo }} · {{ i.nosso_time }} x {{ i.adversario }}</span>
-                <span class="badge badge-{{ i.resultado }}">{{ i.resultado }}</span>
+                <span class="jogo"><span class="data">{{ data_curta(i.data_jogo) }}</span>{{ escudo(i.nosso_time) }}{{ i.nosso_time }} x {{ escudo(i.adversario) }}{{ i.adversario }}</span>
+                <span class="selo selo-{{ i.resultado }}">{{ i.resultado }}</span>
             </div>
             <div class="descricao">{{ i.descricao }}</div>
             <div class="metricas">
-                <span>{{ i.casa_aposta }}</span>
-                <span>Odd: <b>{{ i.odd_oferecida }}</b></span>
-                <span>Probabilidade: <b>{{ i.probabilidade_historica }}%</b></span>
-                <span>VE: <b>{{ i.valor_esperado }}</b></span>
+                <span class="casa">{{ i.casa_aposta }}</span>
+                <span>odd <b>{{ dec(i.odd_oferecida, 2) }}</b></span>
+                <span>prob. <b>{{ dec(i.probabilidade_historica, 1) }}%</b></span>
+                <span>VE <b>{{ '+' if (i.valor_esperado or 0) >= 0 else '' }}{{ dec(i.valor_esperado, 3) }}</b></span>
             </div>
-        </div>
+        </article>
     {% endmacro %}
-
-    <div class="colunas-resultado">
-        <div class="coluna">
-            <div class="coluna-cabecalho coluna-verde">✅ Acertou ({{ acertos|length }})</div>
-            <div id="lista-acertou">
-                {% if acertos %}
-                    {% for i in acertos %}{{ cartao_item(i) }}{% endfor %}
-                {% else %}
-                    <div class="vazio">Nenhum acerto ainda.</div>
-                {% endif %}
+    {% macro cartao_multipla(c) %}
+        <article class="cartao item-pagina r-{{ c.resultado }}">
+            <div class="cartao-topo">
+                <span class="jogo jogos-mult">{% for j in c.jogos %}<span><span class="data">{{ data_curta(j.data_jogo) }}</span>{{ j.nosso_time }} x {{ j.adversario }}</span>{% endfor %}</span>
+                <span class="selo selo-{{ c.resultado }}">{{ c.resultado }}</span>
             </div>
-            {% if acertos|length > 10 %}
-            <div class="paginacao">
-                <button class="btn-pagina" id="anterior-lista-acertou" onclick="mudarPagina('lista-acertou', -1)">← Anterior</button>
-                <span id="label-lista-acertou"></span>
-                <button class="btn-pagina" id="proximo-lista-acertou" onclick="mudarPagina('lista-acertou', 1)">Próxima →</button>
+            <div class="descricao">{{ c.descricao }}</div>
+            <div class="metricas">
+                <span class="casa">{{ c.casa_aposta }}</span>
+                <span>odd <b>{{ dec(c.odd_combinada, 2) }}</b></span>
+                <span>prob. <b>{{ dec(c.probabilidade_combinada, 1) }}%</b></span>
+                <span>VE <b>{{ '+' if (c.valor_esperado or 0) >= 0 else '' }}{{ dec(c.valor_esperado, 3) }}</b></span>
             </div>
-            {% endif %}
-        </div>
-        <div class="coluna">
-            <div class="coluna-cabecalho coluna-vermelha">❌ Errou ({{ erros|length }})</div>
-            <div id="lista-errou">
-                {% if erros %}
-                    {% for i in erros %}{{ cartao_item(i) }}{% endfor %}
-                {% else %}
-                    <div class="vazio">Nenhum erro ainda.</div>
-                {% endif %}
-            </div>
-            {% if erros|length > 10 %}
-            <div class="paginacao">
-                <button class="btn-pagina" id="anterior-lista-errou" onclick="mudarPagina('lista-errou', -1)">← Anterior</button>
-                <span id="label-lista-errou"></span>
-                <button class="btn-pagina" id="proximo-lista-errou" onclick="mudarPagina('lista-errou', 1)">Próxima →</button>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-
-    <div class="coluna-cabecalho coluna-roxa" style="margin-top: 8px;">🗓️ Odds por Rodada</div>
-    <p class="secao-subtitulo">Mesmas recomendações individuais de cima, agora separadas por rodada - acertos e
-        erros em colunas próprias, com botão pra baixar cada lado em CSV. Rodadas de antes de 21/08/2026 (sem o
-        dado de rodada gravado ainda) caem no grupo "Sem rodada identificada", no fim da lista.</p>
-
-    <div id="secao-rodadas">
-        {% for bloco in blocos_rodadas %}
-        <div class="bloco-rodada{{ ' aberto' if loop.first else '' }}" id="bloco-rodada-{{ bloco.rodada_id }}">
-            <div class="rodada-titulo" onclick="toggleRodadaBloco('{{ bloco.rodada_id }}')">
-                <span>{{ bloco.rotulo }}</span>
-                <span class="rodada-seta">▾</span>
-            </div>
-            <div class="colunas-resultado">
-                <div class="coluna">
-                    <div class="coluna-cabecalho coluna-verde">✅ Acertou ({{ bloco.acertou|length }})</div>
-                    <a class="btn-baixar" href="/historico/rodada/{{ bloco.rodada_url }}/download/acertou.csv">⬇️ Baixar certas</a>
-                    <div id="lista-rodada-{{ bloco.rodada_id }}-acertou">
-                        {% if bloco.acertou %}
-                            {% for i in bloco.acertou %}{{ cartao_item(i) }}{% endfor %}
-                        {% else %}
-                            <div class="vazio">Nenhum acerto nessa rodada.</div>
-                        {% endif %}
-                    </div>
-                    {% if bloco.acertou|length > 10 %}
-                    <div class="paginacao">
-                        <button class="btn-pagina" id="anterior-lista-rodada-{{ bloco.rodada_id }}-acertou"
-                                onclick="mudarPagina('lista-rodada-{{ bloco.rodada_id }}-acertou', -1)">← Anterior</button>
-                        <span id="label-lista-rodada-{{ bloco.rodada_id }}-acertou"></span>
-                        <button class="btn-pagina" id="proximo-lista-rodada-{{ bloco.rodada_id }}-acertou"
-                                onclick="mudarPagina('lista-rodada-{{ bloco.rodada_id }}-acertou', 1)">Próxima →</button>
-                    </div>
-                    {% endif %}
-                </div>
-                <div class="coluna">
-                    <div class="coluna-cabecalho coluna-vermelha">❌ Errou ({{ bloco.errou|length }})</div>
-                    <a class="btn-baixar" href="/historico/rodada/{{ bloco.rodada_url }}/download/errou.csv">⬇️ Baixar erradas</a>
-                    <div id="lista-rodada-{{ bloco.rodada_id }}-errou">
-                        {% if bloco.errou %}
-                            {% for i in bloco.errou %}{{ cartao_item(i) }}{% endfor %}
-                        {% else %}
-                            <div class="vazio">Nenhum erro nessa rodada.</div>
-                        {% endif %}
-                    </div>
-                    {% if bloco.errou|length > 10 %}
-                    <div class="paginacao">
-                        <button class="btn-pagina" id="anterior-lista-rodada-{{ bloco.rodada_id }}-errou"
-                                onclick="mudarPagina('lista-rodada-{{ bloco.rodada_id }}-errou', -1)">← Anterior</button>
-                        <span id="label-lista-rodada-{{ bloco.rodada_id }}-errou"></span>
-                        <button class="btn-pagina" id="proximo-lista-rodada-{{ bloco.rodada_id }}-errou"
-                                onclick="mudarPagina('lista-rodada-{{ bloco.rodada_id }}-errou', 1)">Próxima →</button>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-        {% endfor %}
-    </div>
-
-    {% if tem_mais_rodadas %}
-    <div class="carregar-mais-wrap">
-        <button class="btn-carregar-mais" id="btn-carregar-mais-rodadas" onclick="carregarMaisRodadas()">Carregar mais rodadas</button>
-    </div>
-    {% endif %}
-
-    <div class="secao-pendentes">
-        <div class="coluna-cabecalho coluna-cinza">⏳ Pendente ({{ pendentes|length }})</div>
-        <div id="lista-pendente">
-            {% if pendentes %}
-                {% for i in pendentes %}{{ cartao_item(i) }}{% endfor %}
-            {% else %}
-                <div class="vazio">Nenhuma recomendação pendente no momento.</div>
-            {% endif %}
-        </div>
-        {% if pendentes|length > 10 %}
+        </article>
+    {% endmacro %}
+    {% macro paginacao(lista_id, n) %}
+        {% if n > 10 %}
         <div class="paginacao">
-            <button class="btn-pagina" id="anterior-lista-pendente" onclick="mudarPagina('lista-pendente', -1)">← Anterior</button>
-            <span id="label-lista-pendente"></span>
-            <button class="btn-pagina" id="proximo-lista-pendente" onclick="mudarPagina('lista-pendente', 1)">Próxima →</button>
+            <button type="button" class="btn-pagina" id="anterior-{{ lista_id }}" onclick="mudarPagina('{{ lista_id }}', -1)">Anterior</button>
+            <span id="label-{{ lista_id }}"></span>
+            <button type="button" class="btn-pagina" id="proximo-{{ lista_id }}" onclick="mudarPagina('{{ lista_id }}', 1)">Próxima</button>
         </div>
         {% endif %}
+    {% endmacro %}
+
+    <main class="conteudo">
+        <header class="cabeca">
+            <h1>Histórico</h1>
+            <p>Toda recomendação, depois do jogo: o que o sistema disse e o que aconteceu.</p>
+        </header>
+
+        {% set avaliadas = resumo.acertou + resumo.errou %}
+        <section class="vidro placar" aria-label="Resumo">
+            <div class="placar-numeros">
+                <div class="ouro"><span class="rotulo">Acertou</span><b>{{ milhar(resumo.acertou) }}</b></div>
+                <div class="azul"><span class="rotulo">Errou</span><b>{{ milhar(resumo.errou) }}</b></div>
+                <div><span class="rotulo">Pendente</span><b>{{ milhar(resumo.pendente) }}</b></div>
+                <div><span class="rotulo">Taxa de acerto</span><b>{{ dec(resumo.taxa, 1) }}%</b></div>
+            </div>
+            {% if avaliadas %}
+            <div class="placar-barra" role="img" aria-label="{{ dec(resumo.taxa, 1) }}% de acerto entre as avaliadas">
+                <i class="b-ac" style="width: {{ 100 * resumo.acertou / avaliadas }}%"></i><i class="b-er" style="width: {{ 100 * resumo.errou / avaliadas }}%"></i>
+            </div>
+            {% endif %}
+        </section>
+
+        {% if calibracao.detalhamento or calibracao_odd.detalhamento %}
+        <section class="secao" aria-labelledby="t-calib">
+            <h2 class="secao-titulo" id="t-calib">Prometido × acontecido</h2>
+            <p class="nota">Se a probabilidade do sistema está certa, as apostas de 60-80% acertam entre 60 e 80% das vezes. A faixa tracejada é o que foi prometido; a barra é o que aconteceu. Clique numa linha para ver as apostas dela.</p>
+            <div class="calib">
+                {% if calibracao.detalhamento %}
+                <div class="vidro calib-painel">
+                    <h3>Por probabilidade histórica</h3>
+                    {% if calibracao.melhor_faixa %}
+                    <p class="calib-destaque">Maior acerto entre <b>{{ calibracao.melhor_faixa.inicio }}% e {{ calibracao.melhor_faixa.fim }}%</b>: {{ dec(calibracao.melhor_faixa.taxa, 1) }}% em {{ milhar(calibracao.melhor_faixa.total) }} apostas.</p>
+                    {% endif %}
+                    <div class="legenda"><span><i class="leg-fx"></i>prometido</span><span><i class="leg-real"></i>aconteceu</span></div>
+                    <div class="calib-linhas">
+                        {% for item in calibracao.detalhamento|sort(attribute='inicio') %}
+                        <button type="button" class="faixa" onclick="abrirFaixaProb({{ item.inicio }})">
+                            <span class="faixa-rot">{{ item.inicio }}-{{ item.fim }}%</span>
+                            <span class="trilho">
+                                <span class="fx" style="left: {{ item.inicio }}%; width: {{ item.fim - item.inicio }}%"></span>
+                                <span class="real{{ ' bom' if item.inicio <= item.taxa <= item.fim else '' }}" style="width: {{ item.taxa }}%"></span>
+                            </span>
+                            <span class="faixa-num"><b>{{ dec(item.taxa, 1) }}%</b>{{ milhar(item.acertou + item.errou) }}</span>
+                        </button>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                {% if calibracao_odd.detalhamento %}
+                <div class="vidro calib-painel">
+                    <h3>Por odd</h3>
+                    {% if calibracao_odd.melhor_faixa %}
+                    <p class="calib-destaque">Maior acerto na odd <b>{{ calibracao_odd.melhor_faixa.rotulo|replace('.', ',') }}</b>: {{ dec(calibracao_odd.melhor_faixa.taxa, 1) }}% em {{ milhar(calibracao_odd.melhor_faixa.total) }} apostas.</p>
+                    {% endif %}
+                    <div class="legenda"><span><i class="leg-marca"></i>ponto de lucro (1 ÷ odd)</span><span><i class="leg-real"></i>aconteceu: em ouro quando passou do ponto</span></div>
+                    <div class="calib-linhas calib-rolagem">
+                        {% for item in calibracao_odd.detalhamento|sort(attribute='indice') %}
+                        {% set meio = ((item.inicio + item.fim) / 2) if item.fim else item.inicio %}
+                        {% set empate = 100 / meio if meio else 0 %}
+                        <button type="button" class="faixa" onclick="abrirFaixaOdd({{ item.indice }})">
+                            <span class="faixa-rot">{{ item.rotulo|replace('.', ',') }}</span>
+                            <span class="trilho">
+                                <span class="real{{ ' bom' if item.taxa >= empate else '' }}" style="width: {{ item.taxa }}%"></span>
+                                <span class="marca" style="left: {{ [empate, 100]|min }}%" title="{{ dec(empate, 1) }}%"></span>
+                            </span>
+                            <span class="faixa-num"><b>{{ dec(item.taxa, 1) }}%</b>{{ milhar(item.acertou + item.errou) }}</span>
+                        </button>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </section>
+        {% endif %}
+
+        <section class="secao" aria-labelledby="t-todas">
+            <h2 class="secao-titulo" id="t-todas">Todas as recomendações</h2>
+            <p class="nota">Da mais recente para a mais antiga. Mercado do jogo inteiro aparece uma vez por jogo.</p>
+            <div class="colunas">
+                <div class="coluna c-ac">
+                    <div class="coluna-topo"><h3><i class="ponto"></i>Acertou <small>{{ milhar(acertos|length) }}</small></h3></div>
+                    <div id="lista-acertou">
+                        {% for i in acertos %}{{ cartao_item(i) }}{% else %}<div class="vazio">Nenhum acerto ainda.</div>{% endfor %}
+                    </div>
+                    {{ paginacao('lista-acertou', acertos|length) }}
+                </div>
+                <div class="coluna c-er">
+                    <div class="coluna-topo"><h3><i class="ponto"></i>Errou <small>{{ milhar(erros|length) }}</small></h3></div>
+                    <div id="lista-errou">
+                        {% for i in erros %}{{ cartao_item(i) }}{% else %}<div class="vazio">Nenhum erro ainda.</div>{% endfor %}
+                    </div>
+                    {{ paginacao('lista-errou', erros|length) }}
+                </div>
+            </div>
+            <div class="coluna c-pe" style="margin-top: 1.75rem">
+                <div class="coluna-topo"><h3><i class="ponto"></i>Pendente <small>{{ milhar(pendentes|length) }}</small></h3></div>
+                <div id="lista-pendente">
+                    {% for i in pendentes %}{{ cartao_item(i) }}{% else %}<div class="vazio">Nenhuma recomendação esperando resultado agora.</div>{% endfor %}
+                </div>
+                {{ paginacao('lista-pendente', pendentes|length) }}
+            </div>
+        </section>
+
+        <section class="secao" aria-labelledby="t-rodadas">
+            <h2 class="secao-titulo" id="t-rodadas">Por rodada</h2>
+            <p class="nota">As mesmas recomendações, separadas por rodada, com cada lado para baixar em CSV. As de antes de 21/08/2026 (sem a rodada gravada) ficam em "Sem rodada identificada", no fim.</p>
+            <div id="secao-rodadas">
+                {% for bloco in blocos_rodadas %}
+                {% set n_ac = bloco.acertou|length %}{% set n_er = bloco.errou|length %}{% set n_tot = n_ac + n_er %}
+                <div class="vidro bloco-rodada{{ ' aberto' if loop.first else '' }}" id="bloco-rodada-{{ bloco.rodada_id }}">
+                    <button type="button" class="rodada-titulo" onclick="toggleRodadaBloco('{{ bloco.rodada_id }}')">
+                        <span class="rodada-nome">{{ bloco.rotulo }}</span>
+                        <span class="rodada-resumo">
+                            <span><b>{{ n_ac }}</b>acertos · <b>{{ n_er }}</b>erros{% if n_tot %} · <b>{{ dec(100 * n_ac / n_tot, 1) }}%</b>{% endif %}</span>
+                            {% if n_tot %}<span class="mini-barra"><i style="width: {{ 100 * n_ac / n_tot }}%; background: var(--ouro)"></i><i style="width: {{ 100 * n_er / n_tot }}%; background: rgba(180, 200, 242, .45)"></i></span>{% endif %}
+                        </span>
+                        <span class="rodada-seta" aria-hidden="true"></span>
+                    </button>
+                    <div class="colunas">
+                        <div class="coluna c-ac">
+                            <div class="coluna-topo"><h3><i class="ponto"></i>Acertou <small>{{ n_ac }}</small></h3><a class="btn-baixar" href="/historico/rodada/{{ bloco.rodada_url }}/download/acertou.csv">Baixar certas</a></div>
+                            <div id="lista-rodada-{{ bloco.rodada_id }}-acertou">
+                                {% for i in bloco.acertou %}{{ cartao_item(i) }}{% else %}<div class="vazio">Nenhum acerto nessa rodada.</div>{% endfor %}
+                            </div>
+                            {{ paginacao('lista-rodada-' ~ bloco.rodada_id ~ '-acertou', n_ac) }}
+                        </div>
+                        <div class="coluna c-er">
+                            <div class="coluna-topo"><h3><i class="ponto"></i>Errou <small>{{ n_er }}</small></h3><a class="btn-baixar" href="/historico/rodada/{{ bloco.rodada_url }}/download/errou.csv">Baixar erradas</a></div>
+                            <div id="lista-rodada-{{ bloco.rodada_id }}-errou">
+                                {% for i in bloco.errou %}{{ cartao_item(i) }}{% else %}<div class="vazio">Nenhum erro nessa rodada.</div>{% endfor %}
+                            </div>
+                            {{ paginacao('lista-rodada-' ~ bloco.rodada_id ~ '-errou', n_er) }}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% if tem_mais_rodadas %}
+            <div class="carregar-mais-wrap">
+                <button type="button" class="btn-carregar-mais" id="btn-carregar-mais-rodadas" onclick="carregarMaisRodadas()">Carregar mais rodadas</button>
+            </div>
+            {% endif %}
+        </section>
+
+        {% if multiplas_destaque or resumo_multiplas.acertou + resumo_multiplas.errou > 0 %}
+        <section class="secao" aria-labelledby="t-mult">
+            <h2 class="secao-titulo" id="t-mult">Múltiplas em destaque</h2>
+            <p class="nota">As 5 melhores múltiplas (por probabilidade histórica) de cada jogo já concluído, capturadas antes do apito. Não mexem na banca e não têm botão de salvar. Só as rodadas recentes aparecem com o cartão; as antigas saem da lista, mas continuam no total.</p>
+            {% if resumo_multiplas.acertou + resumo_multiplas.errou > 0 %}
+            <div class="vidro mult-resumo">
+                <span class="ouro"><b>{{ milhar(resumo_multiplas.acertou) }}</b>acertos</span>
+                <span class="azul"><b>{{ milhar(resumo_multiplas.errou) }}</b>erros</span>
+                <span><b>{{ dec(resumo_multiplas.taxa, 1) }}%</b>de acerto</span>
+                <p>Esse percentual é só do top 5 de cada jogo e não se soma com a taxa geral lá de cima: são grupos diferentes.</p>
+            </div>
+            {% endif %}
+            <div class="colunas">
+                <div class="coluna c-ac">
+                    <div class="coluna-topo"><h3><i class="ponto"></i>Acertou <small>{{ multiplas_acertou|length }}</small></h3></div>
+                    <div id="lista-multiplas-acertou">
+                        {% for c in multiplas_acertou %}{{ cartao_multipla(c) }}{% else %}<div class="vazio">Nenhum acerto ainda.</div>{% endfor %}
+                    </div>
+                    {{ paginacao('lista-multiplas-acertou', multiplas_acertou|length) }}
+                </div>
+                <div class="coluna c-er">
+                    <div class="coluna-topo"><h3><i class="ponto"></i>Errou <small>{{ multiplas_errou|length }}</small></h3></div>
+                    <div id="lista-multiplas-errou">
+                        {% for c in multiplas_errou %}{{ cartao_multipla(c) }}{% else %}<div class="vazio">Nenhum erro ainda.</div>{% endfor %}
+                    </div>
+                    {{ paginacao('lista-multiplas-errou', multiplas_errou|length) }}
+                </div>
+            </div>
+            {% if multiplas_pendente %}
+            <div class="coluna c-pe" style="margin-top: 1.75rem">
+                <div class="coluna-topo"><h3><i class="ponto"></i>Pendente <small>{{ multiplas_pendente|length }}</small></h3></div>
+                <div id="lista-multiplas-pendente">
+                    {% for c in multiplas_pendente %}{{ cartao_multipla(c) }}{% endfor %}
+                </div>
+                {{ paginacao('lista-multiplas-pendente', multiplas_pendente|length) }}
+            </div>
+            {% endif %}
+        </section>
+        {% endif %}
+    </main>
+
+    <div id="modal-faixa" class="modal-fundo" onclick="if (event.target === this) fecharFaixa()">
+        <div class="modal-caixa" role="dialog" aria-modal="true" aria-labelledby="modal-faixa-titulo">
+            <div class="modal-topo">
+                <span class="modal-titulo" id="modal-faixa-titulo"></span>
+                <button type="button" class="modal-fechar" onclick="fecharFaixa()">Fechar</button>
+            </div>
+            <div id="modal-faixa-corpo"></div>
+        </div>
     </div>
 
     <script>
+        const ESCUDOS = {{ (escudos or {})|tojson }};
         const TAMANHO_PAGINA = 10;
         const paginaAtual = {};
 
@@ -2382,224 +2417,163 @@ PAGINA_HISTORICO = """
                 return v !== null ? parseInt(v, 10) : 0;
             } catch (e) { return 0; }
         }
-
         function totalPaginas(listaId) {
             const n = document.querySelectorAll('#' + listaId + ' .item-pagina').length;
             return Math.max(1, Math.ceil(n / TAMANHO_PAGINA));
         }
-
         function renderizarPagina(listaId) {
+            if (!document.getElementById(listaId)) return;
             if (!(listaId in paginaAtual)) { paginaAtual[listaId] = carregarPaginaDoNavegador(listaId); }
             const total = totalPaginas(listaId);
             if (paginaAtual[listaId] > total - 1) paginaAtual[listaId] = total - 1;
             if (paginaAtual[listaId] < 0) paginaAtual[listaId] = 0;
             const pagina = paginaAtual[listaId];
-            const itens = document.querySelectorAll('#' + listaId + ' .item-pagina');
-            itens.forEach(function(item, i) {
-                const paginaDoItem = Math.floor(i / TAMANHO_PAGINA);
-                item.style.display = (paginaDoItem === pagina) ? '' : 'none';
+            document.querySelectorAll('#' + listaId + ' .item-pagina').forEach(function(item, i) {
+                item.style.display = (Math.floor(i / TAMANHO_PAGINA) === pagina) ? '' : 'none';
             });
             const label = document.getElementById('label-' + listaId);
             if (label) label.textContent = 'Página ' + (pagina + 1) + ' de ' + total;
-            const btnAnterior = document.getElementById('anterior-' + listaId);
-            const btnProximo = document.getElementById('proximo-' + listaId);
-            if (btnAnterior) btnAnterior.disabled = (pagina === 0);
-            if (btnProximo) btnProximo.disabled = (pagina >= total - 1);
+            const a = document.getElementById('anterior-' + listaId), p = document.getElementById('proximo-' + listaId);
+            if (a) a.disabled = (pagina === 0);
+            if (p) p.disabled = (pagina >= total - 1);
         }
-
-
-        // NOVO (17/08/2026): tabela expansivel por faixa de probabilidade,
-        // no card "Acertos e erros por probabilidade historica" - busca
-        // sob demanda (so no primeiro clique de cada faixa) e guarda em
-        // cache pra nao rebuscar se abrir/fechar de novo.
-        const CACHE_FAIXA_CALIBRACAO = {};
-
-        function toggleFaixaCalibracao(inicioFaixa) {
-            const detalheDiv = document.getElementById('detalhe-faixa-' + inicioFaixa);
-            const seta = document.getElementById('seta-faixa-' + inicioFaixa);
-            const abrindo = detalheDiv.style.display === 'none';
-            detalheDiv.style.display = abrindo ? 'block' : 'none';
-            seta.style.transform = abrindo ? 'rotate(180deg)' : 'rotate(0deg)';
-            if (!abrindo) return;
-
-            if (CACHE_FAIXA_CALIBRACAO[inicioFaixa]) {
-                renderizarTabelaFaixa(inicioFaixa, CACHE_FAIXA_CALIBRACAO[inicioFaixa]);
-                return;
-            }
-            detalheDiv.innerHTML = '<div class="vazio">Carregando...</div>';
-            fetch(`/api/calibracao/${inicioFaixa}`)
-                .then(r => r.json())
-                .then(itens => {
-                    CACHE_FAIXA_CALIBRACAO[inicioFaixa] = itens;
-                    renderizarTabelaFaixa(inicioFaixa, itens);
-                });
-        }
-
-        function renderizarTabelaFaixa(inicioFaixa, itens) {
-            const detalheDiv = document.getElementById('detalhe-faixa-' + inicioFaixa);
-            renderizarTabelaFaixaEm(detalheDiv, itens);
-        }
-
-        // NOVO (26/08/2026): tabela expansivel por faixa de ODD, no card
-        // separado "Acertos e erros por linha de odd" - mesmo padrao do
-        // card de probabilidade acima (busca sob demanda, cache por
-        // faixa), so que indexado por INDICE da faixa (inteiro, 1.30 vira
-        // 13) em vez do inicio em %, pra nao arriscar problema de
-        // arredondamento de float na URL/id do elemento.
-        const CACHE_FAIXA_CALIBRACAO_ODD = {};
-
-        function toggleFaixaCalibracaoOdd(indiceFaixa) {
-            const detalheDiv = document.getElementById('detalhe-odd-faixa-' + indiceFaixa);
-            const seta = document.getElementById('seta-odd-faixa-' + indiceFaixa);
-            const abrindo = detalheDiv.style.display === 'none';
-            detalheDiv.style.display = abrindo ? 'block' : 'none';
-            seta.style.transform = abrindo ? 'rotate(180deg)' : 'rotate(0deg)';
-            if (!abrindo) return;
-
-            if (CACHE_FAIXA_CALIBRACAO_ODD[indiceFaixa]) {
-                renderizarTabelaFaixaEm(detalheDiv, CACHE_FAIXA_CALIBRACAO_ODD[indiceFaixa]);
-                return;
-            }
-            detalheDiv.innerHTML = '<div class="vazio">Carregando...</div>';
-            fetch(`/api/calibracao-odd/${indiceFaixa}`)
-                .then(r => r.json())
-                .then(itens => {
-                    CACHE_FAIXA_CALIBRACAO_ODD[indiceFaixa] = itens;
-                    renderizarTabelaFaixaEm(detalheDiv, itens);
-                });
-        }
-
-        // NOVO (26/08/2026): extraida de renderizarTabelaFaixa pra ser
-        // reaproveitada pelos dois cards (probabilidade e odd) - mesmo
-        // formato de tabela nos dois, so muda QUAL faixa alimentou os
-        // itens.
-        function renderizarTabelaFaixaEm(detalheDiv, itens) {
-            if (!itens.length) {
-                detalheDiv.innerHTML = '<div class="vazio">Nenhuma recomendacao avaliada nessa faixa ainda.</div>';
-                return;
-            }
-            const escapar = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
-                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-            }[c]));
-            const linhas = itens.map(i => `
-                <tr class="linha-${i.resultado}">
-                    <td>${i.data_jogo} \u00b7 ${escapar(i.nosso_time)} x ${escapar(i.adversario)}</td>
-                    <td>${escapar(i.descricao)}</td>
-                    <td>${escapar(i.casa_aposta)}</td>
-                    <td>${i.odd_oferecida}</td>
-                    <td>${i.probabilidade_historica}%</td>
-                    <td>${i.valor_esperado}</td>
-                    <td>${i.resultado}</td>
-                </tr>
-            `).join('');
-            detalheDiv.innerHTML = `
-                <div class="tabela-faixa-wrap">
-                    <table class="tabela-faixa">
-                        <thead>
-                            <tr><th>Jogo</th><th>Mercado</th><th>Casa</th><th>Odd</th><th>Prob.</th><th>VE</th><th>Resultado</th></tr>
-                        </thead>
-                        <tbody>${linhas}</tbody>
-                    </table>
-                </div>
-            `;
-        }
-
         function mudarPagina(listaId, direcao) {
             const total = totalPaginas(listaId);
-            let pagina = (paginaAtual[listaId] || 0) + direcao;
-            pagina = Math.max(0, Math.min(total - 1, pagina));
+            const pagina = Math.max(0, Math.min(total - 1, (paginaAtual[listaId] || 0) + direcao));
             paginaAtual[listaId] = pagina;
             salvarPaginaNoNavegador(listaId, pagina);
             renderizarPagina(listaId);
         }
-
-        ['lista-acertou', 'lista-errou', 'lista-pendente'].forEach(renderizarPagina);
-
-        // NOVO (26/08/2026): seção "Odds por Rodada" - paginação das
-        // listas renderizadas pelo Jinja no primeiro carregamento (ids
-        // vem prontos do servidor, um pra cada rodada x resultado).
-        [
-            {% for bloco in blocos_rodadas %}
-            'lista-rodada-{{ bloco.rodada_id }}-acertou',
-            'lista-rodada-{{ bloco.rodada_id }}-errou',
-            {% endfor %}
-        ].forEach(renderizarPagina);
-
-        let offsetRodadas = {{ blocos_rodadas|length }};
 
         function escaparHtml(s) {
             return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
                 '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
             }[c]));
         }
+        function br(v, casas) { return Number(v || 0).toFixed(casas).replace('.', ','); }
+        function dataCurta(d) { const s = String(d || ''); return s.length >= 10 ? s.slice(8, 10) + '/' + s.slice(5, 7) : s; }
+        function escudoJS(nome) { const id = ESCUDOS[nome]; return id ? '<img class="escudo" src="/escudo/' + id + '.png" alt="" loading="lazy">' : ''; }
 
-        // Mesmo markup do macro Jinja cartao_item, só que montado em JS -
-        // usado pelos blocos de rodada carregados via AJAX (o Jinja só
-        // roda no primeiro carregamento da página).
+        // ---- tabela de uma faixa (probabilidade ou odd), numa janela só ----
+        const CACHE_FAIXA_CALIBRACAO = {};
+        const CACHE_FAIXA_CALIBRACAO_ODD = {};
+        function abrirJanelaFaixa(titulo) {
+            document.getElementById('modal-faixa-titulo').textContent = titulo;
+            document.getElementById('modal-faixa-corpo').innerHTML = '<div class="vazio">Carregando...</div>';
+            document.getElementById('modal-faixa').style.display = 'flex';
+            return document.getElementById('modal-faixa-corpo');
+        }
+        function fecharFaixa() { document.getElementById('modal-faixa').style.display = 'none'; }
+        document.addEventListener('keydown', function(e) { if (e.key === 'Escape') fecharFaixa(); });
+        function abrirFaixaProb(inicioFaixa) {
+            const corpo = abrirJanelaFaixa('Apostas com probabilidade entre ' + inicioFaixa + '% e ' + (inicioFaixa + 20) + '%');
+            if (CACHE_FAIXA_CALIBRACAO[inicioFaixa]) { renderizarTabelaFaixaEm(corpo, CACHE_FAIXA_CALIBRACAO[inicioFaixa]); return; }
+            fetch('/api/calibracao/' + inicioFaixa).then(r => r.json()).then(itens => {
+                CACHE_FAIXA_CALIBRACAO[inicioFaixa] = itens;
+                renderizarTabelaFaixaEm(corpo, itens);
+            }).catch(() => { corpo.innerHTML = '<div class="vazio">Não deu para carregar agora.</div>'; });
+        }
+        function abrirFaixaOdd(indiceFaixa) {
+            const inicio = (indiceFaixa / 10).toFixed(2).replace('.', ',');
+            const corpo = abrirJanelaFaixa('Apostas com odd ' + (indiceFaixa >= 40 ? inicio + ' ou mais' : 'entre ' + inicio + ' e ' + ((indiceFaixa + 1) / 10).toFixed(2).replace('.', ',')));
+            if (CACHE_FAIXA_CALIBRACAO_ODD[indiceFaixa]) { renderizarTabelaFaixaEm(corpo, CACHE_FAIXA_CALIBRACAO_ODD[indiceFaixa]); return; }
+            fetch('/api/calibracao-odd/' + indiceFaixa).then(r => r.json()).then(itens => {
+                CACHE_FAIXA_CALIBRACAO_ODD[indiceFaixa] = itens;
+                renderizarTabelaFaixaEm(corpo, itens);
+            }).catch(() => { corpo.innerHTML = '<div class="vazio">Não deu para carregar agora.</div>'; });
+        }
+        function renderizarTabelaFaixaEm(alvo, itens) {
+            if (!itens.length) { alvo.innerHTML = '<div class="vazio">Nenhuma recomendação avaliada nessa faixa ainda.</div>'; return; }
+            const ac = itens.filter(i => i.resultado === 'acertou').length;
+            const linhas = itens.map(i => `
+                <tr class="linha-${i.resultado}">
+                    <td>${dataCurta(i.data_jogo)} · ${escaparHtml(i.nosso_time)} x ${escaparHtml(i.adversario)}</td>
+                    <td>${escaparHtml(i.descricao)}</td>
+                    <td>${escaparHtml(i.casa_aposta)}</td>
+                    <td class="n">${br(i.odd_oferecida, 2)}</td>
+                    <td class="n">${br(i.probabilidade_historica, 1)}%</td>
+                    <td class="n">${br(i.valor_esperado, 3)}</td>
+                    <td>${i.resultado}</td>
+                </tr>`).join('');
+            alvo.innerHTML = `
+                <p class="nota" style="margin: 0 0 0.75rem">${itens.length} apostas · ${ac} acertos · ${br(100 * ac / itens.length, 1)}% · da maior probabilidade para a menor</p>
+                <table class="tabela-faixa">
+                    <thead><tr><th>Jogo</th><th>Mercado</th><th>Casa</th><th>Odd</th><th>Prob.</th><th>VE</th><th>Resultado</th></tr></thead>
+                    <tbody>${linhas}</tbody>
+                </table>`;
+        }
+
+        ['lista-acertou', 'lista-errou', 'lista-pendente'].forEach(renderizarPagina);
+        [
+            {% for bloco in blocos_rodadas %}
+            'lista-rodada-{{ bloco.rodada_id }}-acertou',
+            'lista-rodada-{{ bloco.rodada_id }}-errou',
+            {% endfor %}
+        ].forEach(renderizarPagina);
+        ['lista-multiplas-acertou', 'lista-multiplas-errou', 'lista-multiplas-pendente'].forEach(renderizarPagina);
+
+        // ---- rodadas carregadas depois (mesmo markup do Jinja, montado em JS) ----
+        let offsetRodadas = {{ blocos_rodadas|length }};
         function construirCartaoItemJS(i) {
+            const ve = Number(i.valor_esperado || 0);
             return `
-                <div class="cartao item-pagina">
+                <article class="cartao item-pagina r-${i.resultado}">
                     <div class="cartao-topo">
-                        <span class="jogo">${i.data_jogo} \u00b7 ${escaparHtml(i.nosso_time)} x ${escaparHtml(i.adversario)}</span>
-                        <span class="badge badge-${i.resultado}">${i.resultado}</span>
+                        <span class="jogo"><span class="data">${dataCurta(i.data_jogo)}</span>${escudoJS(i.nosso_time)}${escaparHtml(i.nosso_time)} x ${escudoJS(i.adversario)}${escaparHtml(i.adversario)}</span>
+                        <span class="selo selo-${i.resultado}">${i.resultado}</span>
                     </div>
                     <div class="descricao">${escaparHtml(i.descricao)}</div>
                     <div class="metricas">
-                        <span>${escaparHtml(i.casa_aposta)}</span>
-                        <span>Odd: <b>${i.odd_oferecida}</b></span>
-                        <span>Probabilidade: <b>${i.probabilidade_historica}%</b></span>
-                        <span>VE: <b>${i.valor_esperado}</b></span>
+                        <span class="casa">${escaparHtml(i.casa_aposta)}</span>
+                        <span>odd <b>${br(i.odd_oferecida, 2)}</b></span>
+                        <span>prob. <b>${br(i.probabilidade_historica, 1)}%</b></span>
+                        <span>VE <b>${ve >= 0 ? '+' : ''}${br(ve, 3)}</b></span>
                     </div>
-                </div>
-            `;
+                </article>`;
         }
-
-        function construirColunaRodadaJS(bloco, resultado, emoji, corClasse, titulo, textoBotao) {
+        function construirColunaRodadaJS(bloco, resultado, titulo, textoBotao) {
             const itens = bloco[resultado];
             const listaId = 'lista-rodada-' + bloco.rodada_id + '-' + resultado;
-            const itensHtml = itens.length
-                ? itens.map(construirCartaoItemJS).join('')
+            const itensHtml = itens.length ? itens.map(construirCartaoItemJS).join('')
                 : `<div class="vazio">Nenhum${resultado === 'acertou' ? ' acerto' : ' erro'} nessa rodada.</div>`;
             const paginacaoHtml = itens.length > 10 ? `
                 <div class="paginacao">
-                    <button class="btn-pagina" id="anterior-${listaId}" onclick="mudarPagina('${listaId}', -1)">← Anterior</button>
+                    <button type="button" class="btn-pagina" id="anterior-${listaId}" onclick="mudarPagina('${listaId}', -1)">Anterior</button>
                     <span id="label-${listaId}"></span>
-                    <button class="btn-pagina" id="proximo-${listaId}" onclick="mudarPagina('${listaId}', 1)">Próxima →</button>
+                    <button type="button" class="btn-pagina" id="proximo-${listaId}" onclick="mudarPagina('${listaId}', 1)">Próxima</button>
                 </div>` : '';
             return `
-                <div class="coluna">
-                    <div class="coluna-cabecalho ${corClasse}">${emoji} ${titulo} (${itens.length})</div>
-                    <a class="btn-baixar" href="/historico/rodada/${bloco.rodada_url}/download/${resultado}.csv">⬇️ ${textoBotao}</a>
+                <div class="coluna ${resultado === 'acertou' ? 'c-ac' : 'c-er'}">
+                    <div class="coluna-topo"><h3><i class="ponto"></i>${titulo} <small>${itens.length}</small></h3><a class="btn-baixar" href="/historico/rodada/${bloco.rodada_url}/download/${resultado}.csv">${textoBotao}</a></div>
                     <div id="${listaId}">${itensHtml}</div>
                     ${paginacaoHtml}
-                </div>
-            `;
+                </div>`;
         }
-
         function construirBlocoRodadaJS(bloco) {
+            const nAc = bloco.acertou.length, nEr = bloco.errou.length, nTot = nAc + nEr;
+            const taxa = nTot ? ` · <b>${br(100 * nAc / nTot, 1)}%</b>` : '';
+            const barra = nTot ? `<span class="mini-barra"><i style="width: ${100 * nAc / nTot}%; background: var(--ouro)"></i><i style="width: ${100 * nEr / nTot}%; background: rgba(180, 200, 242, .45)"></i></span>` : '';
             return `
-                <div class="bloco-rodada" id="bloco-rodada-${bloco.rodada_id}">
-                    <div class="rodada-titulo" onclick="toggleRodadaBloco('${bloco.rodada_id}')">
-                        <span>${escaparHtml(bloco.rotulo)}</span>
-                        <span class="rodada-seta">▾</span>
+                <div class="vidro bloco-rodada" id="bloco-rodada-${bloco.rodada_id}">
+                    <button type="button" class="rodada-titulo" onclick="toggleRodadaBloco('${bloco.rodada_id}')">
+                        <span class="rodada-nome">${escaparHtml(bloco.rotulo)}</span>
+                        <span class="rodada-resumo"><span><b>${nAc}</b>acertos · <b>${nEr}</b>erros${taxa}</span>${barra}</span>
+                        <span class="rodada-seta" aria-hidden="true"></span>
+                    </button>
+                    <div class="colunas">
+                        ${construirColunaRodadaJS(bloco, 'acertou', 'Acertou', 'Baixar certas')}
+                        ${construirColunaRodadaJS(bloco, 'errou', 'Errou', 'Baixar erradas')}
                     </div>
-                    <div class="colunas-resultado">
-                        ${construirColunaRodadaJS(bloco, 'acertou', '✅', 'coluna-verde', 'Acertou', 'Baixar certas')}
-                        ${construirColunaRodadaJS(bloco, 'errou', '❌', 'coluna-vermelha', 'Errou', 'Baixar erradas')}
-                    </div>
-                </div>
-            `;
+                </div>`;
         }
-
         function toggleRodadaBloco(rodadaId) {
             document.getElementById('bloco-rodada-' + rodadaId).classList.toggle('aberto');
         }
-
         function carregarMaisRodadas() {
             const btn = document.getElementById('btn-carregar-mais-rodadas');
             btn.disabled = true;
             btn.textContent = 'Carregando...';
-            fetch(`/api/historico-rodadas?offset=${offsetRodadas}`)
+            fetch('/api/historico-rodadas?offset=' + offsetRodadas)
                 .then(r => r.json())
                 .then(dados => {
                     const container = document.getElementById('secao-rodadas');
@@ -2609,111 +2583,13 @@ PAGINA_HISTORICO = """
                         renderizarPagina('lista-rodada-' + bloco.rodada_id + '-errou');
                     });
                     offsetRodadas += dados.blocos.length;
-                    if (dados.tem_mais) {
-                        btn.disabled = false;
-                        btn.textContent = 'Carregar mais rodadas';
-                    } else {
-                        btn.remove();
-                    }
-                });
+                    if (dados.tem_mais) { btn.disabled = false; btn.textContent = 'Carregar mais rodadas'; }
+                    else { btn.remove(); }
+                })
+                .catch(() => { btn.disabled = false; btn.textContent = 'Carregar mais rodadas'; });
         }
     </script>
-
-    {% if multiplas_destaque or resumo_multiplas.acertou + resumo_multiplas.errou > 0 %}
-    <div class="coluna-cabecalho coluna-roxa" style="margin-top: 8px;">🎯 Múltiplas em Destaque ({{ multiplas_destaque|length }})</div>
-    <p class="secao-subtitulo">As 5 melhores múltiplas (por probabilidade histórica) de cada jogo já concluído -
-        capturadas de verdade ANTES do apito inicial (não é mais uma reconstrução hipotética depois do jogo já ter
-        acontecido). Não tem relação com sua banca/ROI nem botão de salvar. Só as rodadas mais recentes mostram o
-        card com detalhe completo; rodadas mais antigas saem da lista abaixo, mas continuam contando no percentual
-        a seguir.</p>
-    {% if resumo_multiplas.acertou + resumo_multiplas.errou > 0 %}
-    <p class="secao-subtitulo" style="margin-top: -8px;">
-        No total (incluindo rodadas já fora do detalhe): <b style="color:#3fb950">{{ resumo_multiplas.acertou }} acerto(s)</b> ·
-        <b style="color:#f85149">{{ resumo_multiplas.errou }} erro(s)</b> ·
-        <b>{{ resumo_multiplas.taxa }}%</b> de acerto — <u>esse percentual é só entre o top-5 de cada jogo;
-        não soma com a taxa de acerto geral lá em cima, porque são grupos diferentes (esse aqui já vem pré-filtrado
-        pras 5 melhores de cada jogo, o de cima não é).</u>
-    </p>
-    {% endif %}
-
-    {% macro cartao_multipla(c) %}
-        <div class="cartao item-pagina">
-            <div class="cartao-topo">
-                <span class="jogo">
-                    {% for j in c.jogos %}{{ j.data_jogo }} · {{ j.nosso_time }} x {{ j.adversario }}{% if not loop.last %} + {% endif %}{% endfor %}
-                </span>
-                <span class="badge badge-{{ c.resultado }}">{{ c.resultado }}</span>
-            </div>
-            <div class="descricao">{{ c.descricao }}</div>
-            <div class="metricas">
-                <span>{{ c.casa_aposta }}</span>
-                <span>Odd: <b>{{ c.odd_combinada }}</b></span>
-                <span>Probabilidade histórica: <b>{{ c.probabilidade_combinada }}%</b></span>
-                <span>Valor esperado: <b>{{ c.valor_esperado }}</b></span>
-            </div>
-        </div>
-    {% endmacro %}
-
-    <div class="colunas-resultado">
-        <div class="coluna">
-            <div class="coluna-cabecalho coluna-verde">✅ Acertou ({{ multiplas_acertou|length }})</div>
-            <div id="lista-multiplas-acertou">
-                {% if multiplas_acertou %}
-                    {% for c in multiplas_acertou %}{{ cartao_multipla(c) }}{% endfor %}
-                {% else %}
-                    <div class="vazio">Nenhum acerto ainda.</div>
-                {% endif %}
-            </div>
-            {% if multiplas_acertou|length > 10 %}
-            <div class="paginacao">
-                <button class="btn-pagina" id="anterior-lista-multiplas-acertou" onclick="mudarPagina('lista-multiplas-acertou', -1)">← Anterior</button>
-                <span id="label-lista-multiplas-acertou"></span>
-                <button class="btn-pagina" id="proximo-lista-multiplas-acertou" onclick="mudarPagina('lista-multiplas-acertou', 1)">Próxima →</button>
-            </div>
-            {% endif %}
-        </div>
-        <div class="coluna">
-            <div class="coluna-cabecalho coluna-vermelha">❌ Errou ({{ multiplas_errou|length }})</div>
-            <div id="lista-multiplas-errou">
-                {% if multiplas_errou %}
-                    {% for c in multiplas_errou %}{{ cartao_multipla(c) }}{% endfor %}
-                {% else %}
-                    <div class="vazio">Nenhum erro ainda.</div>
-                {% endif %}
-            </div>
-            {% if multiplas_errou|length > 10 %}
-            <div class="paginacao">
-                <button class="btn-pagina" id="anterior-lista-multiplas-errou" onclick="mudarPagina('lista-multiplas-errou', -1)">← Anterior</button>
-                <span id="label-lista-multiplas-errou"></span>
-                <button class="btn-pagina" id="proximo-lista-multiplas-errou" onclick="mudarPagina('lista-multiplas-errou', 1)">Próxima →</button>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-
-    <div class="secao-pendentes">
-        <div class="coluna-cabecalho coluna-cinza">⏳ Pendente ({{ multiplas_pendente|length }})</div>
-        <div id="lista-multiplas-pendente">
-            {% if multiplas_pendente %}
-                {% for c in multiplas_pendente %}{{ cartao_multipla(c) }}{% endfor %}
-            {% else %}
-                <div class="vazio">Nenhuma múltipla pendente no momento.</div>
-            {% endif %}
-        </div>
-        {% if multiplas_pendente|length > 10 %}
-        <div class="paginacao">
-            <button class="btn-pagina" id="anterior-lista-multiplas-pendente" onclick="mudarPagina('lista-multiplas-pendente', -1)">← Anterior</button>
-            <span id="label-lista-multiplas-pendente"></span>
-            <button class="btn-pagina" id="proximo-lista-multiplas-pendente" onclick="mudarPagina('lista-multiplas-pendente', 1)">Próxima →</button>
-        </div>
-        {% endif %}
-    </div>
-
-    <script>
-        ['lista-multiplas-acertou', 'lista-multiplas-errou', 'lista-multiplas-pendente'].forEach(renderizarPagina);
-    </script>
-    {% endif %}
-</body>
+""" + SCRIPT_FUNDO_VIVO + """</body>
 </html>
 """
 
@@ -3222,6 +3098,10 @@ def historico():
         multiplas_errou = [c for c in multiplas_destaque if c["resultado"] == "errou"]
         multiplas_pendente = [c for c in multiplas_destaque if c["resultado"] == "pendente"]
         banca_atual = buscar_banca(cur, session["usuario_id"])
+        # REDESIGN (18/10/2026): escudo ao lado do nome do time, como na
+        # página de Recomendações (nome do time -> id na API-Football)
+        cur.execute("SELECT nome, api_football_team_id FROM times WHERE api_football_team_id IS NOT NULL")
+        escudos = {nome: api_id for nome, api_id in cur.fetchall()}
         cur.close()
     finally:
         conn.close()
@@ -3245,8 +3125,8 @@ def historico():
         blocos_rodadas=blocos_rodadas, tem_mais_rodadas=tem_mais_rodadas,
         multiplas_destaque=multiplas_destaque, resumo_multiplas=resumo_multiplas,
         multiplas_acertou=multiplas_acertou, multiplas_errou=multiplas_errou,
-        multiplas_pendente=multiplas_pendente,
-        nav_html=barra_navegacao("historico", round(banca_atual, 2)),
+        multiplas_pendente=multiplas_pendente, escudos=escudos,
+        nav_html=barra_navegacao_nova("historico", round(banca_atual, 2)),
     )
 
 
@@ -3888,258 +3768,217 @@ PAGINA_ROI = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Minhas Apostas - Achismo Zero</title>
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-            background: #0d1117; color: #e6edf3; max-width: 1500px;
-            margin: 0 auto; padding: 32px 20px 80px;
+""" + FONTES_VISUAL_NOVO + """    <style>
+        /* REDESIGN (18/10/2026): Minhas Apostas (ROI) no visual novo. Os
+           formulários, rotas e campos são os de antes (/banca-movimento,
+           /salvar-aposta pelo Criador de Odd, /cancelar-aposta,
+           /corrigir-aposta-manual, /api/jogadores-jogo). Novos: o gráfico é
+           desenhado na página na largura real (antes vinha pronto do
+           servidor) e a lista de apostas tem filtro por resultado. */
+        """ + NAV_CSS + """
+""" + CSS_VISUAL_NOVO + """
+        .conteudo { width: var(--degrau1); margin: 0 auto; }
+        .rotulo { font-family: var(--f-dado); font-size: 0.625rem; letter-spacing: .08em; text-transform: uppercase; color: var(--apagado); }
+        .vidro { background: var(--vidro); border: 1px solid var(--vidro-borda); box-shadow: var(--vidro-sombra); border-radius: var(--raio); }
+        .secao { margin-bottom: 3rem; }
+        .secao-titulo { margin: 0 0 0.875rem; font-family: var(--f-corpo); font-weight: 300; font-size: clamp(1.25rem, 1.8vw, 1.75rem); letter-spacing: -.03em; line-height: 1.1; }
+        .vazio { text-align: center; color: var(--apagado); padding: 1.75rem 1.25rem; font-size: 0.8125rem; background: rgba(3, 12, 32, .4); border: 1px dashed var(--linha); border-radius: var(--raio); }
+        .pos { color: var(--ouro); }
+        .neg { color: var(--azul-claro); }
+        button {
+            background: var(--ouro); color: var(--cta-texto); border: 1px solid transparent; border-radius: 999px;
+            padding: 0.5rem 1rem; font-family: var(--f-corpo); font-size: 0.8125rem; font-weight: 600; cursor: pointer;
+            transition: background .15s, transform .1s;
         }
-        h1 { font-size: 1.5rem; margin: 0 0 4px; text-align: center; }
-        .subtitulo { color: #8b949e; margin: 0 0 20px; text-align: center; }
-        .link-voltar { color: #8b949e; text-decoration: none; font-size: 0.85rem; }
-        .link-voltar:hover { text-decoration: underline; }
-        .resumo-grid { display: flex; gap: 14px; margin: 20px 0 28px; flex-wrap: wrap; }
-        .resumo-card {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 16px 22px; flex: 1; min-width: 130px; text-align: center;
+        button:hover { background: var(--ouro-claro); }
+        button:active { transform: translateY(1px); }
+        .btn-contorno { background: transparent; color: var(--azul-claro); border-color: rgba(180, 200, 242, .5); }
+        .btn-contorno:hover { background: rgba(180, 200, 242, .1); }
+        input[type=number], select {
+            width: 100%; padding: 0.5625rem 0.75rem; border-radius: 0.5rem;
+            background: rgba(1, 5, 15, .55); border: 1px solid var(--linha); color: var(--texto);
+            font-family: var(--f-corpo); font-size: 0.8125rem;
         }
-        .resumo-numero { font-size: 1.5rem; font-weight: 700; }
-        .resumo-label { color: #8b949e; font-size: 0.78rem; margin-top: 4px; }
-        .grafico-box {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 18px; margin-bottom: 28px;
-        }
-        .grafico-titulo { font-size: 0.85rem; color: #8b949e; margin-bottom: 10px; }
+        input[type=number] { font-family: var(--f-dado); }
+        input[type=number]:focus, select:focus { outline: none; border-color: var(--azul-claro); box-shadow: 0 0 0 3px rgba(180, 200, 242, .18); }
+        select option { background: #06122e; }
+        .flash { padding: 0.625rem 0.875rem; border-radius: 0.625rem; margin-bottom: 1.25rem; font-size: 0.75rem; }
+        .flash-erro { background: rgba(255, 122, 122, .12); color: var(--vermelho); border: 1px solid rgba(255, 122, 122, .4); }
+        .flash-sucesso { background: rgba(95, 211, 141, .12); color: var(--verde); border: 1px solid rgba(95, 211, 141, .4); }
 
-        /* NOVO (Criador de Odd) */
-        .criador-odd-box {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 16px 20px; margin-bottom: 28px; display: flex; align-items: center;
-            gap: 14px; cursor: pointer; transition: border-color 0.15s;
+        .cabeca { margin: 0.5rem 0 1.75rem; }
+        .cabeca h1 { margin: 0; font-family: var(--f-corpo); font-weight: 300; font-size: clamp(2rem, 3.2vw, 3rem); letter-spacing: -.035em; line-height: 1; }
+        .cabeca p { margin: 0.5rem 0 0; color: var(--apagado); font-size: 0.8125rem; }
+
+        /* ---------- banca + números ---------- */
+        .topo-grade { display: grid; grid-template-columns: minmax(0, 22rem) minmax(0, 1fr); gap: 1.25rem; align-items: stretch; margin-bottom: 1.25rem; }
+        .banca-box { padding: 1.25rem 1.375rem; display: flex; flex-direction: column; gap: 1rem; }
+        .banca-valor { font-family: var(--f-dado); font-weight: 500; font-size: clamp(2.25rem, 3.4vw, 3.25rem); line-height: 1; margin-top: 0.5rem; font-variant-numeric: tabular-nums; }
+        .banca-valor small { font-size: 0.45em; color: var(--apagado); margin-right: 0.375rem; }
+        .banca-nota { font-size: 0.6875rem; color: var(--apagado); margin-top: 0.375rem; }
+        .banca-botoes { display: flex; gap: 0.5rem; }
+        .banca-botoes button { flex: 1; }
+        .banca-forma { display: none; gap: 0.5rem; }
+        .banca-forma.aberta { display: flex; }
+        .banca-forma input { flex: 1; min-width: 0; }
+        .numeros { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.75rem; }
+        .numero { padding: 1rem 1.125rem; }
+        .numero b { display: block; margin-top: 0.4375rem; font-family: var(--f-dado); font-weight: 500; font-size: clamp(1.375rem, 2vw, 1.875rem); line-height: 1; font-variant-numeric: tabular-nums; }
+        .numero span.det { display: block; margin-top: 0.375rem; font-size: 0.6875rem; color: var(--apagado); }
+        .numeros > .numero:nth-child(-n+3) { grid-column: span 2; }
+        .numeros > .numero:nth-child(n+4) { grid-column: span 3; }
+
+        /* ---------- gráfico ---------- */
+        .grafico-box { padding: 1.125rem 1.25rem 0.875rem; margin-bottom: 1.25rem; }
+        .grafico-topo { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.625rem; }
+        .grafico-topo h3 { margin: 0; font-size: 0.9375rem; font-weight: 600; }
+        .grafico-topo span { font-size: 0.6875rem; color: var(--apagado); }
+        #grafico { position: relative; height: 13rem; }
+        #grafico svg { display: block; width: 100%; height: 100%; overflow: visible; }
+        #grafico text { font-family: var(--f-dado); font-size: 10px; fill: var(--apagado); }
+        .dica {
+            position: absolute; pointer-events: none; transform: translate(-50%, -120%); white-space: nowrap;
+            background: #06122e; border: 1px solid var(--vidro-borda); border-radius: 0.375rem; padding: 0.25rem 0.5rem;
+            font-family: var(--f-dado); font-size: 0.6875rem; opacity: 0; transition: opacity .1s;
         }
-        .criador-odd-box:hover { border-color: #58a6ff; }
-        .criador-odd-icone { font-size: 1.6rem; }
-        .criador-odd-titulo { font-weight: 700; font-size: 0.95rem; }
-        .criador-odd-sub { color: #8b949e; font-size: 0.8rem; margin-top: 2px; }
-        .modal-overlay {
-            display: none; position: fixed; inset: 0; background: #000000aa;
-            align-items: center; justify-content: center; z-index: 1000; padding: 20px;
+
+        /* ---------- criador de odd + extrato ---------- */
+        .faixa-acoes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.25rem; align-items: start; margin-bottom: 3rem; }
+        .criador-odd-box { padding: 1.125rem 1.25rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+        .criador-odd-titulo { font-weight: 600; font-size: 0.9375rem; }
+        .criador-odd-sub { color: var(--apagado); font-size: 0.75rem; margin-top: 0.25rem; max-width: 26rem; line-height: 1.5; }
+        .extrato-box { padding: 0; overflow: hidden; }
+        .extrato-titulo {
+            width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+            padding: 1.125rem 1.25rem; background: none; border: 0; border-radius: 0; color: var(--texto);
+            font-size: 0.9375rem; font-weight: 600; text-align: left;
         }
+        .extrato-titulo:hover { background: rgba(255,255,255,.04); }
+        .extrato-titulo small { font-weight: 400; font-size: 0.6875rem; color: var(--apagado); }
+        .seta { width: 0.5rem; height: 0.5rem; border-right: 2px solid var(--apagado); border-bottom: 2px solid var(--apagado); transform: translateY(-0.125rem) rotate(45deg); transition: transform .2s; flex-shrink: 0; }
+        .extrato-box.aberto .seta { transform: translateY(0.125rem) rotate(-135deg); }
+        .extrato-lista { display: none; padding: 0 1.25rem 0.75rem; max-height: 22rem; overflow-y: auto; }
+        .extrato-lista.aberta { display: block; }
+        .extrato-linha { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0.75rem; align-items: baseline; font-size: 0.75rem; padding: 0.4375rem 0; border-top: 1px solid var(--linha-fraca); }
+        .extrato-linha .quando { font-family: var(--f-dado); font-size: 0.625rem; color: var(--apagado); margin-right: 0.5rem; }
+        .extrato-linha b { font-family: var(--f-dado); font-weight: 600; text-align: right; }
+        .extrato-linha .saldo { font-family: var(--f-dado); font-size: 0.6875rem; color: var(--apagado); text-align: right; min-width: 6.5rem; }
+
+        /* ---------- apostas ---------- */
+        .lista-topo { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.875rem; }
+        .lista-topo .secao-titulo { margin: 0; }
+        .filtros { display: flex; gap: 0.25rem; padding: 0.25rem; border-radius: 999px; background: rgba(1, 5, 15, .45); border: 1px solid var(--linha-fraca); }
+        .filtros button { background: none; color: var(--apagado); font-weight: 500; font-size: 0.75rem; padding: 0.3125rem 0.75rem; }
+        .filtros button:hover { color: var(--texto); background: rgba(255,255,255,.05); }
+        .filtros button.ativo { background: rgba(255, 210, 10, .14); color: var(--ouro); }
+        .filtros small { font-family: var(--f-dado); margin-left: 0.25rem; opacity: .75; }
+        .apostas { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 26rem), 1fr)); gap: 0.75rem; align-items: start; }
+        .cartao { padding: 0.9375rem 1.0625rem 1rem; border-left: 3px solid var(--linha); }
+        .cartao.r-acertou { border-left-color: var(--ouro); }
+        .cartao.r-errou { border-left-color: rgba(180, 200, 242, .55); }
+        .cartao-topo { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+        .quando { font-family: var(--f-dado); font-size: 0.6875rem; color: var(--apagado); }
+        .selo { font-family: var(--f-dado); font-size: 0.5625rem; letter-spacing: .08em; text-transform: uppercase; padding: 0.125rem 0.4375rem; border-radius: 999px; white-space: nowrap; }
+        .selo-acertou { color: var(--cta-texto); background: var(--ouro); }
+        .selo-errou { color: var(--azul-claro); border: 1px solid rgba(180, 200, 242, .5); }
+        .selo-pendente { color: var(--apagado); border: 1px solid var(--linha); }
+        .jogos-label { font-size: 0.6875rem; color: var(--azul-claro); margin-bottom: 0.3125rem; }
+        .descricao { font-size: 0.8125rem; font-weight: 500; line-height: 1.45; margin-bottom: 0.625rem; }
+        .metricas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; padding: 0.625rem 0.75rem; border-radius: 0.5rem; background: rgba(1, 5, 15, .35); }
+        .metricas span { font-size: 0.625rem; color: var(--apagado); }
+        .metricas b { display: block; margin-top: 0.125rem; font-family: var(--f-dado); font-weight: 500; font-size: 0.875rem; color: var(--texto); font-variant-numeric: tabular-nums; }
+        .metricas b.pos { color: var(--ouro); }
+        .metricas b.neg { color: var(--azul-claro); }
+        .casa { font-family: var(--f-dado); font-size: 0.5625rem; letter-spacing: .06em; text-transform: uppercase; color: var(--apagado); margin-top: 0.5rem; }
+        .salvar-linha { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.75rem; flex-wrap: wrap; }
+        .btn-pequeno { font-size: 0.6875rem; padding: 0.3125rem 0.75rem; }
+        .btn-cancelar { background: transparent; color: var(--azul-claro); border-color: rgba(180, 200, 242, .5); }
+        .btn-cancelar:hover { background: rgba(180, 200, 242, .1); }
+        .btn-corrigir { background: transparent; color: var(--apagado); border-color: var(--linha); }
+        .btn-corrigir:hover { background: rgba(255,255,255,.05); color: var(--texto); }
+        .painel-corrigir { display: none; gap: 0.375rem; flex-wrap: wrap; margin-top: 0.5rem; padding: 0.625rem; border-radius: 0.5rem; background: rgba(1, 5, 15, .35); }
+        .painel-corrigir.aberto { display: flex; }
+        .btn-corrigir-opcao { font-size: 0.6875rem; padding: 0.3125rem 0.75rem; background: transparent; }
+        .btn-corrigir-cancelar { color: var(--apagado); border-color: var(--linha); }
+        .btn-corrigir-cancelar:hover { background: rgba(255,255,255,.05); }
+        .btn-corrigir-acertou { color: var(--ouro); border-color: rgba(255, 210, 10, .5); }
+        .btn-corrigir-acertou:hover { background: rgba(255, 210, 10, .1); }
+        .btn-corrigir-errou { color: var(--azul-claro); border-color: rgba(180, 200, 242, .5); }
+        .btn-corrigir-errou:hover { background: rgba(180, 200, 242, .1); }
+        .tag-manual { font-size: 0.625rem; color: var(--apagado); margin-top: 0.5rem; }
+
+        /* ---------- janelas do Criador de Odd ---------- */
+        .modal-overlay { display: none; position: fixed; inset: 0; z-index: 1000; align-items: center; justify-content: center; padding: 1rem; background: rgba(1, 5, 15, .72); }
         .modal-overlay.aberto { display: flex; }
         .modal-caixa {
-            background: #0d1117; border: 1px solid #30363d; border-radius: 14px;
-            padding: 24px; max-width: 560px; width: 100%; max-height: 88vh; overflow-y: auto;
+            width: 100%; max-width: 34rem; max-height: 88vh; overflow-y: auto; padding: 1.375rem 1.5rem;
+            border-radius: var(--raio); border: 1px solid var(--vidro-borda); box-shadow: var(--vidro-sombra);
+            background: linear-gradient(140deg, rgba(255,255,255,.1), rgba(255,255,255,.03)), #06122e;
         }
-        .modal-caixa h2 { margin: 0 0 4px; font-size: 1.15rem; }
-        .modal-caixa .modal-sub { color: #8b949e; font-size: 0.8rem; margin: 0 0 18px; }
-        .modal-campo { margin-bottom: 14px; }
-        .modal-campo label {
-            display: block; font-size: 0.78rem; color: #8b949e; margin-bottom: 5px;
-        }
-        .modal-campo select, .modal-campo input {
-            width: 100%; background: #161b22; border: 1px solid #30363d; border-radius: 8px;
-            color: #e6edf3; padding: 9px 12px; font-size: 0.88rem;
-        }
-        .modal-linha-dupla { display: flex; gap: 10px; }
-        .modal-linha-dupla > div { flex: 1; }
-        .btn-adicionar-perna {
-            width: 100%; background: #1f6feb22; border: 1px solid #1f6feb66; color: #58a6ff;
-            border-radius: 8px; padding: 10px; font-size: 0.85rem; font-weight: 600;
-            cursor: pointer; margin-top: 4px;
-        }
-        .btn-adicionar-perna:hover { background: #1f6feb33; }
-        .pernas-adicionadas { margin: 16px 0; }
-        .perna-adicionada-item {
-            background: #161b22; border: 1px solid #21262d; border-radius: 8px;
-            padding: 8px 12px; font-size: 0.8rem; margin-bottom: 6px;
-            display: flex; justify-content: space-between; align-items: center; gap: 8px;
-        }
-        .perna-adicionada-remover {
-            color: #f85149; cursor: pointer; font-size: 0.75rem; flex-shrink: 0;
-        }
-        .modal-botoes-finais { display: flex; gap: 10px; margin-top: 18px; }
-        .modal-botoes-finais button {
-            flex: 1; padding: 11px; border-radius: 8px; font-size: 0.85rem; font-weight: 600;
-            cursor: pointer; border: none;
-        }
-        .btn-fechar-modal { background: #21262d; color: #e6edf3; }
-        .btn-salvar-odd { background: #238636; color: white; }
-        .btn-salvar-odd:disabled { background: #21262d; color: #8b949e; cursor: not-allowed; }
-
-        /* NOVO (26/08/2026): seletor de jogo por rodada (segundo modal,
-           por cima do Criador de Odd) - substitui o <select> achatado com
-           todo jogo da janela de -45/+30 dias misturado. */
-        .modal-caixa-jogos { max-width: 640px; }
-        .jogo-escolhido-box {
-            display: flex; justify-content: space-between; align-items: center; gap: 10px;
-            background: #161b22; border: 1px solid #30363d; border-radius: 8px;
-            padding: 9px 12px; font-size: 0.85rem;
-        }
-        .jogo-escolhido-trocar {
-            color: #58a6ff; cursor: pointer; font-size: 0.78rem; flex-shrink: 0;
-            white-space: nowrap;
-        }
-        .lista-rodadas-jogo { max-height: 58vh; overflow-y: auto; margin-top: 4px; }
-        .rodada-jogo-item {
-            border: 1px solid #21262d; border-radius: 10px; margin-bottom: 8px; overflow: hidden;
-        }
-        .rodada-jogo-cabecalho {
-            padding: 12px 14px; cursor: pointer; display: flex; justify-content: space-between;
-            align-items: center; background: #161b22;
-        }
-        .rodada-jogo-cabecalho:hover { background: #1c2129; }
-        .rodada-jogo-titulo { font-weight: 700; font-size: 0.88rem; }
-        .rodada-jogo-periodo { color: #8b949e; font-size: 0.78rem; }
-        .rodada-jogo-lista { display: none; padding: 6px 10px 10px; }
+        .modal-caixa h2 { margin: 0 0 0.25rem; font-size: 1.25rem; font-weight: 300; letter-spacing: -.02em; }
+        .modal-sub { color: var(--apagado); font-size: 0.75rem; margin: 0 0 1.125rem; line-height: 1.5; }
+        .modal-campo { margin-bottom: 0.875rem; }
+        .modal-campo label { display: block; margin-bottom: 0.3125rem; font-family: var(--f-dado); font-size: 0.5625rem; letter-spacing: .08em; text-transform: uppercase; color: var(--apagado); }
+        .modal-linha-dupla { display: flex; gap: 0.625rem; }
+        .modal-linha-dupla > div { flex: 1; min-width: 0; }
+        .btn-adicionar-perna { width: 100%; background: rgba(63, 111, 209, .2); color: var(--azul-claro); border: 1px solid rgba(180, 200, 242, .4); border-radius: 0.5rem; }
+        .btn-adicionar-perna:hover { background: rgba(63, 111, 209, .32); }
+        .pernas-adicionadas { margin: 0.875rem 0; display: grid; gap: 0.375rem; }
+        .perna-adicionada-item { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; border-radius: 0.5rem; background: rgba(1, 5, 15, .45); border: 1px solid var(--linha-fraca); font-size: 0.75rem; }
+        .perna-adicionada-remover { color: var(--azul-claro); cursor: pointer; font-size: 0.6875rem; flex-shrink: 0; }
+        .modal-botoes-finais { display: flex; gap: 0.625rem; margin-top: 1.125rem; }
+        .modal-botoes-finais button { flex: 1; }
+        .btn-fechar-modal { background: transparent; color: var(--texto); border-color: var(--linha); }
+        .btn-fechar-modal:hover { background: rgba(255,255,255,.06); }
+        .btn-salvar-odd:disabled { background: rgba(255,255,255,.08); color: var(--apagado); cursor: not-allowed; }
+        .modal-caixa-jogos { max-width: 40rem; }
+        .jogo-escolhido-box { display: flex; justify-content: space-between; align-items: center; gap: 0.625rem; padding: 0.5625rem 0.75rem; border-radius: 0.5rem; background: rgba(1, 5, 15, .55); border: 1px solid var(--linha); font-size: 0.8125rem; }
+        .jogo-escolhido-trocar { color: var(--ouro); cursor: pointer; font-size: 0.75rem; font-weight: 600; flex-shrink: 0; white-space: nowrap; }
+        .lista-rodadas-jogo { max-height: 58vh; overflow-y: auto; margin-top: 0.25rem; display: grid; gap: 0.375rem; }
+        .rodada-jogo-item { border: 1px solid var(--linha-fraca); border-radius: 0.625rem; overflow: hidden; }
+        .rodada-jogo-cabecalho { padding: 0.6875rem 0.875rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; background: rgba(255,255,255,.03); }
+        .rodada-jogo-cabecalho:hover { background: rgba(255,255,255,.07); }
+        .rodada-jogo-titulo { font-weight: 600; font-size: 0.8125rem; }
+        .rodada-jogo-periodo { color: var(--apagado); font-size: 0.6875rem; }
+        .rodada-jogo-lista { display: none; padding: 0.375rem 0.5rem 0.5rem; }
         .rodada-jogo-lista.aberta { display: block; }
-        .jogo-escolher-item {
-            padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
-            display: flex; justify-content: space-between; gap: 10px;
-        }
-        .jogo-escolher-item:hover { background: #1f6feb22; }
-        .jogo-escolher-item span:last-child { color: #8b949e; font-size: 0.78rem; white-space: nowrap; }
+        .jogo-escolher-item { padding: 0.4375rem 0.625rem; border-radius: 0.375rem; cursor: pointer; font-size: 0.8125rem; display: flex; justify-content: space-between; gap: 0.625rem; }
+        .jogo-escolher-item:hover { background: rgba(63, 111, 209, .22); }
+        .jogo-escolher-item span:last-child { color: var(--apagado); font-family: var(--f-dado); font-size: 0.6875rem; white-space: nowrap; }
 
-        .cartao {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 16px 20px; margin-bottom: 12px;
+        /* o fundo acompanha o ROI: o mesmo degradê vivo, com as cores trocadas
+           (verde no positivo, vermelho no negativo). Aqui fica só o fundo de
+           reserva, para quando não há WebGL; as cores do degradê vêm do script. */
+        body.tema-pos .fundo { background: radial-gradient(60vmax 45vmax at 8% -6%, rgba(40, 190, 100, .30), rgba(40, 190, 100, 0) 70%), radial-gradient(55vmax 40vmax at 104% 18%, rgba(92, 74, 0, .55), rgba(92, 74, 0, 0) 70%), radial-gradient(70vmax 50vmax at 70% 112%, rgba(6, 79, 32, .85), rgba(6, 79, 32, 0) 70%), linear-gradient(180deg, #021f0a 0%, #010f05 60%); }
+        body.tema-neg .fundo { background: radial-gradient(60vmax 45vmax at 8% -6%, rgba(209, 63, 63, .30), rgba(209, 63, 63, 0) 70%), radial-gradient(55vmax 40vmax at 104% 18%, rgba(92, 74, 0, .55), rgba(92, 74, 0, 0) 70%), radial-gradient(70vmax 50vmax at 70% 112%, rgba(79, 6, 12, .85), rgba(79, 6, 12, 0) 70%), linear-gradient(180deg, #1f0205 0%, #0f0103 60%); }
+
+        @media (max-width: 1099px) {
+            :root { --degrau1: 100%; --degrau2: 100%; }
+            .topo-grade, .faixa-acoes { grid-template-columns: minmax(0, 1fr); }
         }
-        .cartao-topo {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 8px; flex-wrap: wrap; gap: 8px;
+        @media (max-width: 640px) {
+            .numeros { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .numeros > .numero:nth-child(n) { grid-column: span 1; }
+            .numeros > .numero:first-child { grid-column: 1 / -1; }
+            .modal-linha-dupla { flex-direction: column; gap: 0; }
         }
-        .descricao { color: #c9d1d9; font-size: 0.88rem; margin-bottom: 8px; line-height: 1.5; }
-        .jogos-label { color: #58a6ff; font-size: 0.78rem; margin-bottom: 8px; font-weight: 600; }
-        .metricas { display: flex; gap: 18px; font-size: 0.78rem; color: #8b949e; flex-wrap: wrap; }
-        .metricas b { color: #e6edf3; }
-        .badge {
-            font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 999px;
-            text-transform: uppercase; letter-spacing: 0.03em;
-        }
-        .badge-acertou { background: #23863622; color: #3fb950; }
-        .badge-errou { background: #f8514922; color: #f85149; }
-        .badge-pendente { background: #8b949e22; color: #8b949e; }
-        .retorno-positivo { color: #3fb950; }
-        .retorno-negativo { color: #f85149; }
-        .salvar-linha {
-            display: flex; gap: 8px; align-items: center; margin-top: 10px;
-            padding-top: 10px; border-top: 1px solid #21262d;
-        }
-        .btn-cancelar {
-            background: transparent;
-            color: #f85149;
-            border: 1px solid #f85149;
-            border-radius: 8px;
-            padding: 7px 14px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            cursor: pointer;
-        }
-        .btn-cancelar:hover { background: #f8514922; }
-        .btn-corrigir {
-            background: transparent;
-            color: #8b949e;
-            border: 1px solid #8b949e;
-            border-radius: 8px;
-            padding: 7px 14px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            cursor: pointer;
-        }
-        .btn-corrigir:hover { background: #8b949e22; }
-        .painel-corrigir {
-            display: none;
-            gap: 8px;
-            flex-wrap: wrap;
-            margin-top: 8px;
-        }
-        .painel-corrigir.aberto { display: flex; }
-        .btn-corrigir-opcao {
-            border-radius: 8px;
-            padding: 7px 14px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            cursor: pointer;
-        }
-        .btn-corrigir-cancelar {
-            background: transparent; color: #8b949e; border: 1px solid #8b949e;
-        }
-        .btn-corrigir-cancelar:hover { background: #8b949e22; }
-        .btn-corrigir-acertou {
-            background: transparent; color: #3fb950; border: 1px solid #3fb950;
-        }
-        .btn-corrigir-acertou:hover { background: #23863622; }
-        .btn-corrigir-errou {
-            background: transparent; color: #f85149; border: 1px solid #f85149;
-        }
-        .btn-corrigir-errou:hover { background: #f8514922; }
-        .tag-manual {
-            font-size: 0.72rem; color: #8b949e; margin-top: 6px;
-        }
-        .vazio {
-            text-align: center; color: #8b949e; padding: 32px 24px;
-            background: #161b22; border: 1px dashed #30363d; border-radius: 12px; font-size: 0.9rem;
-        }
-        .flash {
-            padding: 12px 16px; border-radius: 10px; margin-bottom: 18px; font-size: 0.85rem;
-        }
-        .flash-erro { background: #f8514922; color: #f85149; border: 1px solid #f8514955; }
-        .flash-sucesso { background: #23863622; color: #3fb950; border: 1px solid #23863655; }
-        .banca-box {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 18px 22px; margin-bottom: 24px;
-        }
-        .banca-topo { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
-        .banca-valor { font-size: 1.7rem; font-weight: 700; }
-        .banca-label { color: #8b949e; font-size: 0.78rem; margin-top: 2px; }
-        .banca-botoes { display: flex; gap: 8px; }
-        .btn-banca {
-            border-radius: 8px; padding: 7px 14px; font-size: 0.8rem; font-weight: 600;
-            cursor: pointer; border: 1px solid #30363d; background: #21262d; color: #e6edf3;
-        }
-        .btn-banca:hover { background: #30363d; }
-        .banca-forma {
-            display: none; gap: 8px; align-items: center; margin-top: 14px;
-            padding-top: 14px; border-top: 1px solid #21262d;
-        }
-        .banca-forma.aberta { display: flex; flex-wrap: wrap; }
-        .banca-forma input[type=number] {
-            background: #0d1117; border: 1px solid #30363d; color: #e6edf3;
-            border-radius: 8px; padding: 8px 10px; width: 140px;
-        }
-        .btn-confirmar-deposito { background: #23863622; color: #3fb950; border: 1px solid #3fb95055; }
-        .btn-confirmar-resgate { background: #f8514922; color: #f85149; border: 1px solid #f8514955; }
-        .extrato-box {
-            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-            padding: 6px 20px; margin-bottom: 28px;
-        }
-        .extrato-titulo {
-            font-size: 0.82rem; color: #8b949e; padding: 12px 0; cursor: pointer; user-select: none;
-        }
-        .extrato-lista { display: none; padding-bottom: 10px; }
-        .extrato-lista.aberta { display: block; }
-        .extrato-linha {
-            display: flex; justify-content: space-between; font-size: 0.8rem;
-            padding: 7px 0; border-top: 1px solid #21262d; color: #8b949e;
-        }
-        .extrato-linha b { color: #e6edf3; }
-        """ + NAV_CSS + """
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
     </style>
     <script>
         function alternarFormaBanca(tipo) {
+            const alvo = document.getElementById('forma-' + tipo);
+            const abrir = !alvo.classList.contains('aberta');
             document.getElementById('forma-deposito').classList.remove('aberta');
             document.getElementById('forma-resgate').classList.remove('aberta');
-            document.getElementById('forma-' + tipo).classList.add('aberta');
+            if (abrir) { alvo.classList.add('aberta'); alvo.querySelector('input[type=number]').focus(); }
         }
         function alternarExtrato() {
             document.getElementById('extrato-lista').classList.toggle('aberta');
+            document.getElementById('extrato-box').classList.toggle('aberto');
         }
 
-        // NOVO (Criador de Odd) --------------------------------------------
+        // Criador de Odd -----------------------------------------------------
         const RODADAS_CRIADOR_ODD = {{ jogos_criador_odd|tojson }};
-        // Achatado a partir de RODADAS_CRIADOR_ODD - mantém o mesmo formato
-        // que o resto do código já espera (adicionarPernaCriadorOdd faz
-        // JOGOS_CRIADOR_ODD.find(...) por id, sem se importar com rodada).
         const JOGOS_CRIADOR_ODD = RODADAS_CRIADOR_ODD.flatMap(r => r.jogos);
         const MERCADOS_CRIADOR_ODD = {
             "cartao": {"label": "Cartão de Jogador", "jogador": true, "modo": "binario"},
@@ -4159,12 +3998,10 @@ PAGINA_ROI = """
         function abrirCriadorOdd() {
             document.getElementById('criador-odd-jogo').value = '';
             document.getElementById('criador-odd-jogo-label').textContent = 'Nenhum jogo escolhido';
-
             const selectMercado = document.getElementById('criador-odd-mercado');
             selectMercado.innerHTML = Object.entries(MERCADOS_CRIADOR_ODD).map(([chave, m]) =>
                 `<option value="${chave}">${m.label}</option>`
             ).join('');
-
             pernasCriadorOdd = [];
             renderizarPernasCriadorOdd();
             document.getElementById('criador-odd-linha').value = '';
@@ -4173,15 +4010,9 @@ PAGINA_ROI = """
             atualizarCamposCriadorOdd();
             document.getElementById('modal-criador-odd').classList.add('aberto');
         }
-
         function fecharCriadorOdd() {
             document.getElementById('modal-criador-odd').classList.remove('aberto');
         }
-
-        // NOVO (26/08/2026): segundo modal, por cima do Criador de Odd -
-        // lista as rodadas (rótulo + período de datas), cada uma
-        // expansível pra ver os jogos dela. Escolher um jogo fecha esse
-        // modal e volta pro Criador de Odd já com o jogo marcado.
         function abrirEscolherJogo() {
             const container = document.getElementById('lista-rodadas-jogo');
             container.innerHTML = RODADAS_CRIADOR_ODD.map((r, idx) => `
@@ -4202,36 +4033,30 @@ PAGINA_ROI = """
             `).join('');
             document.getElementById('modal-escolher-jogo').classList.add('aberto');
         }
-
         function fecharEscolherJogo() {
             document.getElementById('modal-escolher-jogo').classList.remove('aberto');
         }
-
         function toggleRodadaJogo(idx) {
             document.getElementById('rodada-jogo-lista-' + idx).classList.toggle('aberta');
         }
-
         function selecionarJogoCriadorOdd(jogoId) {
             const jogo = JOGOS_CRIADOR_ODD.find(j => String(j.id) === String(jogoId));
             document.getElementById('criador-odd-jogo').value = jogoId;
             document.getElementById('criador-odd-jogo-label').textContent = jogo
-                ? `${jogo.data_jogo} \u00b7 ${jogo.nosso_time} x ${jogo.adversario}`
+                ? `${jogo.data_jogo} · ${jogo.nosso_time} x ${jogo.adversario}`
                 : ('Jogo #' + jogoId);
             fecharEscolherJogo();
             atualizarJogadoresCriadorOdd();
         }
-
         function escaparHtmlCriadorOdd(s) {
             return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
                 '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
             }[c]));
         }
-
         function atualizarCamposCriadorOdd() {
             const mercado = MERCADOS_CRIADOR_ODD[document.getElementById('criador-odd-mercado').value];
             document.getElementById('campo-criador-odd-jogador').style.display = mercado.jogador ? 'block' : 'none';
             document.getElementById('campo-criador-odd-linha').style.display = mercado.modo === 'linha' ? 'block' : 'none';
-
             const selectDirecao = document.getElementById('criador-odd-direcao');
             if (mercado.modo === 'binario') {
                 selectDirecao.innerHTML = '<option value="sim">Sim</option><option value="não">Não</option>';
@@ -4240,10 +4065,8 @@ PAGINA_ROI = """
             } else {
                 selectDirecao.innerHTML = '<option value="mais">Mais de</option><option value="menos">Menos de</option>';
             }
-
             if (mercado.jogador) atualizarJogadoresCriadorOdd();
         }
-
         function atualizarJogadoresCriadorOdd() {
             const mercado = MERCADOS_CRIADOR_ODD[document.getElementById('criador-odd-mercado').value];
             if (!mercado.jogador) return;
@@ -4261,13 +4084,9 @@ PAGINA_ROI = """
                         || '<option value="">Nenhum jogador com dado nesse jogo ainda</option>';
                 });
         }
-
         function adicionarPernaCriadorOdd() {
             const jogoId = document.getElementById('criador-odd-jogo').value;
-            if (!jogoId) {
-                alert('Escolhe um jogo primeiro.');
-                return;
-            }
+            if (!jogoId) { alert('Escolhe um jogo primeiro.'); return; }
             const jogoInfo = JOGOS_CRIADOR_ODD.find(j => String(j.id) === String(jogoId));
             const tipoPadrao = document.getElementById('criador-odd-mercado').value;
             const mercado = MERCADOS_CRIADOR_ODD[tipoPadrao];
@@ -4276,16 +4095,8 @@ PAGINA_ROI = """
             const selectJogador = document.getElementById('criador-odd-jogador');
             const jogadorId = mercado.jogador ? parseInt(selectJogador.value) : null;
             const jogadorNome = mercado.jogador ? selectJogador.options[selectJogador.selectedIndex].text : null;
-
-            if (mercado.modo === 'linha' && !linha) {
-                alert('Preenche a linha (ex: 3.5).');
-                return;
-            }
-            if (mercado.jogador && !jogadorId) {
-                alert('Escolhe um jogador.');
-                return;
-            }
-
+            if (mercado.modo === 'linha' && !linha) { alert('Preenche a linha (ex: 3.5).'); return; }
+            if (mercado.jogador && !jogadorId) { alert('Escolhe um jogador.'); return; }
             let descricao;
             if (mercado.modo === 'binario') {
                 descricao = `${mercado.label} - ${direcao === 'sim' ? 'Sim' : 'Não'} - ${jogadorNome}`;
@@ -4296,7 +4107,6 @@ PAGINA_ROI = """
                 const rotuloDirecao = direcao === 'mais' ? 'Mais de' : 'Menos de';
                 descricao = `${mercado.label} - ${rotuloDirecao} ${linha}` + (jogadorNome ? ` - ${jogadorNome}` : '');
             }
-
             pernasCriadorOdd.push({
                 jogo_id: parseInt(jogoId),
                 jogador_id: jogadorId,
@@ -4308,31 +4118,25 @@ PAGINA_ROI = """
             });
             renderizarPernasCriadorOdd();
         }
-
         function removerPernaCriadorOdd(indice) {
             pernasCriadorOdd.splice(indice, 1);
             renderizarPernasCriadorOdd();
         }
-
         function renderizarPernasCriadorOdd() {
             const container = document.getElementById('criador-odd-pernas-lista');
             container.innerHTML = pernasCriadorOdd.map((p, i) =>
                 `<div class="perna-adicionada-item">
-                    <span>${p.descricao}</span>
-                    <span class="perna-adicionada-remover" onclick="removerPernaCriadorOdd(${i})">✕ remover</span>
+                    <span>${escaparHtmlCriadorOdd(p.descricao)}</span>
+                    <span class="perna-adicionada-remover" onclick="removerPernaCriadorOdd(${i})">remover</span>
                 </div>`
             ).join('');
             document.getElementById('btn-salvar-criador-odd').disabled = pernasCriadorOdd.length === 0;
         }
-
         function salvarCriadorOdd() {
             if (pernasCriadorOdd.length === 0) return;
             const valor = document.getElementById('criador-odd-valor').value;
             const odd = document.getElementById('criador-odd-odd').value;
-            if (!valor || !odd) {
-                alert('Preenche o valor apostado e a odd.');
-                return;
-            }
+            if (!valor || !odd) { alert('Preenche o valor apostado e a odd.'); return; }
             document.getElementById('campo-criador-odd-descricao').value = pernasCriadorOdd.map(p => p.descricao).join(' + ');
             document.getElementById('campo-criador-odd-pernas').value = JSON.stringify(pernasCriadorOdd);
             document.getElementById('campo-criador-odd-valor').value = valor;
@@ -4341,15 +4145,15 @@ PAGINA_ROI = """
         }
     </script>
 </head>
-<body>
-    <h1>💰 Minhas Apostas</h1>
-    <p class="subtitulo">Só o que você salvou com valor apostado - não inclui recomendações não salvas</p>
+<body class="{{ 'tema-neg' if resumo.roi < 0 else ('tema-pos' if resumo.roi > 0 else '') }}">
+""" + FUNDO_VISUAL_NOVO + """    {% macro reais(v, sinal=false) %}{% set x = (v or 0)|float %}{{ ('+' if sinal and x > 0 else ('−' if x < 0 else '')) }}R$ {{ ('%.2f'|format(x|abs)).replace('.', ',') }}{% endmacro %}
+    {% macro dec(v, casas=1) %}{{ (('%.' ~ casas ~ 'f')|format((v or 0)|float)).replace('.', ',') }}{% endmacro %}
+    {% macro quando(d) %}{% if d is string %}{{ d[8:10] }}/{{ d[5:7] }}/{{ d[2:4] }} {{ d[11:16] }}{% elif d %}{{ d.strftime('%d/%m/%y %H:%M') }}{% endif %}{% endmacro %}
 
-    <div class="modal-overlay" id="modal-criador-odd">
-        <div class="modal-caixa">
-            <h2>💡 Criador de Odd</h2>
-            <p class="modal-sub">Apostou fora do app? Monta aqui, perna por perna, e salva - entra no seu ROI normalmente.</p>
-
+    <div class="modal-overlay" id="modal-criador-odd" onclick="if (event.target === this) fecharCriadorOdd()">
+        <div class="modal-caixa" role="dialog" aria-modal="true" aria-labelledby="t-criador">
+            <h2 id="t-criador">Criador de Odd</h2>
+            <p class="modal-sub">Apostou fora do app? Monte aqui, perna por perna, e salve: entra no seu ROI normalmente.</p>
             <div class="modal-campo">
                 <label>Jogo</label>
                 <div class="jogo-escolhido-box">
@@ -4359,38 +4163,35 @@ PAGINA_ROI = """
                 <input type="hidden" id="criador-odd-jogo">
             </div>
             <div class="modal-campo">
-                <label>Mercado</label>
+                <label for="criador-odd-mercado">Mercado</label>
                 <select id="criador-odd-mercado" onchange="atualizarCamposCriadorOdd()"></select>
             </div>
             <div class="modal-campo" id="campo-criador-odd-jogador">
-                <label>Jogador</label>
+                <label for="criador-odd-jogador">Jogador</label>
                 <select id="criador-odd-jogador"></select>
             </div>
             <div class="modal-linha-dupla">
                 <div class="modal-campo" id="campo-criador-odd-linha">
-                    <label>Linha</label>
+                    <label for="criador-odd-linha">Linha</label>
                     <input type="number" step="0.5" id="criador-odd-linha" placeholder="ex: 3.5">
                 </div>
                 <div class="modal-campo">
-                    <label>Direção</label>
+                    <label for="criador-odd-direcao">Direção</label>
                     <select id="criador-odd-direcao"></select>
                 </div>
             </div>
-            <button type="button" class="btn-adicionar-perna" onclick="adicionarPernaCriadorOdd()">+ Adicionar perna</button>
-
+            <button type="button" class="btn-adicionar-perna" onclick="adicionarPernaCriadorOdd()">Adicionar perna</button>
             <div class="pernas-adicionadas" id="criador-odd-pernas-lista"></div>
-
             <div class="modal-linha-dupla">
                 <div class="modal-campo">
-                    <label>Valor apostado (R$)</label>
+                    <label for="criador-odd-valor">Valor apostado (R$)</label>
                     <input type="number" step="0.01" min="0.01" id="criador-odd-valor">
                 </div>
                 <div class="modal-campo">
-                    <label>Odd final (a combinada, se for múltipla)</label>
+                    <label for="criador-odd-odd">Odd final (a combinada, se for múltipla)</label>
                     <input type="number" step="0.01" min="1.01" id="criador-odd-odd">
                 </div>
             </div>
-
             <form method="POST" action="/salvar-aposta" id="form-criador-odd">
                 <input type="hidden" name="descricao" id="campo-criador-odd-descricao">
                 <input type="hidden" name="casa_aposta" value="Anotado manualmente">
@@ -4399,19 +4200,17 @@ PAGINA_ROI = """
                 <input type="hidden" name="odd_combinada" id="campo-criador-odd-odd">
                 <input type="hidden" name="voltar" value="/minhas-apostas">
             </form>
-
             <div class="modal-botoes-finais">
                 <button type="button" class="btn-fechar-modal" onclick="fecharCriadorOdd()">Cancelar</button>
-                <button type="button" class="btn-salvar-odd" id="btn-salvar-criador-odd" onclick="salvarCriadorOdd()" disabled>💾 Salvar aposta</button>
+                <button type="button" class="btn-salvar-odd" id="btn-salvar-criador-odd" onclick="salvarCriadorOdd()" disabled>Salvar aposta</button>
             </div>
         </div>
     </div>
 
-    <div class="modal-overlay" id="modal-escolher-jogo" style="z-index: 1100;">
-        <div class="modal-caixa modal-caixa-jogos">
-            <h2>🗓️ Escolher jogo</h2>
-            <p class="modal-sub">Jogos da temporada atual, organizados por rodada. Clica numa rodada pra ver
-                os jogos dela.</p>
+    <div class="modal-overlay" id="modal-escolher-jogo" style="z-index: 1100;" onclick="if (event.target === this) fecharEscolherJogo()">
+        <div class="modal-caixa modal-caixa-jogos" role="dialog" aria-modal="true" aria-labelledby="t-escolher">
+            <h2 id="t-escolher">Escolher jogo</h2>
+            <p class="modal-sub">Jogos da temporada atual, por rodada. Clique numa rodada para ver os jogos dela.</p>
             <div class="lista-rodadas-jogo" id="lista-rodadas-jogo"></div>
             <div class="modal-botoes-finais">
                 <button type="button" class="btn-fechar-modal" onclick="fecharEscolherJogo()">Fechar</button>
@@ -4421,163 +4220,271 @@ PAGINA_ROI = """
 
     {{ nav_html|safe }}
 
-    {% with mensagens = get_flashed_messages(with_categories=true) %}
-        {% for categoria, texto in mensagens %}
-        <div class="flash flash-{{ categoria }}">{{ texto }}</div>
-        {% endfor %}
-    {% endwith %}
-
-    <div class="banca-box">
-        <div class="banca-topo">
-            <div>
-                <div class="banca-valor {{ 'retorno-positivo' if banca_atual >= 0 else 'retorno-negativo' }}">
-                    R$ {{ "%.2f"|format(banca_atual) }}
-                </div>
-                <div class="banca-label">🏦 Banca atual (dinheiro fictício, não real)</div>
-            </div>
-            <div class="banca-botoes">
-                <button type="button" class="btn-banca" onclick="alternarFormaBanca('deposito')">➕ Depositar</button>
-                <button type="button" class="btn-banca" onclick="alternarFormaBanca('resgate')">➖ Resgatar</button>
-            </div>
-        </div>
-        <form method="POST" action="/banca-movimento" class="banca-forma" id="forma-deposito">
-            <input type="hidden" name="tipo" value="deposito">
-            <input type="number" step="0.01" min="0.01" name="valor" placeholder="Valor a depositar (R$)" required>
-            <button type="submit" class="btn-banca btn-confirmar-deposito">Confirmar depósito</button>
-        </form>
-        <form method="POST" action="/banca-movimento" class="banca-forma" id="forma-resgate">
-            <input type="hidden" name="tipo" value="resgate">
-            <input type="number" step="0.01" min="0.01" name="valor" placeholder="Valor a resgatar (R$)" required>
-            <button type="submit" class="btn-banca btn-confirmar-resgate">Confirmar resgate</button>
-        </form>
-    </div>
-
-    <div class="criador-odd-box" onclick="abrirCriadorOdd()">
-        <div class="criador-odd-icone">💡</div>
-        <div>
-            <div class="criador-odd-titulo">Criador de Odd</div>
-            <div class="criador-odd-sub">Apostou fora do app (na Superbet, por exemplo)? Anota aqui pra entrar no seu ROI.</div>
-        </div>
-    </div>
-
-    {% if movimentos_banca %}
-    <div class="extrato-box">
-        <div class="extrato-titulo" onclick="alternarExtrato()">📜 Extrato da banca ({{ movimentos_banca|length }} últimos) - clique pra ver</div>
-        <div class="extrato-lista" id="extrato-lista">
-            {% for m in movimentos_banca %}
-            <div class="extrato-linha">
-                <span>{{ m.criado_em }} · {{ {"deposito": "➕ Depósito", "resgate": "➖ Resgate",
-                    "aposta": "🎯 Aposta salva", "retorno": "🏆 Retorno (aposta ganha)",
-                    "cancelamento": "↩️ Cancelamento"}.get(m.tipo, m.tipo) }}</span>
-                <span>
-                    <b class="{{ 'retorno-positivo' if m.valor >= 0 else 'retorno-negativo' }}">
-                        {{ "+" if m.valor >= 0 else "" }}R$ {{ "%.2f"|format(m.valor) }}</b>
-                    &nbsp;→&nbsp; saldo R$ {{ "%.2f"|format(m.saldo_apos) }}
-                </span>
-            </div>
+    <main class="conteudo">
+        {% with mensagens = get_flashed_messages(with_categories=true) %}
+            {% for categoria, texto in mensagens %}
+            <div class="flash flash-{{ categoria }}">{{ texto }}</div>
             {% endfor %}
-        </div>
-    </div>
-    {% endif %}
+        {% endwith %}
 
+        <header class="cabeca">
+            <h1>Minhas apostas</h1>
+            <p>Só o que você salvou com valor apostado. Recomendação não salva não entra aqui.</p>
+        </header>
 
-    <div class="resumo-grid">
-        <div class="resumo-card">
-            <div class="resumo-numero">R$ {{ resumo.total_apostado }}</div>
-            <div class="resumo-label">Total apostado</div>
+        <div class="topo-grade">
+            <section class="vidro banca-box" aria-label="Banca">
+                <div>
+                    <span class="rotulo">Banca atual</span>
+                    <div class="banca-valor {{ 'pos' if banca_atual >= 0 else 'neg' }}"><small>R$</small>{{ ('%.2f'|format(banca_atual|abs)).replace('.', ',') }}</div>
+                    <div class="banca-nota">Dinheiro fictício, não real.</div>
+                </div>
+                <div class="banca-botoes">
+                    <button type="button" onclick="alternarFormaBanca('deposito')">Depositar</button>
+                    <button type="button" class="btn-contorno" onclick="alternarFormaBanca('resgate')">Resgatar</button>
+                </div>
+                <form method="POST" action="/banca-movimento" class="banca-forma" id="forma-deposito">
+                    <input type="hidden" name="tipo" value="deposito">
+                    <input type="number" step="0.01" min="0.01" name="valor" placeholder="Valor a depositar (R$)" required>
+                    <button type="submit" class="btn-confirmar-deposito">Confirmar</button>
+                </form>
+                <form method="POST" action="/banca-movimento" class="banca-forma" id="forma-resgate">
+                    <input type="hidden" name="tipo" value="resgate">
+                    <input type="number" step="0.01" min="0.01" name="valor" placeholder="Valor a resgatar (R$)" required>
+                    <button type="submit" class="btn-contorno btn-confirmar-resgate">Confirmar</button>
+                </form>
+            </section>
+
+            <section class="numeros" aria-label="Resumo">
+                <div class="vidro numero" id="cartao-roi">
+                    <span class="rotulo">ROI</span>
+                    <b>{{ '+' if resumo.roi > 0 else '' }}{{ dec(resumo.roi, 2) }}%</b>
+                    <span class="det">só das apostas já resolvidas</span>
+                </div>
+                <div class="vidro numero">
+                    <span class="rotulo">Taxa de acerto</span>
+                    <b>{{ dec(resumo.taxa_acerto, 1) }}%</b>
+                </div>
+                <div class="vidro numero">
+                    <span class="rotulo">Retorno</span>
+                    <b class="{{ 'pos' if resumo.retorno_total >= 0 else 'neg' }}">{{ reais(resumo.retorno_total, true) }}</b>
+                    <span class="det">lucro ou prejuízo</span>
+                </div>
+                <div class="vidro numero">
+                    <span class="rotulo">Total apostado</span>
+                    <b>{{ reais(resumo.total_apostado) }}</b>
+                </div>
+                <div class="vidro numero">
+                    <span class="rotulo">Apostas salvas</span>
+                    <b>{{ resumo.total_apostas }}</b>
+                </div>
+            </section>
         </div>
-        <div class="resumo-card">
-            <div class="resumo-numero {{ 'retorno-positivo' if resumo.retorno_total >= 0 else 'retorno-negativo' }}">
-                R$ {{ resumo.retorno_total }}
+
+        {% if pontos_grafico|length > 1 %}
+        {% set serie = [] %}{% for rot, v in pontos_grafico %}{% set _ = serie.append([rot if rot is string else rot.strftime('%d/%m %H:%M'), v|float]) %}{% endfor %}
+        <section class="vidro grafico-box" aria-labelledby="t-grafico">
+            <div class="grafico-topo">
+                <h3 id="t-grafico">Retorno acumulado</h3>
+                <span>{{ pontos_grafico|length - 1 }} apostas resolvidas, da mais antiga para a mais nova</span>
             </div>
-            <div class="resumo-label">Retorno (lucro/prejuízo)</div>
-        </div>
-        <div class="resumo-card">
-            <div class="resumo-numero {{ 'retorno-positivo' if resumo.roi >= 0 else 'retorno-negativo' }}">
-                {{ resumo.roi }}%
-            </div>
-            <div class="resumo-label">ROI</div>
-        </div>
-        <div class="resumo-card">
-            <div class="resumo-numero">{{ resumo.taxa_acerto }}%</div>
-            <div class="resumo-label">Taxa de acerto</div>
-        </div>
-        <div class="resumo-card">
-            <div class="resumo-numero">{{ resumo.total_apostas }}</div>
-            <div class="resumo-label">Apostas salvas</div>
-        </div>
-    </div>
+            <div id="grafico" role="img" aria-label="Retorno acumulado: {{ reais(serie[-1][1], true) }} na última aposta resolvida"><div class="dica" id="grafico-dica"></div></div>
+            <script>window.SERIE_RETORNO = {{ serie|tojson }};</script>
+        </section>
+        {% endif %}
 
-    {% if pontos_grafico|length > 1 %}
-    <div class="grafico-box">
-        <div class="grafico-titulo">Retorno acumulado ao longo do tempo</div>
-        {{ svg_grafico|safe }}
-    </div>
-    {% endif %}
-
-    {% if apostas %}
-        {% for a in apostas %}
-        <div class="cartao">
-            <div class="cartao-topo">
-                <span>{{ a.criado_em }}</span>
-                <span class="badge badge-{{ a.resultado }}">{{ a.resultado }}</span>
-            </div>
-            <div class="descricao">{{ a.descricao }}</div>
-            {% if a.jogos_label %}
-            <div class="jogos-label">🏟️ {{ a.jogos_label }}</div>
+        <div class="faixa-acoes">
+            <section class="vidro criador-odd-box" aria-label="Criador de Odd">
+                <div>
+                    <div class="criador-odd-titulo">Criador de Odd</div>
+                    <div class="criador-odd-sub">Apostou fora do app (na casa, por exemplo)? Anote aqui para entrar no seu ROI.</div>
+                </div>
+                <button type="button" onclick="abrirCriadorOdd()">Anotar aposta</button>
+            </section>
+            {% if movimentos_banca %}
+            <section class="vidro extrato-box" id="extrato-box">
+                <button type="button" class="extrato-titulo" onclick="alternarExtrato()">
+                    <span>Extrato da banca <small>últimos {{ movimentos_banca|length }} movimentos</small></span>
+                    <span class="seta" aria-hidden="true"></span>
+                </button>
+                <div class="extrato-lista" id="extrato-lista">
+                    {% for m in movimentos_banca %}
+                    <div class="extrato-linha">
+                        <span><span class="quando">{{ quando(m.criado_em) }}</span>{{ {"deposito": "Depósito", "resgate": "Resgate", "aposta": "Aposta salva", "retorno": "Retorno (aposta ganha)", "cancelamento": "Cancelamento"}.get(m.tipo, m.tipo) }}</span>
+                        <b class="{{ 'pos' if m.valor|float >= 0 else 'neg' }}">{{ reais(m.valor, true) }}</b>
+                        <span class="saldo">saldo {{ reais(m.saldo_apos) }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
             {% endif %}
-            <div class="metricas">
-                <span>{{ a.casa_aposta }}</span>
-                <span>Odd: <b>{{ a.odd_combinada }}</b></span>
-                <span>Apostado: <b>R$ {{ a.valor_apostado }}</b></span>
-                {% if a.retorno is not none %}
-                <span>Retorno: <b class="{{ 'retorno-positivo' if a.retorno >= 0 else 'retorno-negativo' }}">
-                    R$ {{ a.retorno }}</b></span>
+        </div>
+
+        <section class="secao" aria-labelledby="t-apostas">
+            {% set n_ac = apostas|selectattr('resultado', 'equalto', 'acertou')|list|length %}
+            {% set n_er = apostas|selectattr('resultado', 'equalto', 'errou')|list|length %}
+            {% set n_pe = apostas|selectattr('resultado', 'equalto', 'pendente')|list|length %}
+            <div class="lista-topo">
+                <h2 class="secao-titulo" id="t-apostas">Apostas salvas</h2>
+                {% if apostas %}
+                <div class="filtros" role="group" aria-label="Filtrar por resultado">
+                    <button type="button" class="ativo" data-filtro="todas" onclick="filtrarApostas('todas')">Todas<small>{{ apostas|length }}</small></button>
+                    <button type="button" data-filtro="acertou" onclick="filtrarApostas('acertou')">Acertou<small>{{ n_ac }}</small></button>
+                    <button type="button" data-filtro="errou" onclick="filtrarApostas('errou')">Errou<small>{{ n_er }}</small></button>
+                    <button type="button" data-filtro="pendente" onclick="filtrarApostas('pendente')">Pendente<small>{{ n_pe }}</small></button>
+                </div>
                 {% endif %}
             </div>
-            {% if a.resultado == 'pendente' %}
-            <form method="POST" action="/cancelar-aposta" class="salvar-linha">
-                <input type="hidden" name="aposta_id" value="{{ a.id }}">
-                <button type="submit" class="btn-cancelar">❌ Cancelar aposta</button>
-            </form>
+            {% if apostas %}
+            <div class="apostas" id="lista-apostas">
+                {% for a in apostas %}
+                <article class="vidro cartao r-{{ a.resultado }}" data-resultado="{{ a.resultado }}">
+                    <div class="cartao-topo">
+                        <span class="quando">{{ quando(a.criado_em) }}</span>
+                        <span class="selo selo-{{ a.resultado }}">{{ a.resultado }}</span>
+                    </div>
+                    {% if a.jogos_label %}<div class="jogos-label">{{ a.jogos_label }}</div>{% endif %}
+                    <div class="descricao">{{ a.descricao }}</div>
+                    <div class="metricas">
+                        <span>Odd<b>{{ dec(a.odd_combinada, 2) }}</b></span>
+                        <span>Apostado<b>{{ reais(a.valor_apostado) }}</b></span>
+                        <span>Retorno{% if a.retorno is not none %}<b class="{{ 'pos' if a.retorno|float >= 0 else 'neg' }}">{{ reais(a.retorno, true) }}</b>{% else %}<b>-</b>{% endif %}</span>
+                    </div>
+                    <div class="casa">{{ a.casa_aposta }}</div>
+                    {% if a.resultado == 'pendente' %}
+                    <form method="POST" action="/cancelar-aposta" class="salvar-linha">
+                        <input type="hidden" name="aposta_id" value="{{ a.id }}">
+                        <button type="submit" class="btn-pequeno btn-cancelar">Cancelar aposta</button>
+                    </form>
+                    {% else %}
+                    <div class="salvar-linha">
+                        <button type="button" class="btn-pequeno btn-corrigir"
+                                onclick="document.getElementById('painel-corrigir-{{ a.id }}').classList.toggle('aberto')">Corrigir manualmente</button>
+                    </div>
+                    <div class="painel-corrigir" id="painel-corrigir-{{ a.id }}">
+                        <form method="POST" action="/corrigir-aposta-manual"
+                              onsubmit="return confirm('Cancelar esta aposta? A linha vai desaparecer e a banca será ajustada de volta como se ela nunca tivesse existido.');">
+                            <input type="hidden" name="aposta_id" value="{{ a.id }}">
+                            <input type="hidden" name="acao" value="cancelar">
+                            <button type="submit" class="btn-corrigir-opcao btn-corrigir-cancelar">Cancelar aposta</button>
+                        </form>
+                        <form method="POST" action="/corrigir-aposta-manual"
+                              onsubmit="return confirm('Marcar esta aposta como ACERTOU? A banca será ajustada pro novo resultado.');">
+                            <input type="hidden" name="aposta_id" value="{{ a.id }}">
+                            <input type="hidden" name="acao" value="acertou">
+                            <button type="submit" class="btn-corrigir-opcao btn-corrigir-acertou">Deu certo</button>
+                        </form>
+                        <form method="POST" action="/corrigir-aposta-manual"
+                              onsubmit="return confirm('Marcar esta aposta como ERROU? A banca será ajustada pro novo resultado.');">
+                            <input type="hidden" name="aposta_id" value="{{ a.id }}">
+                            <input type="hidden" name="acao" value="errou">
+                            <button type="submit" class="btn-corrigir-opcao btn-corrigir-errou">Deu errado</button>
+                        </form>
+                    </div>
+                    {% if a.resolvido_manualmente %}
+                    <div class="tag-manual">Corrigido manualmente: não é reavaliado automaticamente.</div>
+                    {% endif %}
+                    {% endif %}
+                </article>
+                {% endfor %}
+            </div>
+            <div class="vazio" id="filtro-vazio" hidden>Nenhuma aposta com esse resultado.</div>
             {% else %}
-            <div class="salvar-linha">
-                <button type="button" class="btn-corrigir"
-                        onclick="document.getElementById('painel-corrigir-{{ a.id }}').classList.toggle('aberto')">
-                    🔧 Corrigir manualmente
-                </button>
-            </div>
-            <div class="painel-corrigir" id="painel-corrigir-{{ a.id }}">
-                <form method="POST" action="/corrigir-aposta-manual"
-                      onsubmit="return confirm('Cancelar esta aposta? A linha vai desaparecer e a banca será ajustada de volta como se ela nunca tivesse existido.');">
-                    <input type="hidden" name="aposta_id" value="{{ a.id }}">
-                    <input type="hidden" name="acao" value="cancelar">
-                    <button type="submit" class="btn-corrigir-opcao btn-corrigir-cancelar">🗑️ Cancelar aposta</button>
-                </form>
-                <form method="POST" action="/corrigir-aposta-manual"
-                      onsubmit="return confirm('Marcar esta aposta como ACERTOU? A banca será ajustada pro novo resultado.');">
-                    <input type="hidden" name="aposta_id" value="{{ a.id }}">
-                    <input type="hidden" name="acao" value="acertou">
-                    <button type="submit" class="btn-corrigir-opcao btn-corrigir-acertou">✅ Aposta deu certo</button>
-                </form>
-                <form method="POST" action="/corrigir-aposta-manual"
-                      onsubmit="return confirm('Marcar esta aposta como ERROU? A banca será ajustada pro novo resultado.');">
-                    <input type="hidden" name="aposta_id" value="{{ a.id }}">
-                    <input type="hidden" name="acao" value="errou">
-                    <button type="submit" class="btn-corrigir-opcao btn-corrigir-errou">❌ Aposta deu errado</button>
-                </form>
-            </div>
-            {% if a.resolvido_manualmente %}
-            <div class="tag-manual">🔧 corrigido manualmente - imune à reavaliação automática</div>
+            <div class="vazio">Você ainda não salvou nenhuma aposta. Use o botão "Salvar" nas recomendações, ou o Criador de Odd acima, para começar a acompanhar seu ROI.</div>
             {% endif %}
-            {% endif %}
-        </div>
-        {% endfor %}
-    {% else %}
-        <div class="vazio">Você ainda não salvou nenhuma aposta. Use o botão "💾 Salvar" nas
-        recomendações da página principal ou do histórico pra começar a acompanhar seu ROI.</div>
-    {% endif %}
-</body>
+        </section>
+    </main>
+
+    <script>
+        function filtrarApostas(filtro) {
+            let n = 0;
+            document.querySelectorAll('#lista-apostas .cartao').forEach(function (c) {
+                const mostra = filtro === 'todas' || c.dataset.resultado === filtro;
+                c.style.display = mostra ? '' : 'none';
+                if (mostra) n++;
+            });
+            document.querySelectorAll('.filtros button').forEach(function (b) { b.classList.toggle('ativo', b.dataset.filtro === filtro); });
+            const vazio = document.getElementById('filtro-vazio');
+            if (vazio) vazio.hidden = n > 0;
+        }
+
+        // gráfico do retorno acumulado, desenhado na largura real da caixa
+        (function () {
+            const serie = window.SERIE_RETORNO;
+            const caixa = document.getElementById('grafico');
+            if (!serie || !caixa) return;
+            const NS = 'http://www.w3.org/2000/svg';
+            const dica = document.getElementById('grafico-dica');
+            const brl = v => (v > 0 ? '+' : v < 0 ? '−' : '') + 'R$ ' + Math.abs(v).toFixed(2).replace('.', ',');
+            function el(nome, attrs, pai) {
+                const e = document.createElementNS(NS, nome);
+                for (const k in attrs) e.setAttribute(k, attrs[k]);
+                if (pai) pai.appendChild(e);
+                return e;
+            }
+            function desenhar() {
+                const antigo = caixa.querySelector('svg');
+                if (antigo) antigo.remove();
+                const L = caixa.clientWidth, A = caixa.clientHeight;
+                const esq = 56, dir = 12, cima = 12, baixo = 22;
+                const vals = serie.map(p => p[1]);
+                let min = Math.min(0, ...vals), max = Math.max(0, ...vals);
+                if (max === min) { max += 1; min -= 1; }
+                const folga = (max - min) * 0.12; max += folga; min -= folga;
+                const x = i => esq + i * (L - esq - dir) / Math.max(serie.length - 1, 1);
+                const y = v => cima + (max - v) * (A - cima - baixo) / (max - min);
+                const svg = el('svg', {viewBox: `0 0 ${L} ${A}`, 'aria-hidden': 'true'});
+                const final = vals[vals.length - 1];
+                const cor = final >= 0 ? 'var(--ouro)' : 'var(--azul-claro)';
+                const corHex = getComputedStyle(document.body).getPropertyValue(final >= 0 ? '--ouro' : '--azul-claro').trim() || '#ffd20a';
+                const defs = el('defs', {}, svg);
+                const grad = el('linearGradient', {id: 'grad-retorno', x1: 0, y1: 0, x2: 0, y2: 1}, defs);
+                el('stop', {offset: '0%', 'stop-color': corHex, 'stop-opacity': .28}, grad);
+                el('stop', {offset: '100%', 'stop-color': corHex, 'stop-opacity': 0}, grad);
+                // grade: 4 linhas com o valor em reais
+                for (let k = 0; k <= 3; k++) {
+                    const v = min + (max - min) * k / 3, yy = y(v);
+                    el('line', {x1: esq, x2: L - dir, y1: yy, y2: yy, stroke: 'rgba(255,255,255,.06)'}, svg);
+                    el('text', {x: esq - 8, y: yy + 3, 'text-anchor': 'end'}, svg).textContent = 'R$ ' + v.toFixed(2).replace('.', ',');
+                }
+                el('line', {x1: esq, x2: L - dir, y1: y(0), y2: y(0), stroke: 'rgba(180,200,242,.45)', 'stroke-dasharray': '4 4'}, svg);
+                const pts = serie.map((p, i) => [x(i), y(p[1])]);
+                const linha = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+                el('path', {d: linha + ` L${pts[pts.length - 1][0].toFixed(1)} ${y(min).toFixed(1)} L${pts[0][0].toFixed(1)} ${y(min).toFixed(1)} Z`, fill: 'url(#grad-retorno)'}, svg);
+                el('path', {d: linha, fill: 'none', stroke: cor, 'stroke-width': 2, 'stroke-linejoin': 'round'}, svg);
+                el('text', {x: esq, y: A - 4}, svg).textContent = serie[0][0];
+                el('text', {x: L - dir, y: A - 4, 'text-anchor': 'end'}, svg).textContent = serie[serie.length - 1][0];
+                const ponto = el('circle', {r: 4, fill: cor, stroke: '#01050f', 'stroke-width': 2, cx: pts[pts.length - 1][0], cy: pts[pts.length - 1][1]}, svg);
+                caixa.insertBefore(svg, dica);
+                svg.addEventListener('pointermove', function (ev) {
+                    const r = svg.getBoundingClientRect();
+                    const i = Math.max(0, Math.min(serie.length - 1, Math.round((ev.clientX - r.left - esq) / ((L - esq - dir) / Math.max(serie.length - 1, 1)))));
+                    ponto.setAttribute('cx', pts[i][0]); ponto.setAttribute('cy', pts[i][1]);
+                    dica.style.left = pts[i][0] + 'px'; dica.style.top = pts[i][1] + 'px';
+                    dica.textContent = serie[i][0] + ' · ' + brl(serie[i][1]);
+                    dica.style.opacity = 1;
+                });
+                svg.addEventListener('pointerleave', function () {
+                    dica.style.opacity = 0;
+                    ponto.setAttribute('cx', pts[pts.length - 1][0]); ponto.setAttribute('cy', pts[pts.length - 1][1]);
+                });
+            }
+            desenhar();
+            window.desenharGraficoRetorno = desenhar;
+            let t;
+            window.addEventListener('resize', function () { clearTimeout(t); t = setTimeout(desenhar, 120); });
+        })();
+    </script>
+    <script>
+        // cores do degradê vivo para esta página: as mesmas 6 do padrão (do
+        // mais escuro ao mais claro, mais as manchas de ouro), em verde ou vermelho
+        window.CORES_FUNDO_TEMAS = {
+            pos: [[.004, .03, .012], [.01, .13, .05], [.03, .3, .11], [.07, .48, .2], [.13, .6, .28], [.42, .3, .02]],
+            neg: [[.04, .004, .008], [.14, .012, .02], [.3, .03, .05], [.48, .07, .08], [.6, .13, .13], [.42, .3, .02]]
+        };
+        window.CORES_FUNDO = window.CORES_FUNDO_TEMAS[document.body.classList.contains('tema-neg') ? 'neg' : (document.body.classList.contains('tema-pos') ? 'pos' : '')] || null;
+    </script>
+""" + SCRIPT_FUNDO_VIVO + """</body>
 </html>
 """
 
@@ -5193,7 +5100,7 @@ def minhas_apostas():
         pontos_grafico=pontos_grafico, svg_grafico=svg_grafico,
         banca_atual=round(banca_atual, 2), movimentos_banca=movimentos_banca,
         jogos_criador_odd=rodadas_criador_odd,
-        nav_html=barra_navegacao("roi", round(banca_atual, 2)),
+        nav_html=barra_navegacao_nova("roi", round(banca_atual, 2)),
     )
 
 
