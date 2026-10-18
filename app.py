@@ -2265,7 +2265,8 @@ PAGINA_HISTORICO = """
                     <div class="legenda"><span><i class="leg-marca"></i>ponto de lucro (1 ÷ odd)</span><span><i class="leg-real"></i>aconteceu: em ouro quando passou do ponto</span></div>
                     <div class="calib-linhas calib-rolagem">
                         {% for item in calibracao_odd.detalhamento|sort(attribute='indice') %}
-                        {% set meio = ((item.inicio + item.fim) / 2) if item.fim else item.inicio %}
+                        {# inicio/fim chegam como texto ("1.80"); a conta usa o índice (18 = 1,80 a 1,90) #}
+                        {% set meio = ((item.indice + 0.5) / 10) if item.fim else (item.indice / 10) %}
                         {% set empate = 100 / meio if meio else 0 %}
                         <button type="button" class="faixa" onclick="abrirFaixaOdd({{ item.indice }})">
                             <span class="faixa-rot">{{ item.rotulo|replace('.', ',') }}</span>
