@@ -8173,14 +8173,24 @@ def buscar_ultimos_jogos_jogador(cur, jogador_id, limite=5):
     retângulo "🗓️ Últimos 5 jogos" de cada jogador em /clube/<id>."""
     cur.execute(
         """
-        SELECT j.id, j.data_jogo, j.adversario, j.mandante,
-               j.placar_corinthians, j.placar_adversario, t.nome
-        FROM jogador_estatisticas_jogo jeg
-        JOIN jogos j ON j.id = jeg.jogo_id
-        JOIN times t ON t.id = j.nosso_time_id
-        WHERE jeg.jogador_id = %s
-          AND j.placar_corinthians IS NOT NULL AND j.placar_adversario IS NOT NULL
-        ORDER BY j.data_jogo DESC
+        SELECT id, data_jogo, adversario, mandante,
+               placar_corinthians, placar_adversario, nome
+        FROM (
+            -- Um jogo real tem DUAS linhas em jogos (uma por perspectiva) e o
+            -- jogador aparece nas duas (1_ESSENCIAL §5.1): uma linha por
+            -- fixture, preferindo a perspectiva do time do jogador
+            -- (jeg.lado = mando real). Em anos antigos pode haver só a outra.
+            SELECT DISTINCT ON (j.fixture_id_api)
+                   j.id, j.data_jogo, j.adversario, j.mandante,
+                   j.placar_corinthians, j.placar_adversario, t.nome
+            FROM jogador_estatisticas_jogo jeg
+            JOIN jogos j ON j.id = jeg.jogo_id
+            JOIN times t ON t.id = j.nosso_time_id
+            WHERE jeg.jogador_id = %s
+              AND j.placar_corinthians IS NOT NULL AND j.placar_adversario IS NOT NULL
+            ORDER BY j.fixture_id_api, (j.mandante = (jeg.lado = 'mandante')) DESC
+        ) um_por_jogo
+        ORDER BY data_jogo DESC
         LIMIT %s
         """,
         (jogador_id, limite),

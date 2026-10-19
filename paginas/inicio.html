@@ -1,8 +1,12 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Achismo Zero · só o que os números dizem</title>
 <link rel="icon" href="/static/marca/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/static/marca/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/static/marca/apple-touch-icon.png">
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -395,6 +399,8 @@ dialog .botoes{display:flex;gap:0.625rem;justify-content:flex-end;flex-wrap:wrap
 .linha-tempo time{font-family:var(--f-dado);font-size:0.75rem;color:var(--laranja);letter-spacing:.04em}
 .linha-tempo b{display:block;font-size:0.9688rem;margin:2px 0 0.1875rem}
 .linha-tempo span{color:var(--apagado);font-size:0.8438rem}
+.linha-tempo time,.linha-tempo span{display:block}
+.linha-tempo span{line-height:1.33}
 .rodadas{border-radius:1.25rem;padding:1.25rem;background:var(--painel-solido);border:1px solid var(--linha);min-width:0}
 .rodadas .chart{width:100%;overflow-x:auto}
 .rodadas svg{display:block;width:100%;min-width:32.5rem;height:auto}
@@ -945,7 +951,39 @@ html.trava{overflow:hidden}
   .mq-confronto{flex-wrap:wrap}
 }
 
+
+/* ================= celular (19/10): marca embaixo, legenda abaixo dos botões ================= */
+@media (max-width:620px){
+  .chamada{display:block;top:auto;left:1.25rem;right:auto;width:max-content;max-width:calc(100% - 2.5rem);bottom:calc(5.5rem + env(safe-area-inset-bottom,0px))}
+  .chamada .marca{font-size:1.375rem;margin:0 0 0.375rem}
+  .chamada .slogan{font-size:0.8125rem;margin:-0.125rem 0 0.375rem}
+  .chamada .eyebrow{font-size:0.625rem}
+  .chamada::before{inset:-0.625rem -0.75rem;border-radius:0.875rem}
+  .legenda{font-size:0.6875rem;gap:0.625rem}
+  .legenda i{width:0.6875rem;height:0.6875rem}
+  .legenda::before{inset:-0.375rem -0.5rem;border-radius:0.625rem}
+  .chamada h1,.chamada p{display:none}
+  .legenda{top:calc(9.75rem + env(safe-area-inset-top,0px));left:1rem}
+  .times ol{grid-template-columns:minmax(0,1fr);gap:0.25rem}
+  .times li{display:flex;align-items:baseline;gap:0.5rem;padding:0.3125rem 0.625rem}
+  .times li .n{flex:1;min-width:0}
+  .times{padding:0.625rem 0.75rem}
+  .times .cab small{display:none}
+  .times li{padding:0.1875rem 0.5rem}
+  .times .entrar{margin-top:0.5rem;padding:0.5rem 0.875rem;font-size:0.8125rem}
+  .nav:not(.aberta) .grandes .rotulo{font-size:0.6875rem;text-align:center;width:100%}
+  .nav:not(.aberta) .grandes [aria-disabled="true"]{display:none}
+  .grandes{display:flex;width:calc(100% - 1rem)}
+  .nav:not(.aberta) .grandes .cartao-grande{padding:0.5rem 0.25rem;justify-content:center}
+  .nav:not(.aberta) .grandes .sub{display:none}
+  .nav.recolhida::before{content:"";position:fixed;left:0;right:0;top:0;height:calc(5rem + env(safe-area-inset-top,0px));background:linear-gradient(var(--noite) 40%,transparent);pointer-events:none;z-index:-1}
+}
+.rodadas .chart.estreito svg{min-width:0}
+.rodadas .chart.estreito .rot{font-size:0.5625rem}
+.rodadas .chart.estreito .rot-forte{font-size:0.6875rem}
 </style>
+</head>
+<body>
 
 <div class="fundo" aria-hidden="true"><canvas id="fundo-gl"></canvas><div class="grao"></div><div class="veu" id="veu"></div></div>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -996,7 +1034,7 @@ html.trava{overflow:hidden}
     <button class="descer" id="descer" type="button">Ver ligas disponíveis ↓</button>
     <div class="titulo-split" id="titulo-split">
       <h2>As 6 ligas que já têm análise</h2>
-      <p>Passe o mouse num país para ver os líderes da temporada. Clique para entrar.</p>
+      <p id="split-p">Passe o mouse num país para ver os líderes da temporada. Clique para entrar.</p>
     </div>
     <div class="camada" id="camada"></div>
     <div class="times vidro" id="times"></div>
@@ -1978,8 +2016,8 @@ function tempoRolagem() {
   const caixaChart = document.getElementById("chart");
   function desenhar() {
   const u = Math.max(1, (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16) / 16);
-  const W = Math.max(320, Math.round(caixaChart.clientWidth || 700)), H = Math.round(300 * u);
-  const m = { l: 40 * u, r: 12 * u, t: 16 * u, b: 62 * u }, iw = W - m.l - m.r, ih = H - m.t - m.b, max = 70;
+  const W = Math.max(240, Math.round(caixaChart.clientWidth || 700)), estr = W < 480, H = Math.round((estr ? 230 : 300) * u);
+  const m = { l: (estr ? 40 : 40) * u, r: (estr ? 4 : 12) * u, t: 16 * u, b: (estr ? 66 : 62) * u }, iw = W - m.l - m.r, ih = H - m.t - m.b, max = 70;
   const y = v => m.t + ih - v / max * ih, passo = iw / D.length, bw = Math.min(passo * .46, 64 * u);
   let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Acerto real e prometido por rodada">` +
     `<defs><pattern id="hachura" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="rgba(255,255,255,.04)"/><rect width="3" height="6" fill="var(--azul)"/></pattern></defs>`;
@@ -1989,10 +2027,12 @@ function tempoRolagem() {
     s += `<rect class="barra-r${d.sem ? " sem" : ""}" style="transition-delay:${i * 90}ms" x="${x.toFixed(1)}" y="${y(d.a).toFixed(1)}" width="${bw.toFixed(1)}" height="${(m.t + ih - y(d.a)).toFixed(1)}" rx="4"><title>Rodada ${d.r}: ${d.a.toString().replace(".", ",")}% de acerto, ${d.p.toString().replace(".", ",")}% prometido, ${d.n} apostas</title></rect>`;
     s += `<line class="prev" style="transition-delay:${400 + i * 90}ms" x1="${(x - 6 * u).toFixed(1)}" x2="${(x + bw + 6 * u).toFixed(1)}" y1="${y(d.p).toFixed(1)}" y2="${y(d.p).toFixed(1)}"/>`;
     s += `<text class="rot-forte" x="${cx}" y="${H - m.b + 20 * u}" text-anchor="middle">R${d.r}</text>`;
-    const roi = (d.roi > 0 ? "+" : "") + d.roi.toString().replace(".", ",") + "%";
+    const roi = (d.roi > 0 ? "+" : "") + d.roi.toString().replace(".", ",") + (estr ? "" : "%");
     s += `<text class="rot ${d.roi >= 0 ? "roi-pos" : "roi-neg"}" x="${cx}" y="${H - m.b + 38 * u}" text-anchor="middle">${roi}</text>`;
-    s += `<text class="rot" x="${cx}" y="${H - m.b + 54 * u}" text-anchor="middle">${d.a.toString().replace(".", ",")}%</text>`;
+    s += `<text class="rot" x="${cx}" y="${H - m.b + 54 * u}" text-anchor="middle">${d.a.toString().replace(".", ",")}${estr ? "" : "%"}</text>`;
   });
+  if (estr) s += `<text class="rot" x="0" y="${H - m.b + 38 * u}">ROI</text><text class="rot" x="0" y="${H - m.b + 54 * u}">acerto</text>`;
+  caixaChart.classList.toggle("estreito", estr);
   caixaChart.innerHTML = s + "</svg>";
   }
   desenhar();
@@ -2195,6 +2235,13 @@ if (globo) {
   ctrl.autoRotate = !reduz; ctrl.autoRotateSpeed = 0.32;
   ctrl.enableZoom = toque; ctrl.enablePan = false; ctrl.zoomSpeed = 0.8; ctrl.rotateSpeed = 0.55;
   ctrl.enableDamping = true; ctrl.dampingFactor = 0.08;
+  if (toque) {
+    try { globo.renderer().domElement.style.touchAction = "pan-y"; } catch (e) {}
+    const splitP = document.getElementById("split-p");
+    if (splitP) splitP.textContent = "Toque num país para ver os líderes da temporada. Toque de novo para entrar.";
+    const dicaToque = document.getElementById("dica");
+    if (dicaToque) dicaToque.innerHTML = "<b>Arraste de lado</b> para girar · <b>deslize para cima</b> para descer · <b>pinça</b> para aproximar";
+  }
   const POV0 = { lat: 8, lng: -30, altitude: 2.35 };
   globo.pointOfView(POV0, 0);
 
@@ -2247,7 +2294,7 @@ if (globo) {
     if (ativo === s) return;
     if (ativo) ativo.d.classList.remove("ativo");
     ativo = s;
-    if (!s) { timesBox.innerHTML = `<div class="vazio">Passe o mouse num país para ver os 5 primeiros da temporada.</div>`; return; }
+    if (!s) { timesBox.innerHTML = `<div class="vazio">${toque ? "Toque num país" : "Passe o mouse num país"} para ver os 5 primeiros da temporada.</div>`; return; }
     s.d.classList.add("ativo");
     const c = s.f.properties.c, dados = LIDERES[c];
     timesBox.innerHTML = `<div class="cab"><b>${esc(dados.t)}</b><small>líderes · pontos · jogos</small></div><ol>` +
@@ -2273,22 +2320,24 @@ if (globo) {
   let lay = null;
   function layout() {
     const w = palco.clientWidth, h = palco.clientHeight, estreito = w < 820;
-    const cols = w < 620 ? 2 : 3, rows = Math.ceil(sils.length / cols);
+    const cols = 3, rows = Math.ceil(sils.length / cols);
     let fator = w < 620 ? .72 : (estreito ? .85 : 1);
     const areaW = estreito ? w - 32 : Math.min(w * .58, 760 * K), x0Area = estreito ? 16 : Math.max(28, w * .04);
     const nomeH = Math.max(36 * K, (sils[0] && sils[0].nome.offsetHeight) || 0) + 8 * K;   // nome + país embaixo da silhueta
     tituloSplit.style.maxWidth = areaW + "px";
     // começa logo abaixo do título; se a grade + o painel de líderes não couberem na altura, encolhe
     const fimTitulo = tituloSplit.offsetTop + tituloSplit.offsetHeight;
-    const topo = estreito ? h * .25 : Math.max(h * .16, fimTitulo + 8 * K);
+    const celular = w < 620;
+    const topo = celular ? fimTitulo + 14 * K : (estreito ? h * .25 : Math.max(h * .16, fimTitulo + 8 * K));
     const alturaTimes = (timesBox.offsetHeight || 140 * K) + 16 * K;
     const precisa = (H + nomeH + 20 * K) * rows + 16 * K + alturaTimes;
     if (!estreito && topo + precisa * fator > h) fator = Math.max(.6, (h - topo - alturaTimes) / (precisa - alturaTimes));
+    if (celular) { const grade = (H + nomeH + 20 * K) * rows, cabe = (h - topo - 24 * K - alturaTimes) / grade; fator = Math.max(.38, Math.min(fator, cabe)); }
     const passoX = areaW / cols, passoY = (H + nomeH + 20 * K) * fator;
     const alvos = sils.map((_, i) => ({ x: x0Area + passoX * (i % cols + .5), y: topo + passoY * (Math.floor(i / cols) + .5), s: fator }));
     const fimY = topo + passoY * (rows - .5) + (H / 2 + nomeH) * fator + 16 * K;
     timesBox.style.left = x0Area + "px"; timesBox.style.top = fimY + "px"; timesBox.style.width = areaW + "px";
-    lay = { w, h, estreito, alvos, gx: estreito ? 0 : w * .3, gy: estreito ? -h * .28 : 0, gs: estreito ? .55 : .66 };
+    lay = { w, h, estreito, alvos, gx: estreito ? 0 : w * .3, gy: w < 620 ? -h * .44 : (estreito ? -h * .28 : 0), gs: estreito ? .55 : .66, apaga: w < 620 ? .9 : .55 };
   }
 
   function origem() {
@@ -2326,7 +2375,7 @@ if (globo) {
       redesenhar();
     }
     caixa.style.transform = `translate3d(${(lay.gx * g).toFixed(1)}px,${(lay.gy * g).toFixed(1)}px,0) scale(${(1 - (1 - lay.gs) * g).toFixed(4)})`;
-    caixa.style.opacity = (1 - 0.55 * g).toFixed(3);
+    caixa.style.opacity = (1 - lay.apaga * g).toFixed(3);
     veu.style.opacity = g.toFixed(3);
     const ui1 = (1 - suave(p / 0.08)).toFixed(3);
     ui.forEach(x => x && (x.style.opacity = ui1));
@@ -2558,3 +2607,5 @@ document.getElementById("testes-botao").addEventListener("click", () => {
   montar("recomendacoes");
 })();
 </script>
+</body>
+</html>
