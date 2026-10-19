@@ -707,6 +707,244 @@ html.trava{overflow:hidden}
   .nav{padding-top:calc(4rem + env(safe-area-inset-top,0px))}
   .nav-icone{top:calc(0.875rem + env(safe-area-inset-top,0px))}
 }
+/* ================= v16: tutorial das páginas (seção "Por dentro") ================= */
+.tour{padding-block:4.5rem 5rem}
+.tour .eyebrow-t{font-family:var(--f-dado);font-size:0.7188rem;letter-spacing:.16em;text-transform:uppercase;color:var(--laranja);margin-bottom:.5rem}
+.tour-abas{display:flex;gap:.375rem;flex-wrap:wrap;margin:0 0 1rem}
+.tour-aba{font-family:var(--f-corpo);font-size:.8125rem;font-weight:600;color:var(--apagado);background:rgba(255,255,255,.04);border:1px solid var(--linha);border-radius:999px;padding:.4375rem .9375rem;cursor:pointer;transition:color .15s,background .15s,border-color .15s}
+.tour-aba:hover:not(:disabled){color:var(--texto);border-color:rgba(180,200,242,.5)}
+.tour-aba[aria-selected="true"]{color:var(--cta-texto);background:var(--laranja);border-color:var(--laranja)}
+.tour-aba:disabled{opacity:.45;cursor:default}
+.tour-aba small{font-family:var(--f-dado);font-size:.5625rem;letter-spacing:.08em;text-transform:uppercase;margin-left:.375rem;opacity:.8}
+.tour-grade{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,19rem);gap:1.25rem;align-items:start}
+
+/* a "tela" da maquete: uma janela do app em miniatura */
+.tour-tela{position:relative;border-radius:1.125rem;border:1px solid var(--linha);overflow:hidden;
+  background:radial-gradient(70% 60% at 85% 0%,rgba(92,74,0,.35),transparent 70%),radial-gradient(60% 50% at 0% 0%,rgba(63,111,209,.28),transparent 70%),linear-gradient(180deg,#041233,#01050f);
+  box-shadow:0 1.5rem 3.5rem -1.5rem rgba(0,0,0,.8)}
+.tour-janela{display:flex;align-items:center;gap:.375rem;padding:.5rem .75rem;border-bottom:1px solid var(--linha);background:rgba(1,5,15,.6)}
+.tour-janela i{width:.5rem;height:.5rem;border-radius:50%;background:rgba(255,255,255,.18)}
+.tour-janela span{margin-left:.5rem;font-family:var(--f-dado);font-size:.625rem;color:var(--apagado)}
+.mq{padding:.875rem 1rem 1.125rem;font-size:.75rem;line-height:1.4;color:var(--texto)}
+.mq-topo{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.625rem}
+.mq-marca{font-family:var(--f-titulo);font-size:.75rem;font-weight:700}
+.mq-marca b{color:var(--laranja)}
+.mq-nav{display:flex;gap:.125rem;padding:.1875rem;border-radius:999px;border:1px solid var(--linha);background:rgba(255,255,255,.04)}
+.mq-nav span{font-size:.625rem;padding:.1875rem .5rem;border-radius:999px;color:var(--apagado);white-space:nowrap}
+.mq-nav span.ativo{background:rgba(255,210,10,.16);color:var(--laranja)}
+.mq-banca{font-family:var(--f-dado);font-size:.5625rem;color:var(--laranja);border:1px solid rgba(255,210,10,.4);border-radius:999px;padding:.1875rem .5rem;white-space:nowrap}
+.mq-ligas{display:flex;gap:.375rem;margin-bottom:.75rem}
+.mq-liga{flex:1;min-width:0;padding:.3125rem .5rem;border-radius:.5rem;border:1px solid var(--linha);font-size:.625rem;color:var(--apagado);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mq-liga.ativa{border-color:rgba(180,200,242,.6);background:rgba(63,111,209,.22);color:var(--texto)}
+.mq-liga small{display:block;font-family:var(--f-dado);font-size:.5rem;letter-spacing:.06em;text-transform:uppercase;color:var(--laranja)}
+.mq-liga:not(.ativa) small{color:var(--apagado)}
+.mq-caixa{border-radius:.75rem;border:1px solid rgba(255,255,255,.14);background:linear-gradient(140deg,rgba(255,255,255,.09),rgba(255,255,255,.025)),rgba(4,14,38,.45)}
+.mq-filtro{display:flex;align-items:flex-end;gap:.5rem;flex-wrap:wrap;padding:.625rem .75rem;margin-bottom:.875rem}
+.mq-campo{display:grid;gap:.1875rem}
+.mq-campo span{font-family:var(--f-dado);font-size:.5rem;letter-spacing:.08em;text-transform:uppercase;color:var(--apagado)}
+.mq-campo b{font-family:var(--f-dado);font-weight:500;font-size:.6875rem;padding:.25rem .5rem;min-width:3rem;border-radius:.375rem;border:1px solid var(--linha);background:rgba(1,5,15,.55)}
+.mq-botao{margin-left:auto;font-weight:600;font-size:.6875rem;color:var(--cta-texto);background:var(--laranja);border-radius:999px;padding:.375rem .75rem;white-space:nowrap}
+.mq-colunas{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.875rem;align-items:start}
+.mq-tit{font-weight:300;font-size:.9375rem;letter-spacing:-.02em;margin:0 0 .5rem}
+.mq-card{padding:.625rem .6875rem .6875rem;margin-bottom:.5rem}
+.mq-card-topo{display:flex;align-items:center;gap:.375rem;margin-bottom:.3125rem}
+.mq-jogo{flex:1;min-width:0;font-size:.5625rem;color:var(--apagado);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mq-jogo img{width:.75rem;height:.75rem;object-fit:contain;vertical-align:-.15rem;margin:0 .1875rem}
+.mq-casa{font-family:var(--f-dado);font-size:.4688rem;letter-spacing:.06em;text-transform:uppercase;color:var(--azul-claro);border:1px solid rgba(180,200,242,.3);background:rgba(63,111,209,.18);border-radius:999px;padding:.0625rem .375rem;white-space:nowrap}
+.mq-odd{font-family:var(--f-dado);font-weight:600;font-size:.6875rem;color:var(--laranja);border:1px solid rgba(255,210,10,.45);background:rgba(255,210,10,.1);border-radius:.3125rem;padding:.0625rem .375rem;white-space:nowrap}
+.mq-desc{font-size:.6875rem;font-weight:500;margin-bottom:.3125rem}
+.mq-met{display:flex;gap:.75rem;flex-wrap:wrap;font-size:.5625rem;color:var(--apagado)}
+.mq-met b{font-family:var(--f-dado);font-weight:500;color:var(--texto)}
+.mq-salvar{display:flex;gap:.3125rem;margin-top:.4375rem;padding-top:.4375rem;border-top:1px solid rgba(255,255,255,.07)}
+.mq-salvar span{font-size:.5625rem;color:var(--apagado);border:1px solid var(--linha);border-radius:.3125rem;padding:.1875rem .375rem;width:4rem;background:rgba(1,5,15,.5)}
+.mq-salvar b{font-size:.5625rem;font-weight:600;color:#fff;background:var(--azul);border-radius:999px;padding:.1875rem .5rem}
+.mq-pernas{display:grid;gap:.1875rem;margin:.0625rem 0 .3125rem}
+.mq-pernas span{font-size:.625rem;padding-left:.5rem;border-left:2px solid rgba(255,210,10,.5)}
+.mq-jogos{margin-top:.375rem}
+.mq-linha-jogo{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.4375rem .6875rem;font-size:.6875rem;font-weight:600}
+.mq-linha-jogo img{width:.875rem;height:.875rem;object-fit:contain;vertical-align:-.2rem;margin:0 .25rem}
+.mq-linha-jogo small{font-family:var(--f-dado);font-size:.5rem;color:var(--azul-claro);border:1px solid rgba(180,200,242,.3);border-radius:999px;padding:.0625rem .375rem;font-weight:400}
+
+/* partes explicáveis e o balão */
+[data-passo]{position:relative;border-radius:.5rem;transition:box-shadow .2s,background .2s;cursor:help;outline:none}
+[data-passo]::after{content:attr(data-num);position:absolute;top:-.4375rem;right:-.4375rem;z-index:3;width:1.125rem;height:1.125rem;border-radius:50%;display:grid;place-items:center;
+  font-family:var(--f-dado);font-size:.5625rem;font-weight:600;color:var(--cta-texto);background:var(--laranja);box-shadow:0 0 0 0 rgba(255,210,10,.6);animation:tour-pulso 2.2s ease-in-out infinite}
+[data-passo].aceso{box-shadow:0 0 0 2px var(--laranja),0 0 1.75rem -.25rem rgba(255,210,10,.55);background-color:rgba(255,210,10,.04);z-index:2}
+[data-passo].aceso::after{animation:none}
+/* número da parte: nos blocos, no canto de fora; nas partes pequenas (odd, chance,
+   valor esperado, salvar), logo depois delas na mesma linha, sem cobrir texto */
+[data-passo][data-dentro]::after{position:static;display:inline-grid;vertical-align:middle;margin-left:.375rem;width:1rem;height:1rem;font-size:.5rem;flex-shrink:0}
+.mq-met [data-passo]{padding:.125rem .3125rem;margin:-.125rem -.3125rem;display:inline-flex;align-items:center;gap:.25rem}
+.mq-met [data-passo][data-dentro]::after{margin-left:.125rem}
+.mq-card[data-passo]::after{right:auto;left:-.5625rem}
+.mq-salvar[data-passo]{align-items:center}
+.mq-card{margin-bottom:.625rem}
+.mq-lista-jogos{display:grid;gap:.375rem}
+.mq-linha-jogo em{font-style:normal;font-family:var(--f-dado);font-weight:400;font-size:.5625rem;color:var(--apagado);margin-left:.375rem}
+.mq-tit.mq-jogos{margin-top:.75rem}
+.tour-tela.focando [data-passo]:not(.aceso){opacity:.55;transition:opacity .25s}
+@keyframes tour-pulso{0%,100%{box-shadow:0 0 0 0 rgba(255,210,10,.55)}50%{box-shadow:0 0 0 .375rem rgba(255,210,10,0)}}
+.tour-balao{position:absolute;z-index:5;width:min(17rem,calc(100% - 1.5rem));padding:.75rem .875rem .8125rem;border-radius:.75rem;pointer-events:none;
+  background:linear-gradient(140deg,rgba(255,255,255,.14),rgba(255,255,255,.05)),#081a44;border:1px solid rgba(255,210,10,.55);box-shadow:0 1rem 2.5rem -.75rem rgba(0,0,0,.85);
+  opacity:0;transform:translateY(.375rem);transition:opacity .18s,transform .18s}
+.tour-balao.mostra{opacity:1;transform:none}
+.tour-balao .bn{font-family:var(--f-dado);font-size:.5625rem;letter-spacing:.1em;text-transform:uppercase;color:var(--laranja)}
+.tour-balao h4{margin:.1875rem 0 .25rem;font-size:.875rem;line-height:1.25}
+.tour-balao p{margin:0;font-size:.75rem;line-height:1.5;color:#d6dbea}
+
+/* lista de passos ao lado */
+.tour-lado{padding:1rem 1rem 1.125rem;position:sticky;top:5.5rem}
+.tour-lado h3{margin:0 0 .25rem;font-family:var(--f-titulo);font-size:.9375rem;font-weight:500}
+.tour-lado .dica-t{margin:0 0 .75rem;font-size:.75rem;color:var(--apagado);line-height:1.5}
+.tour-passos{list-style:none;margin:0 0 .875rem;padding:0;display:grid;gap:.25rem}
+.tour-passos button{width:100%;display:grid;grid-template-columns:1.375rem minmax(0,1fr);gap:.5rem;align-items:start;text-align:left;padding:.4375rem .5rem;border-radius:.5rem;border:1px solid transparent;background:none;color:var(--texto);font:inherit;font-size:.8125rem;cursor:pointer;transition:background .15s,border-color .15s}
+.tour-passos button:hover{background:rgba(255,255,255,.05)}
+.tour-passos button i{font-style:normal;width:1.375rem;height:1.375rem;border-radius:50%;display:grid;place-items:center;font-family:var(--f-dado);font-size:.625rem;font-weight:600;border:1px solid rgba(255,210,10,.5);color:var(--laranja)}
+.tour-passos button.ativo{background:rgba(255,210,10,.08);border-color:rgba(255,210,10,.35)}
+.tour-passos button.ativo i{background:var(--laranja);color:var(--cta-texto)}
+.tour-controles{display:flex;gap:.375rem;align-items:center}
+.tour-controles button{font:inherit;font-size:.75rem;font-weight:600;border-radius:999px;padding:.4375rem .875rem;cursor:pointer;border:1px solid var(--linha);background:rgba(255,255,255,.05);color:var(--texto)}
+.tour-controles button.primario{background:var(--laranja);color:var(--cta-texto);border-color:var(--laranja)}
+.tour-controles button:hover{border-color:rgba(180,200,242,.55)}
+.tour-controles .cont{margin-left:auto;font-family:var(--f-dado);font-size:.6875rem;color:var(--apagado)}
+.tour-aviso{margin:.875rem 0 0;font-family:var(--f-dado);font-size:.625rem;letter-spacing:.06em;color:var(--apagado)}
+
+@media (max-width:1000px){
+  .tour-grade{grid-template-columns:minmax(0,1fr)}
+  .tour-lado{position:static}
+}
+@media (max-width:640px){
+  .mq-colunas{grid-template-columns:minmax(0,1fr)}
+  .mq-nav span:not(.ativo){display:none}
+  .mq-liga:nth-child(n+3){display:none}
+  .mq-esconde-celular{display:none}
+}
+@media (prefers-reduced-motion:reduce){[data-passo]::after{animation:none}.tour-balao{transition:none}}
+
+/* v18: as outras 4 páginas do tutorial */
+.mq[hidden]{display:none}
+.mq-h1{font-weight:300;font-size:1.375rem;letter-spacing:-.03em;margin:.25rem 0 .625rem}
+.mq .ouro{color:var(--laranja)}
+.mq .azul{color:var(--azul-claro)}
+.mq-placar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem;padding:.75rem .875rem .875rem;margin-bottom:.875rem}
+.mq-placar small,.mq-calib-t,.mq-estilo small,.mq-faixa small,.mq-lideres small,.mq-banca-box small,.mq-nums small,.mq-grafico small{display:block;font-family:var(--f-dado);font-size:.5rem;letter-spacing:.08em;text-transform:uppercase;color:var(--apagado)}
+.mq-placar b{font-family:var(--f-dado);font-weight:500;font-size:1.125rem}
+.mq-barra{grid-column:1/-1;display:block;height:.3125rem;border-radius:999px;background:rgba(180,200,242,.35);overflow:hidden}
+.mq-barra>i{display:block;height:100%;background:var(--laranja)}
+.mq-calib{padding:.625rem .75rem;display:grid;gap:.3125rem}
+.mq-fx{display:grid;grid-template-columns:3.25rem minmax(0,1fr) 2rem;gap:.5rem;align-items:center;font-size:.5625rem}
+.mq-fx>span:first-child{font-family:var(--f-dado);color:var(--apagado)}
+.mq-fx b{font-family:var(--f-dado);font-weight:600;text-align:right}
+.mq-trilho{position:relative;height:.625rem;border-radius:.1875rem;background:rgba(255,255,255,.05)}
+.mq-trilho .fx{position:absolute;top:0;bottom:0;background:rgba(180,200,242,.12);border-left:1px dashed rgba(180,200,242,.5);border-right:1px dashed rgba(180,200,242,.5)}
+.mq-trilho .real{position:absolute;left:0;top:.1875rem;height:.25rem;border-radius:999px;background:var(--azul)}
+.mq-trilho .real.ouro{background:var(--laranja)}
+.mq-trilho .marca{position:absolute;top:-.125rem;bottom:-.125rem;width:2px;background:var(--azul-claro)}
+.mq-r-ac{border-left:3px solid var(--laranja)}
+.mq-r-er{border-left:3px solid rgba(180,200,242,.55)}
+.mq-selo{font-family:var(--f-dado);font-size:.4688rem;letter-spacing:.08em;text-transform:uppercase;padding:.0625rem .375rem;border-radius:999px;white-space:nowrap}
+.mq-selo.ac{background:var(--laranja);color:var(--cta-texto)}
+.mq-selo.er{border:1px solid rgba(180,200,242,.5);color:var(--azul-claro)}
+.mq-rodada{display:flex;align-items:center;gap:.75rem;padding:.5625rem .75rem;font-size:.6875rem}
+.mq-rod-res{color:var(--apagado);font-size:.625rem}
+.mq-rod-res b{font-family:var(--f-dado);color:var(--texto);font-weight:600}
+.mq-rodada .mq-barra{width:5rem;margin-left:auto}
+.mq-rod-nota{margin-left:auto;font-size:.5625rem;color:var(--apagado)}
+.mq-csv{display:flex;justify-content:flex-end;margin-top:.375rem}
+.mq-csv>span{font-size:.5625rem;font-weight:600;color:var(--azul-claro);border:1px solid rgba(180,200,242,.4);border-radius:999px;padding:.1875rem .5625rem;display:inline-flex;align-items:center}
+
+.mq-fileira{display:flex;align-items:center;gap:.5rem;padding:.375rem .5rem;margin-bottom:.75rem;flex-wrap:wrap}
+.mq-fileira img{width:1rem;height:1rem;object-fit:contain}
+.mq-fileira .todos{font-size:.5625rem;font-weight:600;color:var(--azul-claro);border:1px solid rgba(180,200,242,.35);border-radius:999px;padding:.1875rem .5rem;white-space:nowrap;margin-right:.25rem}
+.mq-fileira .ativo{display:inline-grid;place-items:center;width:1.5rem;height:1.5rem;border-radius:.375rem;border:1px solid rgba(255,210,10,.5);background:rgba(255,210,10,.12)}
+.mq-fileira>span:last-child{display:flex;gap:.5rem}
+.mq-heroi{display:flex;align-items:center;gap:.625rem;margin-bottom:.5rem}
+.mq-heroi>img{width:2rem;height:2rem;object-fit:contain}
+.mq-heroi b{display:block;font-weight:300;font-size:1.25rem;letter-spacing:-.03em;line-height:1}
+.mq-heroi small{font-size:.5625rem;color:var(--apagado)}
+.mq-pos{margin-left:auto;font-family:var(--f-dado);font-size:.625rem;border:1px solid var(--linha);border-radius:999px;padding:.1875rem .5rem;display:inline-flex;align-items:center}
+.mq-freq{padding:.625rem .75rem;display:grid;gap:.3125rem;margin-bottom:.25rem}
+.mq-fr{display:grid;grid-template-columns:6.5rem minmax(0,1fr);gap:.5rem;align-items:center;font-size:.5625rem}
+.mq-fr>span:first-child{color:var(--apagado)}
+.mq-celulas{display:flex;flex-wrap:wrap;gap:.25rem}
+.mq-celulas i{--p:0;font-style:normal;font-family:var(--f-dado);font-size:.5625rem;color:var(--apagado);padding:.125rem .375rem;border-radius:.3125rem;border:1px solid rgba(255,255,255,.08);white-space:nowrap;
+  background:linear-gradient(90deg,rgba(63,111,209,.32) calc(var(--p)*1%),rgba(255,255,255,.03) calc(var(--p)*1%))}
+.mq-celulas i.forte{background:linear-gradient(90deg,rgba(255,210,10,.26) calc(var(--p)*1%),rgba(255,255,255,.03) calc(var(--p)*1%))}
+.mq-celulas i.sel{border-color:var(--laranja);box-shadow:0 0 0 1px var(--laranja) inset}
+.mq-celulas i b{color:var(--texto);font-weight:600}
+.mq-estilo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.375rem}
+.mq-estilo>span{padding:.4375rem .5rem}
+.mq-estilo b,.mq-zona b{font-family:var(--f-dado);font-weight:500;font-size:.875rem}
+.mq-zona{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.375rem;padding:.4375rem .5rem}
+.mq-zona span{display:block;font-size:.5rem;color:var(--apagado)}
+.mq-zona small{display:block;font-size:.5rem;color:var(--apagado)}
+.mq-ultimos{display:grid;gap:.3125rem}
+.mq-linha-jogo b{font-family:var(--f-dado)}
+.mq-res{font-style:normal;display:inline-grid;place-items:center;width:1rem;height:1rem;border-radius:.25rem;font-family:var(--f-dado);font-size:.5rem;margin-right:.375rem}
+.mq-res.v{background:var(--laranja);color:var(--cta-texto)}
+.mq-res.d{border:1px solid rgba(180,200,242,.5);color:var(--azul-claro)}
+.mq-confronto{display:flex;align-items:center;gap:.75rem;padding:.5rem .75rem;font-size:.625rem;color:var(--apagado)}
+.mq-confronto b{font-family:var(--f-dado);color:var(--texto)}
+.mq-busca{border:1px solid var(--linha);border-radius:999px;padding:.1875rem .625rem;color:var(--texto);background:rgba(1,5,15,.55);min-width:5rem}
+
+.mq-col-larga{grid-template-columns:minmax(0,1fr) minmax(0,12rem)}
+.mq-faixa{padding:.5rem .625rem;display:grid;gap:.125rem}
+.mq-faixa b{font-size:.6875rem;display:flex;align-items:center;gap:.25rem}
+.mq-faixa b img{width:.875rem;height:.875rem;object-fit:contain}
+.mq-faixa span{font-size:.5625rem;color:var(--apagado)}
+.mq-faixa.aviso{border-color:rgba(255,210,10,.45)}
+.mq-faixa.aviso b{color:var(--laranja)}
+.mq-acoes{display:flex;gap:.375rem;margin:.625rem 0}
+.mq-acoes .mq-botao{margin-left:0}
+.mq-botao2{font-weight:600;font-size:.625rem;color:var(--azul-claro);border:1px solid rgba(180,200,242,.5);border-radius:999px;padding:.3125rem .6875rem;white-space:nowrap}
+.mq-jog{padding:.625rem .75rem;display:grid;gap:.3125rem}
+.mq-jog-topo{display:flex;align-items:center;gap:.5rem;margin-bottom:.125rem}
+.mq-foto{width:1.75rem;height:1.75rem;border-radius:50%;display:grid;place-items:center;font-family:var(--f-titulo);font-size:.5rem;font-weight:700;color:var(--azul-claro);background:linear-gradient(150deg,#1d3a7a,#0a1a3f);box-shadow:0 0 0 1px rgba(180,200,242,.35)}
+.mq-jog-topo b{font-size:.75rem}
+.mq-regua{margin-left:auto;display:inline-flex;align-items:center;gap:.1875rem;font-size:.5625rem;color:var(--laranja);font-weight:600}
+.mq-regua i{width:.4375rem;height:.5625rem;border-radius:.125rem;border:1px solid rgba(255,210,10,.5)}
+.mq-regua i.c{background:var(--laranja);border-color:var(--laranja)}
+.mq-ult{font-size:.5625rem;font-weight:600;color:var(--azul-claro);display:inline-flex;align-items:center;justify-self:start}
+.mq-lideres{display:grid;gap:.375rem}
+.mq-lideres>div{display:grid;grid-template-columns:minmax(0,1fr) auto;padding:.4375rem .5625rem;align-items:center}
+.mq-lideres small{grid-column:1/-1}
+.mq-lideres span{font-size:.625rem;font-weight:600}
+.mq-lideres b{font-family:var(--f-dado);font-weight:500;font-size:.875rem}
+.mq-carrinho{display:flex;align-items:center;justify-content:center;gap:.75rem;margin:.75rem auto 0;width:max-content;max-width:100%;padding:.375rem .375rem .375rem .875rem;border-radius:999px;border:1px solid rgba(255,210,10,.55);background:rgba(4,14,38,.85);font-size:.625rem}
+.mq-carrinho b{font-family:var(--f-dado);color:var(--laranja)}
+.mq-carrinho .mq-botao{margin-left:0}
+
+.mq-tema-pos{background:radial-gradient(70% 55% at 90% 0%,rgba(40,190,100,.28),transparent 70%),radial-gradient(60% 50% at 0% 30%,rgba(6,79,32,.45),transparent 70%)}
+.mq-col-banca{grid-template-columns:minmax(0,11rem) minmax(0,1fr);margin-bottom:.625rem}
+.mq-banca-box{padding:.625rem .75rem;display:grid;gap:.25rem}
+.mq-banca-box>b{font-family:var(--f-dado);font-weight:500;font-size:1.25rem;color:var(--laranja)}
+.mq-acoes2{display:flex;gap:.3125rem;margin-top:.25rem}
+.mq-acoes2 .mq-botao{margin-left:0;padding:.25rem .625rem;font-size:.5625rem}
+.mq-acoes2 .mq-botao2{padding:.25rem .625rem;font-size:.5625rem}
+.mq-nums{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.375rem}
+.mq-nums>span{padding:.5625rem .625rem}
+.mq-nums b{display:block;margin-top:.25rem;font-family:var(--f-dado);font-weight:500;font-size:1rem}
+.mq-grafico{padding:.5625rem .75rem .625rem;margin-bottom:.625rem}
+.mq-grafico svg{display:block;width:100%;height:3.5rem;margin-top:.375rem}
+.mq-criador{display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.5625rem .75rem;font-size:.625rem}
+.mq-criador b{display:block;font-size:.6875rem}
+.mq-criador small{color:var(--apagado);font-size:.5625rem}
+.mq-criador .mq-botao{margin-left:0}
+.mq-lista-topo{display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin:.75rem 0 .375rem}
+.mq-lista-topo .mq-tit{margin:0}
+.mq-filtros{display:inline-flex;align-items:center;gap:.125rem;padding:.1875rem;border-radius:999px;background:rgba(1,5,15,.45);border:1px solid rgba(255,255,255,.08)}
+.mq-filtros i{font-style:normal;font-size:.5625rem;color:var(--apagado);padding:.125rem .4375rem;border-radius:999px}
+.mq-filtros i.on{background:rgba(255,210,10,.14);color:var(--laranja)}
+.mq-corrigir{font-size:.5625rem;color:var(--apagado);border:1px solid var(--linha);border-radius:999px;padding:.125rem .5rem;width:auto!important;background:none!important}
+.mq-fundo-nota{margin-top:.75rem;font-size:.625rem;color:var(--apagado);padding:.375rem .5rem}
+.mq-fundo-nota .v{color:#4fe08a}.mq-fundo-nota .r{color:var(--vermelho,#ff7a7a)}.mq-fundo-nota .a{color:var(--azul-claro)}
+@media (max-width:640px){
+  .mq-placar{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .mq-col-larga,.mq-col-banca{grid-template-columns:minmax(0,1fr)}
+  .mq-fr{grid-template-columns:minmax(0,1fr)}
+  .mq-confronto{flex-wrap:wrap}
+}
+
 </style>
 
 <div class="fundo" aria-hidden="true"><canvas id="fundo-gl"></canvas><div class="grao"></div><div class="veu" id="veu"></div></div>
@@ -915,6 +1153,313 @@ html.trava{overflow:hidden}
         </div>
       </div>
       <div class="como-pontos" id="como-pontos"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
+  </div>
+</section>
+
+<section class="secao tour" id="tour" aria-labelledby="t-tour">
+  <div class="envolve">
+    <div class="cabeca-sec">
+      <div><div class="eyebrow-t">Por dentro do sistema</div><h2 id="t-tour" class="palavras" data-palavras>Conheça as páginas</h2></div>
+      <p class="sobe">Quem assina tem acesso a cinco páginas. Aqui está cada uma em miniatura: passe o mouse (ou toque) nas partes marcadas para ver o que cada uma faz.</p>
+    </div>
+    <div class="tour-abas sobe" role="tablist" aria-label="Páginas do sistema">
+      <button class="tour-aba" role="tab" aria-selected="true" type="button" data-aba="recomendacoes">Recomendações</button>
+      <button class="tour-aba" role="tab" aria-selected="false" type="button" data-aba="historico">Histórico</button>
+      <button class="tour-aba" role="tab" aria-selected="false" type="button" data-aba="times">Times</button>
+      <button class="tour-aba" role="tab" aria-selected="false" type="button" data-aba="jogadores">Jogadores</button>
+      <button class="tour-aba" role="tab" aria-selected="false" type="button" data-aba="apostas">Minhas Apostas</button>
+    </div>
+
+    <div class="tour-grade sobe">
+      <div class="tour-tela" id="tour-tela">
+        <div class="tour-janela" aria-hidden="true"><i></i><i></i><i></i><span id="tour-janela-t">achismozero · Recomendações</span></div>
+        <div class="mq" data-tela="recomendacoes">
+          <div class="mq-topo">
+            <span class="mq-marca">Achismo <b>Zero</b></span>
+            <span class="mq-nav"><span>Histórico</span><span>Times</span><span class="ativo">Recomendações</span><span>Jogadores</span><span>Minhas Apostas</span></span>
+            <span class="mq-banca mq-esconde-celular">Banca R$ 250,00</span>
+          </div>
+          <div class="mq-ligas" data-passo="ligas" data-num="1">
+            <span class="mq-liga ativa">Brasileirão<small>disponível</small></span>
+            <span class="mq-liga">Premier League<small>em breve</small></span>
+            <span class="mq-liga">La Liga<small>em breve</small></span>
+            <span class="mq-liga">Serie A<small>em breve</small></span>
+          </div>
+          <div class="mq-caixa mq-filtro" data-passo="filtro" data-num="2">
+            <span class="mq-campo"><span>Odd mín.</span><b>1,50</b></span>
+            <span class="mq-campo"><span>Odd máx.</span><b>5,00</b></span>
+            <span class="mq-campo"><span>Prob. mín.</span><b>60%</b></span>
+            <span class="mq-campo mq-esconde-celular"><span>Prob. máx.</span><b>qualquer</b></span>
+            <span class="mq-botao">Gerar recomendações</span>
+          </div>
+          <div class="mq-colunas">
+            <div>
+              <div class="mq-tit">Odds individuais (32)</div>
+              <div class="mq-caixa mq-card" data-passo="aposta" data-num="3">
+                <div class="mq-card-topo">
+                  <span class="mq-jogo">18/10 ·<img src="/escudo/127.png" alt="">Flamengo x<img src="/escudo/131.png" alt="">Corinthians</span>
+                  <span class="mq-casa">casa</span><span class="mq-odd" data-passo="odd" data-num="4" data-dentro>ODD 1,85</span>
+                </div>
+                <div class="mq-desc">Mais de 2,5 gols no jogo</div>
+                <div class="mq-met">
+                  <span data-passo="prob" data-num="5" data-dentro>Probabilidade histórica <b>61,2%</b></span>
+                  <span data-passo="ve" data-num="6" data-dentro>Valor esperado <b>+0,132</b></span>
+                </div>
+                <div class="mq-salvar" data-passo="salvar" data-num="7" data-dentro><span>Valor (R$)</span><b>Salvar</b></div>
+              </div>
+              <div class="mq-caixa mq-card mq-esconde-celular">
+                <div class="mq-card-topo">
+                  <span class="mq-jogo">19/10 ·<img src="/escudo/130.png" alt="">Grêmio x<img src="/escudo/133.png" alt="">Vasco</span>
+                  <span class="mq-casa">casa</span><span class="mq-odd">ODD 1,62</span>
+                </div>
+                <div class="mq-desc">Menos de 10,5 escanteios no jogo</div>
+                <div class="mq-met"><span>Probabilidade histórica <b>68,4%</b></span><span>Valor esperado <b>+0,108</b></span></div>
+                <div class="mq-salvar"><span>Valor (R$)</span><b>Salvar</b></div>
+              </div>
+              <div class="mq-caixa mq-card mq-esconde-celular">
+                <div class="mq-card-topo">
+                  <span class="mq-jogo">18/10 ·<img src="/escudo/121.png" alt="">Palmeiras x<img src="/escudo/118.png" alt="">Bahia</span>
+                  <span class="mq-casa">casa</span><span class="mq-odd">ODD 1,40</span>
+                </div>
+                <div class="mq-desc">Palmeiras marca - Sim</div>
+                <div class="mq-met"><span>Probabilidade histórica <b>77,3%</b></span><span>Valor esperado <b>+0,082</b></span></div>
+                <div class="mq-salvar"><span>Valor (R$)</span><b>Salvar</b></div>
+              </div>
+            </div>
+            <div>
+              <div class="mq-tit">Múltiplas (23)</div>
+              <div class="mq-caixa mq-card" data-passo="multipla" data-num="8">
+                <div class="mq-card-topo">
+                  <span class="mq-jogo">18/10 · Flamengo x Corinthians + 19/10 · Grêmio x Vasco</span>
+                  <span class="mq-casa">casa</span><span class="mq-odd">ODD 3,00</span>
+                </div>
+                <div class="mq-pernas"><span>Mais de 2,5 gols — Flamengo x Corinthians</span><span>Menos de 10,5 escanteios — Grêmio x Vasco</span></div>
+                <div class="mq-met"><span>Probabilidade histórica <b>41,9%</b></span><span>Valor esperado <b>+0,257</b></span></div>
+                <div class="mq-salvar"><span>Valor (R$)</span><b>Salvar</b></div>
+              </div>
+              <div class="mq-caixa mq-card mq-esconde-celular">
+                <div class="mq-card-topo">
+                  <span class="mq-jogo">18/10 · Palmeiras x Bahia + 19/10 · Grêmio x Vasco</span>
+                  <span class="mq-casa">casa</span><span class="mq-odd">ODD 2,27</span>
+                </div>
+                <div class="mq-pernas"><span>Palmeiras marca - Sim — Palmeiras x Bahia</span><span>Menos de 10,5 escanteios — Grêmio x Vasco</span></div>
+                <div class="mq-met"><span>Probabilidade histórica <b>52,9%</b></span><span>Valor esperado <b>+0,199</b></span></div>
+                <div class="mq-salvar"><span>Valor (R$)</span><b>Salvar</b></div>
+              </div>
+            </div>
+          </div>
+          <div class="mq-tit mq-jogos">Jogos disponíveis (4)</div>
+          <div class="mq-lista-jogos" data-passo="jogos" data-num="9">
+            <div class="mq-caixa mq-linha-jogo"><span><img src="/escudo/127.png" alt="">Flamengo x<img src="/escudo/131.png" alt="">Corinthians <em>18/10</em></span><small>18 odds</small></div>
+            <div class="mq-caixa mq-linha-jogo"><span><img src="/escudo/121.png" alt="">Palmeiras x<img src="/escudo/118.png" alt="">Bahia <em>18/10</em></span><small>15 odds</small></div>
+            <div class="mq-caixa mq-linha-jogo"><span><img src="/escudo/130.png" alt="">Grêmio x<img src="/escudo/133.png" alt="">Vasco <em>19/10</em></span><small>16 odds</small></div>
+          </div>
+        </div>
+        <div class="mq" data-tela="historico" hidden>
+          <div class="mq-topo">
+            <span class="mq-marca">Achismo <b>Zero</b></span>
+            <span class="mq-nav"><span class="ativo">Histórico</span><span>Times</span><span>Recomendações</span><span>Jogadores</span><span>Minhas Apostas</span></span>
+            <span class="mq-banca mq-esconde-celular">Banca R$ 250,00</span>
+          </div>
+          <div class="mq-h1">Histórico</div>
+          <div class="mq-caixa mq-placar" data-passo="placar" data-num="1">
+            <span><small>Acertou</small><b class="ouro">1.180</b></span>
+            <span><small>Errou</small><b class="azul">1.420</b></span>
+            <span><small>Pendente</small><b>34</b></span>
+            <span><small>Taxa de acerto</small><b>45,4%</b></span>
+            <i class="mq-barra"><i style="width:45.4%"></i></i>
+          </div>
+          <div class="mq-tit">Prometido × acontecido</div>
+          <div class="mq-colunas">
+            <div class="mq-caixa mq-calib" data-passo="calib-prob" data-num="2">
+              <div class="mq-calib-t">Por probabilidade</div>
+              <div class="mq-fx"><span>40-60%</span><span class="mq-trilho"><i class="fx" style="left:40%;width:20%"></i><i class="real ouro" style="width:47%"></i></span><b>47%</b></div>
+              <div class="mq-fx"><span>60-80%</span><span class="mq-trilho"><i class="fx" style="left:60%;width:20%"></i><i class="real ouro" style="width:63%"></i></span><b>63%</b></div>
+              <div class="mq-fx"><span>80-100%</span><span class="mq-trilho"><i class="fx" style="left:80%;width:20%"></i><i class="real" style="width:76%"></i></span><b>76%</b></div>
+            </div>
+            <div class="mq-caixa mq-calib" data-passo="calib-odd" data-num="3">
+              <div class="mq-calib-t">Por odd</div>
+              <div class="mq-fx"><span>1,20</span><span class="mq-trilho"><i class="real ouro" style="width:85%"></i><i class="marca" style="left:80%"></i></span><b>85%</b></div>
+              <div class="mq-fx"><span>1,80</span><span class="mq-trilho"><i class="real" style="width:50%"></i><i class="marca" style="left:54%"></i></span><b>50%</b></div>
+              <div class="mq-fx"><span>2,50</span><span class="mq-trilho"><i class="real ouro" style="width:44%"></i><i class="marca" style="left:39%"></i></span><b>44%</b></div>
+            </div>
+          </div>
+          <div class="mq-tit">Todas as recomendações</div>
+          <div class="mq-colunas" data-passo="resultados" data-num="4">
+            <div class="mq-caixa mq-card mq-r-ac">
+              <div class="mq-card-topo"><span class="mq-jogo">18/10 ·<img src="/escudo/127.png" alt="">Flamengo x<img src="/escudo/131.png" alt="">Corinthians</span><span class="mq-selo ac">acertou</span></div>
+              <div class="mq-desc">Mais de 2,5 gols no jogo</div>
+              <div class="mq-met"><span>odd <b>1,85</b></span><span>prob. <b>61,2%</b></span></div>
+            </div>
+            <div class="mq-caixa mq-card mq-r-er">
+              <div class="mq-card-topo"><span class="mq-jogo">19/10 ·<img src="/escudo/130.png" alt="">Grêmio x<img src="/escudo/133.png" alt="">Vasco</span><span class="mq-selo er">errou</span></div>
+              <div class="mq-desc">Menos de 10,5 escanteios no jogo</div>
+              <div class="mq-met"><span>odd <b>1,62</b></span><span>prob. <b>68,4%</b></span></div>
+            </div>
+          </div>
+          <div class="mq-tit">Por rodada</div>
+          <div class="mq-caixa mq-rodada" data-passo="rodada" data-num="5">
+            <b>Rodada 31</b>
+            <span class="mq-rod-res"><b>99</b> acertos · <b>121</b> erros · <b>45,0%</b></span>
+            <i class="mq-barra mq-esconde-celular"><i style="width:45%"></i></i>
+          </div>
+          <div class="mq-csv"><span data-passo="csv" data-num="6" data-dentro>Baixar certas · Baixar erradas</span></div>
+          <div class="mq-tit">Múltiplas em destaque</div>
+          <div class="mq-caixa mq-rodada" data-passo="mult-dest" data-num="7">
+            <span class="mq-rod-res"><b class="ouro">324</b> acertos · <b>233</b> erros · <b>58,2%</b></span>
+            <span class="mq-rod-nota mq-esconde-celular">as 5 melhores de cada jogo</span>
+          </div>
+        </div>
+        <div class="mq" data-tela="times" hidden>
+          <div class="mq-topo">
+            <span class="mq-marca">Achismo <b>Zero</b></span>
+            <span class="mq-nav"><span>Histórico</span><span class="ativo">Times</span><span>Recomendações</span><span>Jogadores</span><span>Minhas Apostas</span></span>
+            <span class="mq-banca mq-esconde-celular">Banca R$ 250,00</span>
+          </div>
+          <div class="mq-caixa mq-fileira" data-passo="fileira" data-num="1">
+            <span class="todos">Tabela e líderes</span><img src="/escudo/127.png" alt=""><img src="/escudo/121.png" alt=""><span class="ativo"><img src="/escudo/131.png" alt=""></span><img src="/escudo/130.png" alt=""><img src="/escudo/133.png" alt=""><img src="/escudo/118.png" alt=""><span class="mq-esconde-celular"><img src="/escudo/126.png" alt=""><img src="/escudo/124.png" alt=""></span>
+          </div>
+          <div class="mq-heroi"><img src="/escudo/131.png" alt=""><span><b>Corinthians</b><small>Brasileirão 2026</small></span>
+            <span class="mq-pos" data-passo="posicao" data-num="2" data-dentro>16º · 32 pts</span></div>
+          <div class="mq-tit">Frequência por linha</div>
+          <div class="mq-caixa mq-freq" data-passo="frequencia" data-num="3">
+            <div class="mq-fr"><span>Escanteios do time</span><span class="mq-celulas"><i style="--p:88">+2,5 <b>88%</b></i><i class="forte" style="--p:66">+3,5 <b>66%</b></i><i style="--p:42">+4,5 <b>42%</b></i></span></div>
+            <div class="mq-fr"><span>Cartões do time</span><span class="mq-celulas"><i class="forte" style="--p:74">+1,5 <b>74%</b></i><i style="--p:46">+2,5 <b>46%</b></i><i style="--p:22">+3,5 <b>22%</b></i></span></div>
+            <div class="mq-fr"><span>Gols do time</span><span class="mq-celulas"><i class="forte" style="--p:68">+0,5 <b>68%</b></i><i style="--p:30">+1,5 <b>30%</b></i><i style="--p:8">+2,5 <b>8%</b></i></span></div>
+          </div>
+          <div class="mq-colunas">
+            <div>
+              <div class="mq-tit">Estilo de jogo</div>
+              <div class="mq-estilo" data-passo="estilo" data-num="4">
+                <span class="mq-caixa"><small>Posse</small><b>51%</b></span>
+                <span class="mq-caixa"><small>Chutes</small><b>12,8</b></span>
+                <span class="mq-caixa"><small>Faltas</small><b>14,1</b></span>
+              </div>
+            </div>
+            <div>
+              <div class="mq-tit">Por zona da tabela</div>
+              <div class="mq-caixa mq-zona" data-passo="zona" data-num="5">
+                <div><span>contra o G4</span><b>3,9</b><small>escanteios</small></div>
+                <div><span>meio</span><b>5,1</b><small>escanteios</small></div>
+                <div><span>contra o Z4</span><b>6,2</b><small>escanteios</small></div>
+              </div>
+            </div>
+          </div>
+          <div class="mq-tit">Últimos jogos</div>
+          <div class="mq-ultimos" data-passo="ultimos" data-num="6">
+            <div class="mq-caixa mq-linha-jogo"><span><i class="mq-res d">D</i>Palmeiras <b>4 x 1</b> Corinthians</span><em>11/10</em></div>
+            <div class="mq-caixa mq-linha-jogo"><span><i class="mq-res v">V</i>Corinthians <b>2 x 0</b> Santos</span><em>04/10</em></div>
+          </div>
+          <div class="mq-tit">Confronto direto</div>
+          <div class="mq-caixa mq-confronto" data-passo="confronto" data-num="7">
+            <span class="mq-busca">Vitória</span><span>últimos 5: <b>3V 1E 1D</b> · escanteios <b>5,4</b> · cartões <b>4,2</b></span>
+          </div>
+        </div>
+        <div class="mq" data-tela="jogadores" hidden>
+          <div class="mq-topo">
+            <span class="mq-marca">Achismo <b>Zero</b></span>
+            <span class="mq-nav"><span>Histórico</span><span>Times</span><span>Recomendações</span><span class="ativo">Jogadores</span><span>Minhas Apostas</span></span>
+            <span class="mq-banca mq-esconde-celular">Banca R$ 250,00</span>
+          </div>
+          <div class="mq-caixa mq-fileira" data-passo="fileira" data-num="1">
+            <span class="todos">Todos os jogadores</span><img src="/escudo/127.png" alt=""><img src="/escudo/121.png" alt=""><span class="ativo"><img src="/escudo/131.png" alt=""></span><img src="/escudo/130.png" alt=""><img src="/escudo/133.png" alt=""><img src="/escudo/118.png" alt=""><span class="mq-esconde-celular"><img src="/escudo/126.png" alt=""><img src="/escudo/124.png" alt=""></span>
+          </div>
+          <div class="mq-colunas mq-col-larga">
+            <div>
+              <div class="mq-colunas">
+                <div class="mq-caixa mq-faixa" data-passo="proximo" data-num="2">
+                  <small>Próximo jogo</small>
+                  <b><img src="/escudo/131.png" alt="">Corinthians x Vitória<img src="/escudo/136.png" alt=""></b>
+                  <span>19/10 · rodada 31</span>
+                </div>
+                <div class="mq-caixa mq-faixa aviso" data-passo="regua-time" data-num="3">
+                  <small>A 1 cartão da suspensão</small>
+                  <b>9 jogadores</b>
+                  <span>o time tende a evitar cartão</span>
+                </div>
+              </div>
+              <div class="mq-acoes" data-passo="auto" data-num="7"><span class="mq-botao">Gerar 3 apostas automáticas</span><span class="mq-botao2">Limpar seleção</span></div>
+              <div class="mq-caixa mq-jog">
+                <div class="mq-jog-topo">
+                  <span class="mq-foto">YA</span><b>Yuri Alberto</b>
+                  <span class="mq-regua" data-passo="regua" data-num="4" data-dentro><i class="c"></i><i class="c"></i><i></i> a 1 cartão</span>
+                </div>
+                <div class="mq-fr" data-passo="celulas" data-num="5"><span>Chutes (total)</span><span class="mq-celulas"><i class="forte" style="--p:84">+0,5 <b>84%</b></i><i class="sel" style="--p:62">+1,5 <b>62%</b></i><i style="--p:36">+2,5 <b>36%</b></i></span></div>
+                <div class="mq-fr"><span>Chutes no gol</span><span class="mq-celulas"><i class="forte" style="--p:64">+0,5 <b>64%</b></i><i style="--p:24">+1,5 <b>24%</b></i></span></div>
+                <div class="mq-fr"><span>Cartão · impedimento</span><span class="mq-celulas"><i style="--p:18">cartão <b>18%</b></i><i style="--p:32">impedimento <b>32%</b></i></span></div>
+                <div class="mq-ult" data-passo="ultimos" data-num="8" data-dentro>Últimos 5 jogos ▾</div>
+              </div>
+            </div>
+            <div class="mq-esconde-celular">
+              <div class="mq-tit">Líderes do time</div>
+              <div class="mq-lideres" data-passo="lideres" data-num="9">
+                <div class="mq-caixa"><small>Chutes (total)</small><span>Yuri Alberto</span><b>430</b></div>
+                <div class="mq-caixa"><small>Desarmes</small><span>Raniele</span><b>402</b></div>
+                <div class="mq-caixa"><small>Faltas cometidas</small><span>Allan</span><b>332</b></div>
+              </div>
+            </div>
+          </div>
+          <div class="mq-carrinho" data-passo="carrinho" data-num="6"><span><b>2</b> estatísticas selecionadas</span><span class="mq-botao">Criar aposta</span></div>
+        </div>
+        <div class="mq mq-tema-pos" data-tela="apostas" hidden>
+          <div class="mq-topo">
+            <span class="mq-marca">Achismo <b>Zero</b></span>
+            <span class="mq-nav"><span>Histórico</span><span>Times</span><span>Recomendações</span><span>Jogadores</span><span class="ativo">Minhas Apostas</span></span>
+            <span class="mq-banca mq-esconde-celular">Banca R$ 250,00</span>
+          </div>
+          <div class="mq-h1">Minhas apostas</div>
+          <div class="mq-colunas mq-col-banca">
+            <div class="mq-caixa mq-banca-box" data-passo="banca" data-num="1">
+              <small>Banca atual</small><b>R$ 250,00</b>
+              <span class="mq-acoes2"><span class="mq-botao">Depositar</span><span class="mq-botao2">Resgatar</span></span>
+            </div>
+            <div class="mq-nums" data-passo="numeros" data-num="2">
+              <span class="mq-caixa"><small>ROI</small><b>+13,3%</b></span>
+              <span class="mq-caixa"><small>Taxa de acerto</small><b>52,9%</b></span>
+              <span class="mq-caixa"><small>Retorno</small><b class="ouro">+R$ 31,50</b></span>
+            </div>
+          </div>
+          <div class="mq-caixa mq-grafico" data-passo="grafico" data-num="3">
+            <small>Retorno acumulado</small>
+            <svg viewBox="0 0 300 60" preserveAspectRatio="none" aria-hidden="true"><path d="M0 48 L25 44 L50 50 L75 30 L100 26 L125 18 L150 24 L175 20 L200 28 L225 22 L250 26 L275 16 L300 14" fill="none" stroke="#ffd20a" stroke-width="2" vector-effect="non-scaling-stroke"/><line x1="0" y1="46" x2="300" y2="46" stroke="rgba(180,200,242,.45)" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/></svg>
+          </div>
+          <div class="mq-colunas">
+            <div class="mq-caixa mq-criador" data-passo="criador" data-num="4"><span><b>Criador de Odd</b><small>apostou fora do app? anote aqui</small></span><span class="mq-botao">Anotar aposta</span></div>
+            <div class="mq-caixa mq-criador" data-passo="extrato" data-num="5"><span><b>Extrato da banca</b><small>depósitos, apostas e retornos</small></span><span>▾</span></div>
+          </div>
+          <div class="mq-lista-topo"><span class="mq-tit">Apostas salvas</span><span class="mq-filtros" data-passo="filtros" data-num="6" data-dentro><i class="on">Todas</i><i>Acertou</i><i>Errou</i><i>Pendente</i></span></div>
+          <div class="mq-colunas">
+            <div class="mq-caixa mq-card mq-r-ac" data-passo="aposta" data-num="7">
+              <div class="mq-card-topo"><span class="mq-jogo">18/10 · Flamengo x Corinthians</span><span class="mq-selo ac">acertou</span></div>
+              <div class="mq-desc">Mais de 2,5 gols no jogo</div>
+              <div class="mq-met"><span>odd <b>1,85</b></span><span>apostado <b>R$ 20,00</b></span><span>retorno <b class="ouro">+R$ 17,00</b></span></div>
+              <div class="mq-salvar"><span class="mq-corrigir">Corrigir manualmente</span></div>
+            </div>
+            <div class="mq-caixa mq-card mq-r-er mq-esconde-celular">
+              <div class="mq-card-topo"><span class="mq-jogo">19/10 · Grêmio x Vasco</span><span class="mq-selo er">errou</span></div>
+              <div class="mq-desc">Menos de 10,5 escanteios no jogo</div>
+              <div class="mq-met"><span>odd <b>1,62</b></span><span>apostado <b>R$ 10,00</b></span><span>retorno <b class="azul">−R$ 10,00</b></span></div>
+              <div class="mq-salvar"><span class="mq-corrigir">Corrigir manualmente</span></div>
+            </div>
+          </div>
+          <div class="mq-fundo-nota" data-passo="fundo" data-num="8">O fundo desta página muda com o seu ROI: <b class="v">verde</b> no positivo, <b class="r">vermelho</b> no negativo, <b class="a">azul</b> zerado.</div>
+        </div>
+        <div class="tour-balao" id="tour-balao" role="status" aria-live="polite"><div class="bn" id="tour-balao-n"></div><h4 id="tour-balao-t"></h4><p id="tour-balao-p"></p></div>
+      </div>
+
+      <aside class="vidro tour-lado" aria-label="Partes da página">
+        <h3 id="tour-lado-t">Recomendações</h3>
+        <p class="dica-t" id="tour-lado-p">As apostas da rodada que, pelas nossas contas, valem mais do que a casa paga.</p>
+        <ol class="tour-passos" id="tour-passos"></ol>
+        <div class="tour-controles">
+          <button type="button" class="primario" id="tour-play">Me mostra</button>
+          <button type="button" id="tour-ant" aria-label="Parte anterior">←</button>
+          <button type="button" id="tour-prox" aria-label="Próxima parte">→</button>
+          <span class="cont" id="tour-cont"></span>
+        </div>
+        <p class="tour-aviso">Números ilustrativos, não são recomendações reais.</p>
+      </aside>
     </div>
   </div>
 </section>
@@ -1853,5 +2398,163 @@ document.getElementById("testes-botao").addEventListener("click", () => {
   document.getElementById("testes-botao").setAttribute("aria-expanded", fechado ? "false" : "true");
 });
 
+})();
+</script>
+<script>
+// v18: tutorial das 5 páginas. Cada maquete (.mq[data-tela]) tem partes
+// marcadas com data-passo; o texto de cada parte fica em TEXTOS. Passar o
+// mouse (ou tocar, ou focar pelo teclado) acende a parte e abre o balão.
+// "Me mostra" percorre as partes da página aberta sozinho.
+(function tourPaginas() {
+  const tela = document.getElementById("tour-tela");
+  if (!tela) return;
+  const INFO = {
+    recomendacoes: ["Recomendações", "As apostas da rodada que, pelas nossas contas, valem mais do que a casa paga."],
+    historico: ["Histórico", "Toda recomendação depois do jogo: o que o sistema disse e o que aconteceu, sem esconder os erros."],
+    times: ["Times", "Os números de cada clube: o que costuma acontecer nos jogos dele e contra quem."],
+    jogadores: ["Jogadores", "O histórico de cada jogador, linha por linha, e a montagem das suas próprias apostas."],
+    apostas: ["Minhas Apostas", "Sua banca, seu ROI e cada aposta que você anotou, conferida sozinha depois do jogo."],
+  };
+  const TEXTOS = {
+    recomendacoes: {
+      ligas: ["Ligas", "Escolha a liga. O Brasileirão já está disponível; as outras entram aos poucos."],
+      filtro: ["Filtro da rodada", "Diga que faixa de odd e de chance você quer ver. O botão busca as odds mais novas e monta as recomendações da rodada."],
+      aposta: ["Uma recomendação", "Cada cartão é uma aposta que passou no filtro: o jogo, o mercado e os números que justificam a escolha."],
+      odd: ["A odd da casa", "Quanto a casa paga naquele momento. É com esse preço que o sistema compara a chance que ele calculou."],
+      prob: ["Probabilidade histórica", "A chance que o sistema estima: o histórico recente dos dois times, ajustado pelo que a própria odd já diz."],
+      ve: ["Valor esperado", "Quanto a aposta rende, em média, para cada R$ 1. Só aparece aqui o que tem valor positivo: chance × odd maior que 1."],
+      salvar: ["Salvar", "Anote quanto você apostou. A aposta entra na sua banca e no seu ROI, em Minhas Apostas, e é conferida sozinha depois do jogo."],
+      multipla: ["Múltiplas", "Combinações de 2 a 5 apostas de jogos próximos, nunca com duas que se contradizem. A chance da múltipla é a das pernas multiplicadas."],
+      jogos: ["Jogos disponíveis", "Todas as odds de cada jogo da rodada, inclusive as que não passaram no filtro, para você conferir."],
+    },
+    historico: {
+      placar: ["O placar geral", "Quantas recomendações acertaram, quantas erraram e a taxa de acerto. Conta tudo, inclusive o que deu errado."],
+      "calib-prob": ["Prometido × acontecido", "Se dissemos 60 a 80% de chance, deveria acontecer entre 60 e 80% das vezes. A faixa tracejada é a promessa; a barra, o que aconteceu. Clique numa faixa para ver as apostas dela."],
+      "calib-odd": ["Por odd", "O traço é o ponto de lucro de cada odd (1 ÷ odd). Barra dourada: aquela faixa acertou o bastante para dar lucro."],
+      resultados: ["Acertou e errou", "Cada recomendação conferida com o resultado real, separada em duas colunas, da mais recente para a mais antiga."],
+      rodada: ["Por rodada", "As mesmas apostas agrupadas por rodada, com o resumo de cada uma: acertos, erros e taxa."],
+      csv: ["Baixar em planilha", "Cada lado de cada rodada sai em CSV, para você abrir no Excel e fazer as suas contas."],
+      "mult-dest": ["Múltiplas em destaque", "As 5 melhores múltiplas de cada jogo, guardadas antes do apito e conferidas depois."],
+    },
+    times: {
+      fileira: ["Escolha o time", "Os escudos levam a cada clube. O primeiro botão abre a tabela do campeonato e os líderes por estatística."],
+      posicao: ["Posição", "Onde o time está na tabela e quantos pontos tem."],
+      frequencia: ["Frequência por linha", "Em quantos dos últimos jogos o time passou de cada linha: escanteios, cartões e gols. Dourado é 60% ou mais."],
+      estilo: ["Estilo de jogo", "As médias do time por jogo: posse, chutes, faltas e mais."],
+      zona: ["Por zona da tabela", "Como o time joga contra quem está em cima, no meio ou embaixo da tabela."],
+      ultimos: ["Últimos jogos", "Os jogos recentes, com placar e os números de cada um."],
+      confronto: ["Confronto direto", "Escolha o adversário e veja o que costuma acontecer quando os dois se enfrentam."],
+    },
+    jogadores: {
+      fileira: ["Escolha o clube", "Todos os jogadores de uma vez, com busca, ou o elenco de um clube só."],
+      proximo: ["Próximo jogo", "As apostas que você montar nesta página são para este jogo."],
+      "regua-time": ["Régua de cartões", "Quantos jogadores estão a 1 cartão da suspensão. Com muita gente nessa situação, o time costuma evitar cartão."],
+      regua: ["Cartões do jogador", "Os amarelos rumo à suspensão. Fica dourado quando falta só um."],
+      celulas: ["Linhas do jogador", "Em quantos dos últimos jogos ele passou de cada linha. Toque numa linha para colocá-la na sua aposta."],
+      carrinho: ["Sua aposta", "As linhas que você escolheu viram uma aposta: informe a odd da casa e o valor, e ela entra no seu ROI."],
+      auto: ["3 apostas automáticas", "O sistema monta três apostas de 3 ou 4 pernas com as melhores linhas do elenco, sem repetir jogador."],
+      ultimos: ["Últimos 5 jogos", "Minutos, chutes, faltas, desarmes e cartões do jogador em cada um dos jogos recentes."],
+      lideres: ["Líderes do time", "Quem mais chuta, desarma, faz falta e leva cartão no elenco."],
+    },
+    apostas: {
+      banca: ["Banca", "O seu saldo. Deposite e resgate quando quiser; cada aposta salva desconta daqui e cada acerto devolve."],
+      numeros: ["ROI e acerto", "Quanto você ganhou ou perdeu sobre o que apostou, a taxa de acerto e o retorno em reais."],
+      grafico: ["Retorno acumulado", "A linha do seu resultado, aposta por aposta, da primeira até a mais recente."],
+      criador: ["Criador de Odd", "Apostou fora do site? Monte a aposta perna por perna e ela entra no seu ROI do mesmo jeito."],
+      extrato: ["Extrato", "Cada depósito, resgate, aposta e retorno, com o saldo depois de cada um."],
+      filtros: ["Filtros", "Veja todas as apostas ou só as que acertaram, erraram ou ainda esperam o jogo."],
+      aposta: ["Cada aposta", "Odd, valor e retorno. Ela é conferida sozinha depois do jogo; se algo sair errado, dá para corrigir na mão."],
+      fundo: ["A cor da página", "O fundo acompanha o seu ROI: verde no positivo, vermelho no negativo, azul zerado."],
+    },
+  };
+  const abas = [...document.querySelectorAll(".tour-aba[data-aba]")];
+  const balao = document.getElementById("tour-balao");
+  const lista = document.getElementById("tour-passos");
+  const cont = document.getElementById("tour-cont");
+  const play = document.getElementById("tour-play");
+  const reduzir = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let telaAtual = "recomendacoes", partes = [], botoes = [], atual = -1, auto = null;
+
+  function montar(nome) {
+    telaAtual = nome;
+    tela.querySelectorAll(".mq[data-tela]").forEach(m => { m.hidden = m.dataset.tela !== nome; });
+    abas.forEach(a => a.setAttribute("aria-selected", a.dataset.aba === nome ? "true" : "false"));
+    const [titulo, desc] = INFO[nome];
+    document.getElementById("tour-lado-t").textContent = titulo;
+    document.getElementById("tour-lado-p").textContent = desc;
+    document.getElementById("tour-janela-t").textContent = "achismozero · " + titulo;
+    const mq = tela.querySelector(`.mq[data-tela="${nome}"]`);
+    // parte escondida no celular (ex.: líderes do time) fica fora da lista
+    partes = [...mq.querySelectorAll("[data-passo]")].filter(p => p.getClientRects().length).sort((a, b) => a.dataset.num - b.dataset.num);
+    partes.forEach((p, i) => { p.tabIndex = 0; p.dataset.i = i; p.setAttribute("aria-label", TEXTOS[nome][p.dataset.passo][0]); });
+    lista.innerHTML = partes.map((p, i) => `<li><button type="button" data-i="${i}"><i>${p.dataset.num}</i><span>${TEXTOS[nome][p.dataset.passo][0]}</span></button></li>`).join("");
+    botoes = [...lista.querySelectorAll("button")];
+    atual = -1; apagar();
+    cont.textContent = partes.length + " partes";
+  }
+  function posicionar(el) {
+    const t = tela.getBoundingClientRect(), r = el.getBoundingClientRect();
+    const bw = balao.offsetWidth, bh = balao.offsetHeight, folga = 12;
+    let x = r.left - t.left + r.width / 2 - bw / 2;
+    x = Math.max(folga, Math.min(t.width - bw - folga, x));
+    let y = r.bottom - t.top + 10;                                   // embaixo da parte...
+    if (y + bh > t.height - folga) y = r.top - t.top - bh - 10;      // ...ou em cima, se não couber
+    y = Math.max(folga, y);
+    balao.style.left = x + "px"; balao.style.top = y + "px";
+  }
+  function acender(i) {
+    if (i < 0 || i >= partes.length) return;
+    atual = i;
+    const el = partes[i], [titulo, texto] = TEXTOS[telaAtual][el.dataset.passo];
+    partes.forEach(p => p.classList.toggle("aceso", p === el));
+    botoes.forEach((b, j) => b.classList.toggle("ativo", j === i));
+    tela.classList.add("focando");
+    document.getElementById("tour-balao-n").textContent = el.dataset.num + " de " + partes.length;
+    document.getElementById("tour-balao-t").textContent = titulo;
+    document.getElementById("tour-balao-p").textContent = texto;
+    balao.classList.add("mostra");
+    posicionar(el);
+    cont.textContent = (i + 1) + " / " + partes.length;
+  }
+  function apagar() {
+    tela.querySelectorAll("[data-passo].aceso").forEach(p => p.classList.remove("aceso"));
+    botoes.forEach(b => b.classList.remove("ativo"));
+    tela.classList.remove("focando");
+    balao.classList.remove("mostra");
+  }
+  function parar() { if (auto) { clearInterval(auto); auto = null; play.textContent = "Me mostra"; } }
+  function tocar() {
+    if (auto) { parar(); return; }
+    play.textContent = "Pausar";
+    acender(atual < 0 || atual >= partes.length - 1 ? 0 : atual + 1);
+    auto = setInterval(() => { if (atual >= partes.length - 1) { parar(); return; } acender(atual + 1); }, reduzir ? 6000 : 4200);
+  }
+  // no celular a lista fica embaixo da maquete: ao escolher pela lista, a maquete volta para a tela
+  const trazer = () => { if (matchMedia("(max-width: 1000px)").matches) { const r = tela.getBoundingClientRect(); if (r.top < 0 || r.bottom > innerHeight) tela.scrollIntoView({ behavior: reduzir ? "auto" : "smooth", block: "start" }); } };
+
+  tela.addEventListener("pointerover", e => {
+    if (e.pointerType === "touch") return;
+    const p = e.target.closest("[data-passo]"); if (!p) return;   // a parte mais de dentro ganha
+    parar(); acender(+p.dataset.i);
+  });
+  tela.addEventListener("pointerleave", e => { if (e.pointerType !== "touch" && !auto) apagar(); });
+  tela.addEventListener("click", e => {
+    const p = e.target.closest("[data-passo]");
+    parar();
+    if (p) acender(+p.dataset.i); else apagar();
+  });
+  tela.addEventListener("focusin", e => { const p = e.target.closest("[data-passo]"); if (p) { parar(); acender(+p.dataset.i); } });
+  lista.addEventListener("click", e => { const b = e.target.closest("button"); if (b) { parar(); acender(+b.dataset.i); trazer(); } });
+  document.getElementById("tour-ant").addEventListener("click", () => { parar(); acender(Math.max(0, atual - 1)); });
+  document.getElementById("tour-prox").addEventListener("click", () => { parar(); acender(Math.min(partes.length - 1, atual + 1)); });
+  play.addEventListener("click", () => { tocar(); trazer(); });
+  abas.forEach(a => a.addEventListener("click", () => { parar(); montar(a.dataset.aba); }));
+  document.addEventListener("keydown", e => { if (e.key === "Escape") { parar(); apagar(); } });
+  let largo = innerWidth > 640;
+  addEventListener("resize", () => {
+    if ((innerWidth > 640) !== largo) { largo = innerWidth > 640; parar(); montar(telaAtual); return; }
+    if (balao.classList.contains("mostra") && atual >= 0) posicionar(partes[atual]);
+  });
+  montar("recomendacoes");
 })();
 </script>
