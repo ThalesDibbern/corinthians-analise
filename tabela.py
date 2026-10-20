@@ -16,9 +16,14 @@ ZONA_Z4 = 4 últimas posições (rebaixamento)
 resto   = meio de tabela
 """
 
-TOTAL_TIMES_LIGA = 20
-TAMANHO_ZONA_G4 = 4
-TAMANHO_ZONA_Z4 = 4
+import os
+
+# Fase 2 das ligas extras (13/10/2026, `claude/arquitetura_ligas_extras.md`): esta constante
+# vem do ambiente. SEM a variável, o valor é o de sempre (Brasileirão) — só o `rodar_liga.py`
+# define a variável, dentro do subprocesso de cada liga.
+TOTAL_TIMES_LIGA = int(os.environ.get("TOTAL_TIMES_LIGA", "20"))
+TAMANHO_ZONA_G4 = int(os.environ.get("TAMANHO_ZONA_TOPO", "4"))
+TAMANHO_ZONA_Z4 = int(os.environ.get("TAMANHO_ZONA_REBAIXAMENTO", "4"))
 
 
 def calcular_tabela(cur, temporada, rodada_numero):
@@ -175,7 +180,7 @@ def calcular_contexto_jogo(cur, api_football_team_id, adversario_api_team_id, te
     }
 
 
-TOTAL_RODADAS_LIGA = 38
+TOTAL_RODADAS_LIGA = int(os.environ.get("TOTAL_RODADAS_LIGA", "38"))  # 34 na Bundesliga e na Ligue 1
 
 # NOVO: só considera "jogo morto" dentro das últimas N rodadas do
 # campeonato - mesmo quando a matemática já permite concluir isso mais

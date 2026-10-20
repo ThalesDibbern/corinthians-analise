@@ -56,7 +56,16 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 API_BASE = "https://api.oddspapi.io/v4"
 API_FOOTBALL_BASE = "https://v3.football.api-sports.io"
 SPORT_ID = 10
-TOURNAMENT_ID = 325     # Brasileirão Série A
+# Fase 2 das ligas extras (13/10/2026, `claude/arquitetura_ligas_extras.md`): esta constante
+# vem do ambiente. SEM a variável, o valor é o de sempre (Brasileirão) — só o `rodar_liga.py`
+# define a variável, dentro do subprocesso de cada liga.
+TOURNAMENT_ID = int(os.environ.get("ODDSPAPI_TOURNAMENT_ID", "325"))     # 325 = Brasileirão Série A
+NOME_COMPETICAO = os.environ.get("NOME_COMPETICAO", "Brasileirão Série A")
+# Calendário: 1 chamada POR TIME (como sempre) ou, com CALENDARIO_POR_TORNEIO=1, 1 chamada por
+# execução para o torneio inteiro, filtrada em memória por time. Mesmo filtro de datas nos dois
+# casos. Sem isso, as 5 ligas levariam a cota do plano a ~4.600 de 5.000/mês (arquitetura §3.3).
+CALENDARIO_POR_TORNEIO = os.environ.get("CALENDARIO_POR_TORNEIO") == "1"
+_CALENDARIO_TORNEIO_CACHE = []
 # 13/10/2026: superbet.bet.br -> superbet.rs. A MP 1.394/2026 tirou as casas brasileiras do ar
 # em 06/10; o plano pago da OddsPapi foi trocado para a Superbet Sérvia (mesma empresa, 18 de 19
 # tipos de mercado, validada no registro do modelo em 07/10). Revisão prevista: 01/01/2027.
@@ -164,20 +173,37 @@ def buscar_catalogo_mercados():
     return catalogo
 
 
+def _calendario_do_torneio():
+    """Fase 2 das ligas: o calendário do torneio inteiro, 1 chamada por
+    execução (cache no processo). Só usado com CALENDARIO_POR_TORNEIO=1."""
+    if not _CALENDARIO_TORNEIO_CACHE:
+        resp = get_com_retry_429(
+            f"{API_BASE}/fixtures",
+            params={"tournamentId": TOURNAMENT_ID, "sportId": SPORT_ID, "apiKey": API_KEY},
+        )
+        resp.raise_for_status()
+        _CALENDARIO_TORNEIO_CACHE.append(resp.json())
+    return _CALENDARIO_TORNEIO_CACHE[0]
+
+
 def buscar_proximos_jogos(participant_id):
     """Busca jogos desse time no Brasileirão e filtra os que acontecem
     dentro da janela de antecedência definida."""
-    resp = get_com_retry_429(
-        f"{API_BASE}/fixtures",
-        params={
-            "tournamentId": TOURNAMENT_ID,
-            "sportId": SPORT_ID,
-            "participantId": participant_id,
-            "apiKey": API_KEY,
-        },
-    )
-    resp.raise_for_status()
-    jogos = resp.json()
+    if CALENDARIO_POR_TORNEIO:
+        jogos = [j for j in _calendario_do_torneio()
+                 if participant_id in (j.get("participant1Id"), j.get("participant2Id"))]
+    else:
+        resp = get_com_retry_429(
+            f"{API_BASE}/fixtures",
+            params={
+                "tournamentId": TOURNAMENT_ID,
+                "sportId": SPORT_ID,
+                "participantId": participant_id,
+                "apiKey": API_KEY,
+            },
+        )
+        resp.raise_for_status()
+        jogos = resp.json()
 
     hoje = datetime.now(timezone.utc).date()
 
@@ -539,7 +565,7 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
                                        arbitro, mandante_id, visitante_id)
                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
                 (fixture_id_real, fixture_id_real, nosso_time_id, data_jogo, datahora_jogo,
-                 adversario_canonico, mandante, "Brasileirão Série A",
+                 adversario_canonico, mandante, NOME_COMPETICAO,
                  arbitro, mandante_id, visitante_id),
             )
             return cur.fetchone()[0]
@@ -598,7 +624,7 @@ def get_or_create_jogo(cur, data_jogo, adversario, mandante,
                                mandante_id, visitante_id)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
         (fixture_id_para_salvar, nosso_time_id, data_jogo, datahora_jogo, adversario_canonico, mandante,
-         "Brasileirão Série A", arbitro, mandante_id, visitante_id),
+         NOME_COMPETICAO, arbitro, mandante_id, visitante_id),
     )
     return cur.fetchone()[0]
 

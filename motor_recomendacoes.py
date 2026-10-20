@@ -293,6 +293,15 @@ FATOR_SUSPENSAO_ESCALA = 0.15
 PESO_PADRAO_SEM_HISTORICO_CARTAO = 0.15  # jogador na régua sem padrão calculado ainda (poucos jogos) - peso neutro
 TEMPORADA_ATUAL = 2026  # cartão não carrega de uma temporada pra outra
 
+# Fase 2 das ligas (13/10/2026): no Brasileirão a temporada é o ANO da data do jogo (não cruza a
+# virada de ano). Nas ligas europeias a temporada 2026/27 cruza — lá o `rodar_liga.py` define
+# TEMPORADA_POR_COLUNA=1 e a temporada vem da coluna `jogos.temporada` (season da API), que só
+# existe nos schemas `liga_*`. SEM a variável, o SQL é exatamente o de sempre.
+TEMPORADA_POR_COLUNA = os.environ.get("TEMPORADA_POR_COLUNA") == "1"
+SQL_TEMPORADA_J = "j.temporada" if TEMPORADA_POR_COLUNA else "EXTRACT(YEAR FROM j.data_jogo)::int"
+SQL_TEMPORADA_J_CMP = "j.temporada" if TEMPORADA_POR_COLUNA else "EXTRACT(YEAR FROM j.data_jogo)"
+SQL_TEMPORADA_CMP = "temporada" if TEMPORADA_POR_COLUNA else "EXTRACT(YEAR FROM data_jogo)"
+
 # NOVO (Grupo A): piso/teto individual dos 4 fatores novos - igualado ao
 # mesmo intervalo que Árbitro/Forma recente já usam, por consistência.
 FATOR_ZONA_MINIMO = 0.85
@@ -565,11 +574,11 @@ def buscar_odds_futuras(cur):
     (derivada do ano de data_jogo) - usados pra descobrir em que zona da
     tabela e em que ponto do padrão por rodada esse jogo específico cai."""
     cur.execute(
-        """
+        f"""
         SELECT o.id, o.jogo_id, o.jogador_id, o.casa_aposta, o.mercado,
                o.valor_odd, o.linha, o.direcao, j.data_jogo, j.adversario,
                j.mandante, j.arbitro, j.mandante_id, j.visitante_id, j.nosso_time_id,
-               j.rodada_numero, EXTRACT(YEAR FROM j.data_jogo)::int
+               j.rodada_numero, {SQL_TEMPORADA_J}
         FROM odds o
         JOIN jogos j ON j.id = o.jogo_id
         WHERE (j.datahora_jogo IS NOT NULL AND j.datahora_jogo >= NOW())
@@ -1666,13 +1675,13 @@ def peso_jogadores_na_regua(cur, time_id):
     if time_id is None:
         return 0.0
     cur.execute(
-        """
+        f"""
         SELECT c.jogador_id, j.data_jogo
         FROM cartoes c
         JOIN jogos j ON j.id = c.jogo_id
         JOIN jogadores jog ON jog.id = c.jogador_id
         WHERE c.cor = 'amarelo'
-          AND EXTRACT(YEAR FROM j.data_jogo) = %s
+          AND {SQL_TEMPORADA_J_CMP} = %s
           AND jog.ativo = TRUE
           AND jog.time_atual_id = %s
         ORDER BY c.jogador_id, j.data_jogo ASC, j.id ASC
@@ -1961,13 +1970,13 @@ def buscar_contexto_zona_time(cur, time_id, api_football_team_id, temporada, rod
         return None, "geral"
 
     cur.execute(
-        """
+        f"""
         SELECT CASE WHEN placar_corinthians > placar_adversario THEN 'vitoria'
                     WHEN placar_corinthians = placar_adversario THEN 'empate'
                     ELSE 'derrota' END
         FROM jogos
         WHERE nosso_time_id = %s AND rodada_numero = %s
-          AND EXTRACT(YEAR FROM data_jogo) = %s
+          AND {SQL_TEMPORADA_CMP} = %s
           AND placar_corinthians IS NOT NULL AND placar_adversario IS NOT NULL
         LIMIT 1
         """,

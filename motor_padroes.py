@@ -30,6 +30,13 @@ from tabela import calcular_tabela
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
+# Fase 2 das ligas (13/10/2026): no Brasileirão a temporada é o ANO da data do jogo (não cruza a
+# virada de ano). Nas ligas europeias a temporada 2026/27 cruza — lá o `rodar_liga.py` define
+# TEMPORADA_POR_COLUNA=1 e a temporada vem da coluna `jogos.temporada` (season da API), que só
+# existe nos schemas `liga_*`. SEM a variável, o SQL é exatamente o de sempre.
+TEMPORADA_POR_COLUNA = os.environ.get("TEMPORADA_POR_COLUNA") == "1"
+SQL_TEMPORADA = "temporada" if TEMPORADA_POR_COLUNA else "EXTRACT(YEAR FROM data_jogo)::int"
+
 JOGOS_MINIMOS_PARA_ANALISAR = 5   # não vale a pena calcular padrão com poucos jogos
 JANELA_MAXIMA_DE_JOGOS = 50       # olha no máximo os últimos 50 jogos
 
@@ -1653,8 +1660,8 @@ def buscar_jogos_ordenados_time(cur, time_id):
     (vitória/empate/derrota) - espinha dorsal pra computar zona/momento de
     cada jogo."""
     cur.execute(
-        """
-        SELECT id, EXTRACT(YEAR FROM data_jogo)::int AS temporada, rodada_numero,
+        f"""
+        SELECT id, {SQL_TEMPORADA} AS temporada, rodada_numero,
                CASE WHEN placar_corinthians > placar_adversario THEN 'vitoria'
                     WHEN placar_corinthians = placar_adversario THEN 'empate'
                     ELSE 'derrota' END AS resultado

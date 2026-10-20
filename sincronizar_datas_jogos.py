@@ -129,7 +129,10 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 API_BASE = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
-LEAGUE_ID = 71
+# Fase 2 das ligas extras (13/10/2026, `claude/arquitetura_ligas_extras.md`): esta constante
+# vem do ambiente. SEM a variável, o valor é o de sempre (Brasileirão) — só o `rodar_liga.py`
+# define a variável, dentro do subprocesso de cada liga.
+LEAGUE_ID = int(os.environ.get("API_FOOTBALL_LEAGUE_ID", "71"))  # 71 = Brasileirão Série A
 TEMPORADAS_PADRAO = [2026]
 
 # Se mais que isso divergir, o aplicar exige confirmação explícita.
