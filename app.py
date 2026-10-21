@@ -22,6 +22,7 @@ import os
 import json
 import re
 import secrets
+import unicodedata
 import subprocess
 import sys
 import threading
@@ -743,7 +744,7 @@ PAGINA = """
     <title>Recomendações - Achismo Zero</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Manrope:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
     <style>
         /* REDESIGN (15/10/2026): mesma paleta, fontes, vidro e fundo da
            página inicial pública (/inicio, paleta "b"). Muda só a aparência:
@@ -766,7 +767,7 @@ PAGINA = """
             --verde: #5fd38d;
             --vermelho: #ff7a7a;
             --f-titulo: "Unbounded", "Arial Black", system-ui, sans-serif;
-            --f-corpo: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+            --f-corpo: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
             --f-dado: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
             --raio: 0.875rem;
             --margem: clamp(1rem, 2.5vw, 3rem);
@@ -795,7 +796,7 @@ PAGINA = """
             padding: 1rem 0 6rem;
         }
         a { color: var(--azul-claro); }
-        ::selection { background: rgba(255, 210, 10, .35); }
+        ::selection { background: rgba(180, 200, 242, .35); }
         button:focus-visible, a:focus-visible { outline: 2px solid var(--azul-claro); outline-offset: 2px; }
 
         /* ---------- fundo: o degradê vivo da /inicio ----------
@@ -810,10 +811,6 @@ PAGINA = """
                 linear-gradient(180deg, #020a1f 0%, var(--noite) 60%);
         }
         #fundo-gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-        .grao {
-            position: absolute; inset: 0; opacity: .06;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-        }
 
         /* ---------- filtro (caixa de gerar recomendações) ---------- */
         .painel {
@@ -843,7 +840,7 @@ PAGINA = """
             margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--linha-fraca);
             font-size: 0.75rem; color: var(--apagado);
         }
-        .linha-atualizacao b { color: var(--ouro); font-family: var(--f-dado); font-weight: 500; }
+        .linha-atualizacao b { color: var(--texto); font-family: var(--f-dado); font-weight: 500; }
         .link-atualizar {
             background: rgba(255,255,255,.05); border: 1px solid var(--linha); color: var(--azul-claro);
             border-radius: 999px; padding: 0.3125rem 0.75rem; font-size: 0.75rem; font-weight: 600;
@@ -852,10 +849,10 @@ PAGINA = """
         .link-atualizar:hover { border-color: var(--azul-claro); background: rgba(180, 200, 242, .1); }
         label {
             display: block;
-            font-family: var(--f-dado);
-            font-size: 0.5938rem;
-            letter-spacing: .04em;
-            text-transform: uppercase;
+            font-family: var(--f-corpo);
+            font-size: 0.75rem;
+            letter-spacing: 0;
+            text-transform: none;
             color: var(--apagado);
             margin-bottom: 0.3125rem;
             white-space: nowrap;
@@ -939,13 +936,13 @@ PAGINA = """
             transition: color .15s, background .15s;
         }
         .topo-link:hover { color: var(--texto); background: rgba(255, 255, 255, .06); }
-        .topo-link.topo-ativo { color: var(--ouro); background: rgba(255, 210, 10, .1); }
+        .topo-link.topo-ativo { color: var(--texto); background: rgba(255, 255, 255, .1); }
         .topo-direita { justify-self: end; display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
         .topo-banca {
-            font-family: var(--f-dado); font-size: 0.6875rem; color: var(--ouro); text-decoration: none; white-space: nowrap;
-            padding: 0.375rem 0.625rem; border-radius: 999px; border: 1px solid rgba(255, 210, 10, .35);
+            font-family: var(--f-dado); font-size: 0.6875rem; color: var(--texto); text-decoration: none; white-space: nowrap;
+            padding: 0.375rem 0.625rem; border-radius: 999px; border: 1px solid var(--linha);
         }
-        .topo-banca:hover { border-color: var(--ouro); }
+        .topo-banca:hover { border-color: var(--azul-claro); }
         .topo-conta {
             padding: 0.4375rem 0.9375rem; border-radius: 999px; white-space: nowrap;
             color: var(--texto); font-size: 0.8125rem; font-weight: 600; text-decoration: none;
@@ -974,8 +971,8 @@ PAGINA = """
             filter: drop-shadow(0 0 1px rgba(255,255,255,.55)) drop-shadow(0 1px 3px rgba(0,0,0,.45));
         }
         .liga-nome { font-size: 0.75rem; font-weight: 600; }
-        .liga-selo { font-family: var(--f-dado); font-size: 0.5625rem; letter-spacing: .06em; text-transform: uppercase; color: var(--apagado); font-weight: 500; }
-        .liga-selo-ok { color: var(--ouro); }
+        .liga-selo { font-family: var(--f-corpo); font-size: 0.6875rem; letter-spacing: 0; text-transform: none; color: var(--apagado); font-weight: 500; }
+        .liga-selo-ok { color: var(--azul-claro); }
 
         /* ---------- mensagens ---------- */
         .flash {
@@ -1074,12 +1071,12 @@ PAGINA = """
             background: rgba(63, 111, 209, .18);
             color: var(--azul-claro);
             border: 1px solid rgba(180, 200, 242, .25);
-            font-family: var(--f-dado);
-            font-size: 0.5625rem;
+            font-family: var(--f-corpo);
+            font-size: 0.6875rem;
             padding: 0.125rem 0.5rem;
             border-radius: 999px;
-            text-transform: uppercase;
-            letter-spacing: .06em;
+            text-transform: none;
+            letter-spacing: 0;
         }
         .odd-tag {
             background: rgba(255, 210, 10, .1);
@@ -1095,7 +1092,7 @@ PAGINA = """
         .descricao { color: var(--texto); font-size: 0.875rem; font-weight: 500; line-height: 1.45; margin-bottom: 0.5rem; }
         .metricas { display: flex; gap: 1rem; font-size: 0.6875rem; color: var(--apagado); flex-wrap: wrap; }
         .metricas b { color: var(--texto); font-family: var(--f-dado); font-weight: 500; font-variant-numeric: tabular-nums; }
-        .ja-apostado { color: var(--ouro); font-family: var(--f-dado); font-size: 0.6875rem; margin-top: 0.5rem; }
+        .ja-apostado { color: var(--apagado); font-family: var(--f-dado); font-size: 0.6875rem; margin-top: 0.5rem; }
         .salvar-linha {
             display: flex;
             gap: 0.375rem;
@@ -1159,12 +1156,12 @@ PAGINA = """
             width: 0.5rem; height: 0.5rem; border-right: 2px solid var(--apagado); border-bottom: 2px solid var(--apagado);
             transform: translateY(-0.125rem) rotate(45deg); transition: transform 0.2s;
         }
-        .jogo-bloco.aberto .jogo-seta { transform: translateY(0.125rem) rotate(-135deg); border-color: var(--ouro); }
+        .jogo-bloco.aberto .jogo-seta { transform: translateY(0.125rem) rotate(-135deg); border-color: var(--azul-claro); }
         .jogo-bloco.aberto { border-color: rgba(180, 200, 242, .3); }
         .jogo-corpo { display: none; padding: 0.625rem 0.75rem 0.75rem; }
         .jogo-bloco.aberto .jogo-corpo { display: block; }
         .jogo-aviso-ocultas {
-            font-size: 0.75rem; color: var(--ouro); text-align: center;
+            font-size: 0.75rem; color: var(--apagado); text-align: center;
             padding: 0.5rem; border-top: 1px solid var(--linha-fraca); margin-top: 0.375rem;
         }
 
@@ -1215,7 +1212,7 @@ PAGINA = """
     </style>
 </head>
 <body>
-    <div class="fundo" aria-hidden="true"><canvas id="fundo-gl"></canvas><div class="grao"></div></div>
+    <div class="fundo" aria-hidden="true"><canvas id="fundo-gl"></canvas></div>
     {{ nav_html|safe }}
 
     <script>
@@ -1334,7 +1331,7 @@ PAGINA = """
                     {% if c.pernas|length == 1 %}{% for j in c.jogos %}{{ j.data_jogo }} · {{ escudo(j.nosso_time) }}{{ j.nosso_time }} x {{ escudo(j.adversario) }}{{ j.adversario }}{% endfor %}{% else %}{% for j in c.jogos %}{{ j.data_jogo }} · {{ j.nosso_time }} x {{ j.adversario }}{% if not loop.last %} + {% endif %}{% endfor %}{% endif %}
                 </span>
                 <span class="casa">{{ c.casa_aposta }}</span>
-                <span class="odd-tag">ODD {{ c.odd_combinada }}</span>
+                <span class="odd-tag">{{ c.odd_combinada }}</span>
             </div>
             <div class="descricao">{{ c.descricao }}</div>
             <div class="metricas">
@@ -1726,7 +1723,7 @@ CSS_VISUAL_NOVO = """
             --verde: #5fd38d;
             --vermelho: #ff7a7a;
             --f-titulo: "Unbounded", "Arial Black", system-ui, sans-serif;
-            --f-corpo: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+            --f-corpo: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
             --f-dado: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
             --raio: 0.875rem;
             --margem: clamp(1rem, 2.5vw, 3rem);
@@ -1755,7 +1752,7 @@ CSS_VISUAL_NOVO = """
             padding: 1rem 0 6rem;
         }
         a { color: var(--azul-claro); }
-        ::selection { background: rgba(255, 210, 10, .35); }
+        ::selection { background: rgba(180, 200, 242, .35); }
         button:focus-visible, a:focus-visible { outline: 2px solid var(--azul-claro); outline-offset: 2px; }
 
         /* ---------- fundo: o degradê vivo da /inicio ----------
@@ -1770,10 +1767,6 @@ CSS_VISUAL_NOVO = """
                 linear-gradient(180deg, #020a1f 0%, var(--noite) 60%);
         }
         #fundo-gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-        .grao {
-            position: absolute; inset: 0; opacity: .06;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-        }
 
         /* ---------- topo: nome | links no centro | banca e Conta ---------- */
         .topo {
@@ -1806,13 +1799,13 @@ CSS_VISUAL_NOVO = """
             transition: color .15s, background .15s;
         }
         .topo-link:hover { color: var(--texto); background: rgba(255, 255, 255, .06); }
-        .topo-link.topo-ativo { color: var(--ouro); background: rgba(255, 210, 10, .1); }
+        .topo-link.topo-ativo { color: var(--texto); background: rgba(255, 255, 255, .1); }
         .topo-direita { justify-self: end; display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
         .topo-banca {
-            font-family: var(--f-dado); font-size: 0.6875rem; color: var(--ouro); text-decoration: none; white-space: nowrap;
-            padding: 0.375rem 0.625rem; border-radius: 999px; border: 1px solid rgba(255, 210, 10, .35);
+            font-family: var(--f-dado); font-size: 0.6875rem; color: var(--texto); text-decoration: none; white-space: nowrap;
+            padding: 0.375rem 0.625rem; border-radius: 999px; border: 1px solid var(--linha);
         }
-        .topo-banca:hover { border-color: var(--ouro); }
+        .topo-banca:hover { border-color: var(--azul-claro); }
         .topo-conta {
             padding: 0.4375rem 0.9375rem; border-radius: 999px; white-space: nowrap;
             color: var(--texto); font-size: 0.8125rem; font-weight: 600; text-decoration: none;
@@ -1841,8 +1834,8 @@ CSS_VISUAL_NOVO = """
             filter: drop-shadow(0 0 1px rgba(255,255,255,.55)) drop-shadow(0 1px 3px rgba(0,0,0,.45));
         }
         .liga-nome { font-size: 0.75rem; font-weight: 600; }
-        .liga-selo { font-family: var(--f-dado); font-size: 0.5625rem; letter-spacing: .06em; text-transform: uppercase; color: var(--apagado); font-weight: 500; }
-        .liga-selo-ok { color: var(--ouro); }
+        .liga-selo { font-family: var(--f-corpo); font-size: 0.6875rem; letter-spacing: 0; text-transform: none; color: var(--apagado); font-weight: 500; }
+        .liga-selo-ok { color: var(--azul-claro); }
 
         @media (max-width: 1099px) {
             .topo { grid-template-columns: 1fr auto; row-gap: 0.75rem; }
@@ -1857,10 +1850,10 @@ CSS_VISUAL_NOVO = """
 
 FONTES_VISUAL_NOVO = """    <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Manrope:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 """
 
-FUNDO_VISUAL_NOVO = """    <div class="fundo" aria-hidden="true"><canvas id="fundo-gl"></canvas><div class="grao"></div></div>
+FUNDO_VISUAL_NOVO = """    <div class="fundo" aria-hidden="true"><canvas id="fundo-gl"></canvas></div>
 """
 
 SCRIPT_FUNDO_VIVO = """    <script>
@@ -1990,7 +1983,7 @@ PAGINA_HISTORICO = """
         """ + NAV_CSS + """
 """ + CSS_VISUAL_NOVO + """
         .conteudo { width: var(--degrau1); margin: 0 auto; }
-        .rotulo { font-family: var(--f-dado); font-size: 0.625rem; letter-spacing: .08em; text-transform: uppercase; color: var(--apagado); }
+        .rotulo { font-family: var(--f-corpo); font-size: 0.625rem; letter-spacing: 0; text-transform: none; color: var(--apagado); }
         .vidro { background: var(--vidro); border: 1px solid var(--vidro-borda); box-shadow: var(--vidro-sombra); border-radius: var(--raio); }
         .num { font-family: var(--f-dado); font-variant-numeric: tabular-nums; }
         .secao { margin-bottom: 3.5rem; }
@@ -2080,14 +2073,14 @@ PAGINA_HISTORICO = """
         .cartao-topo { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.375rem; }
         .jogo { font-size: 0.6875rem; color: var(--apagado); min-width: 0; }
         .jogo .data { font-family: var(--f-dado); margin-right: 0.375rem; }
-        .selo { font-family: var(--f-dado); font-size: 0.5625rem; letter-spacing: .08em; text-transform: uppercase; padding: 0.125rem 0.4375rem; border-radius: 999px; white-space: nowrap; }
+        .selo { font-family: var(--f-corpo); font-size: 0.5625rem; letter-spacing: 0; text-transform: none; padding: 0.125rem 0.4375rem; border-radius: 999px; white-space: nowrap; }
         .selo-acertou { color: var(--cta-texto); background: var(--ouro); }
         .selo-errou { color: var(--azul-claro); border: 1px solid rgba(180, 200, 242, .5); }
         .selo-pendente { color: var(--apagado); border: 1px solid var(--linha); }
         .descricao { font-size: 0.8125rem; font-weight: 500; line-height: 1.45; margin-bottom: 0.4375rem; }
         .metricas { display: flex; gap: 0.25rem 0.875rem; flex-wrap: wrap; align-items: center; font-size: 0.6875rem; color: var(--apagado); }
         .metricas b { font-family: var(--f-dado); font-weight: 500; color: var(--texto); font-variant-numeric: tabular-nums; }
-        .casa { font-family: var(--f-dado); font-size: 0.5625rem; letter-spacing: .06em; text-transform: uppercase; color: var(--azul-claro); }
+        .casa { font-family: var(--f-corpo); font-size: 0.5625rem; letter-spacing: 0; text-transform: none; color: var(--azul-claro); }
 
         .paginacao { display: flex; align-items: center; justify-content: center; gap: 0.875rem; margin-top: 0.75rem; font-family: var(--f-dado); font-size: 0.6875rem; color: var(--apagado); }
         .btn-pagina {
@@ -2143,7 +2136,7 @@ PAGINA_HISTORICO = """
         .modal-fechar:hover { color: var(--texto); }
         #modal-faixa-corpo { overflow: auto; min-height: 0; }
         .tabela-faixa { border-collapse: collapse; width: 100%; font-size: 0.6875rem; white-space: nowrap; }
-        .tabela-faixa th { text-align: left; font-family: var(--f-dado); font-weight: 500; font-size: 0.5625rem; letter-spacing: .08em; text-transform: uppercase; color: var(--apagado); padding: 0.375rem 0.625rem; border-bottom: 1px solid var(--linha); position: sticky; top: 0; background: #0a1838; }
+        .tabela-faixa th { text-align: left; font-family: var(--f-corpo); font-weight: 500; font-size: 0.5625rem; letter-spacing: 0; text-transform: none; color: var(--apagado); padding: 0.375rem 0.625rem; border-bottom: 1px solid var(--linha); position: sticky; top: 0; background: #0a1838; }
         .tabela-faixa td { padding: 0.375rem 0.625rem; border-bottom: 1px solid var(--linha-fraca); }
         .tabela-faixa td.n { font-family: var(--f-dado); text-align: right; }
         .tabela-faixa tr.linha-acertou td:last-child { color: var(--ouro); font-weight: 600; }
@@ -3137,7 +3130,7 @@ def exigir_login():
     sem estar logado, redireciona pro login. Exceções: a própria página de
     login, e o proxy de escudo (é só uma imagem pública, sem dado
     pessoal)."""
-    rotas_livres = ("login", "api_consulta.consultar", "inicio", "numeros_home", "favicon")
+    rotas_livres = ("login", "api_consulta.consultar", "inicio", "numeros_home", "bilhetes_home", "favicon")
     if request.endpoint in rotas_livres or (request.endpoint or "").startswith("escudo"):
         return
     if request.endpoint == "static":
@@ -3310,6 +3303,168 @@ def numeros_home():
     resposta.headers["Cache-Control"] = "public, max-age=300"
     return resposta
 
+
+# ---------- 20/10/2026: bilhetes da página inicial ("Múltiplas que acertaram") ----------
+#
+# Rota pública com as múltiplas que acertaram na última rodada avaliada: uma
+# por jogo (a de maior odd entre as que têm 2+ pernas e incluem o jogo), mais
+# o total da rodada (acertos, avaliadas, retorno), que a página mostra ao lado
+# para não parecer que toda múltipla acerta. Só leitura, cache de 15 min.
+# "Rodada" = rodada_numero do jogo da múltipla avaliada mais recente; entram
+# as múltiplas cujas pernas são TODAS de jogos dessa rodada com placar.
+BILHETES_HOME_VALIDADE_S = 900
+_bilhetes_home_cache = {"quando": 0.0, "dados": None}
+_bilhetes_home_trava = threading.Lock()
+BILHETES_HOME_MAXIMO = 10
+
+# nome de exibição e sigla por id da API-Football (o banco guarda o nome da API)
+NOMES_EXIBICAO_TIMES = {
+    127: ("Flamengo", "FLA"), 121: ("Palmeiras", "PAL"), 134: ("Athletico-PR", "CAP"),
+    1062: ("Atlético-MG", "CAM"), 147: ("Coritiba", "CFC"), 120: ("Botafogo", "BOT"),
+    132: ("Chapecoense", "CHA"), 1198: ("Remo", "REM"), 794: ("Bragantino", "RBB"),
+    118: ("Bahia", "BAH"), 124: ("Fluminense", "FLU"), 128: ("Santos", "SAN"),
+    126: ("São Paulo", "SAO"), 133: ("Vasco", "VAS"), 130: ("Grêmio", "GRE"),
+    135: ("Cruzeiro", "CRU"), 131: ("Corinthians", "COR"), 136: ("Vitória", "VIT"),
+    7848: ("Mirassol", "MIR"), 119: ("Internacional", "INT"),
+}
+
+
+def _nome_exibicao(api_id, nome_banco):
+    if api_id in NOMES_EXIBICAO_TIMES:
+        return NOMES_EXIBICAO_TIMES[api_id]
+    base = unicodedata.normalize("NFKD", nome_banco or "").encode("ascii", "ignore").decode()
+    return nome_banco, (re.sub(r"[^A-Za-z]", "", base)[:3] or "???").upper()
+
+
+def _perna_curta(descricao, nomes, mandante, visitante):
+    """Descrição da perna em português curto, para o bilhete. O que não
+    tiver forma conhecida fica com a descrição original, sem os parênteses
+    de ajuste."""
+    d = re.sub(r"\s*\([^)]*\)", "", descricao or "").strip()
+    nm = lambda s: nomes.get(s.strip(), s.strip())
+    n = lambda s: s.replace(".", ",")
+    regras = (
+        (r"Resultado Final - Vitória do (.+)$", lambda m: f"Vitória do {nm(m[1])}"),
+        (r"Handicap - (.+) ([+-][\d.]+)$", lambda m: f"{nm(m[1])} {n(m[2])} (handicap)"),
+        (r"Gols do Time - (.+) - (Mais|Menos) de ([\d.]+)$", lambda m: f"{nm(m[1])}: {m[2].lower()} de {n(m[3])} gols"),
+        (r"Gols Total do Jogo - (Mais|Menos) de ([\d.]+)$", lambda m: f"{m[1]} de {n(m[2])} gols no jogo"),
+        (r"Escanteios Total do Jogo - (Mais|Menos) de ([\d.]+)$", lambda m: f"{m[1]} de {n(m[2])} escanteios no jogo"),
+        (r"Escanteios - Mais/Menos (.+) - (Mais|Menos) de ([\d.]+)$", lambda m: f"{nm(m[1])}: {m[2].lower()} de {n(m[3])} escanteios"),
+        (r"Cartões Total do Jogo - (Mais|Menos) de ([\d.]+)$", lambda m: f"{m[1]} de {n(m[2])} cartões no jogo"),
+        (r"Cartões - Mais/Menos (.+) - (Mais|Menos) de ([\d.]+)$", lambda m: f"{nm(m[1])}: {m[2].lower()} de {n(m[3])} cartões"),
+        (r"Ambas Marcam (Primeiro|Segundo) Tempo - (Sim|Não)$",
+         lambda m: f"Ambas marcam no {'1º' if m[1] == 'Primeiro' else '2º'} tempo: {m[2].lower()}"),
+        (r"Dupla Chance (Primeiro|Segundo) Tempo - (1X|X2|12)$",
+         lambda m: ("1º" if m[1] == "Primeiro" else "2º") + " tempo: " +
+                   {"1X": f"{mandante} ou empate", "X2": f"{visitante} ou empate", "12": "sem empate"}[m[2]]),
+    )
+    for padrao, monta in regras:
+        m = re.match(padrao, d)
+        if m:
+            return monta(m)
+    for banco, exib in nomes.items():
+        d = d.replace(banco, exib)
+    return re.sub(r"(\d)\.(\d)", r"\1,\2", d)
+
+
+def _montar_bilhetes_home():
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        conn.set_session(readonly=True)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT jl.temporada, jl.rodada_numero
+            FROM multiplas_candidatas m
+            CROSS JOIN LATERAL jsonb_array_elements(m.pernas) p
+            JOIN jogos_liga jl ON jl.fixture_id_api = (p->>'fixture_id_api')::bigint
+            WHERE m.avaliada
+            ORDER BY m.primeiro_apito DESC
+            LIMIT 1
+        """)
+        linha = cur.fetchone()
+        if not linha:
+            return {"multiplas": []}
+        temporada, rodada = linha
+        cur.execute("""
+            SELECT fixture_id_api, mandante_api_id, visitante_api_id, mandante_nome, visitante_nome,
+                   placar_mandante, placar_visitante, data_jogo
+            FROM jogos_liga
+            WHERE temporada = %s AND rodada_numero = %s
+              AND placar_mandante IS NOT NULL AND placar_visitante IS NOT NULL
+            ORDER BY data_jogo, fixture_id_api
+        """, (temporada, rodada))
+        jogos = {}
+        ordem = []
+        for fx, ida, idb, na, nb, ga, gb, dia in cur.fetchall():
+            ea, eb = _nome_exibicao(ida, na), _nome_exibicao(idb, nb)
+            jogos[int(fx)] = [ea[0], eb[0], ida, idb, int(ga), int(gb), ea[1], eb[1], dia]
+            ordem.append(int(fx))
+        if not jogos:
+            return {"multiplas": []}
+        datas = [j[8] for j in jogos.values()]
+        cur.execute("SELECT nome, api_football_team_id FROM times WHERE api_football_team_id IS NOT NULL")
+        nomes = {nome: _nome_exibicao(api, nome)[0] for nome, api in cur.fetchall()}
+        cur.execute("""
+            SELECT id, odd_combinada, probabilidade_combinada, resultado, casa_aposta, pernas
+            FROM multiplas_candidatas
+            WHERE avaliada AND resultado IN ('acertou', 'errou')
+              AND primeiro_apito >= %s::date - 1 AND primeiro_apito < %s::date + 2
+        """, (min(datas), max(datas)))
+        da_rodada = []
+        for mid, odd, prob, res, casa, pernas in cur.fetchall():
+            if isinstance(pernas, str):
+                pernas = json.loads(pernas)
+            fxs = [int(p.get("fixture_id_api") or 0) for p in pernas]
+            if pernas and all(fx in jogos for fx in fxs):
+                da_rodada.append((int(mid), float(odd), float(prob), res, casa, pernas, fxs))
+        cur.close()
+        conn.rollback()
+    finally:
+        conn.close()
+
+    acertos = [m for m in da_rodada if m[3] == "acertou"]
+    retorno = sum((m[1] - 1) if m[3] == "acertou" else -1 for m in da_rodada)
+    escolhidas, vistos = [], set()
+    for fx in ordem:
+        cands = [m for m in acertos if fx in m[6] and len(m[5]) >= 2 and m[0] not in vistos]
+        if not cands:
+            continue
+        m = max(cands, key=lambda x: (x[1], -x[0]))
+        vistos.add(m[0])
+        escolhidas.append({
+            "id": m[0], "odd": round(m[1], 2), "prob": round(m[2], 2), "casa": m[4],
+            "pernas": [[fx_p, _perna_curta(p.get("descricao"), nomes, jogos[fx_p][0], jogos[fx_p][1])]
+                       for p, fx_p in zip(m[5], m[6])],
+        })
+        if len(escolhidas) >= BILHETES_HOME_MAXIMO:
+            break
+    usados = {fx for e in escolhidas for fx, _ in e["pernas"]}
+    return {
+        "atualizado": datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat(timespec="minutes"),
+        "rodada": int(rodada),
+        "total": {"acertou": len(acertos), "avaliadas": len(da_rodada),
+                  "roi": round(retorno / len(da_rodada) * 100, 1) if da_rodada else 0.0},
+        "jogos": {str(fx): jogos[fx][:8] for fx in usados},
+        "multiplas": escolhidas,
+    }
+
+
+@app.route("/api/bilhetes-home")
+def bilhetes_home():
+    agora = datetime.now(timezone.utc).timestamp()
+    with _bilhetes_home_trava:
+        if _bilhetes_home_cache["dados"] is None or agora - _bilhetes_home_cache["quando"] > BILHETES_HOME_VALIDADE_S:
+            try:
+                _bilhetes_home_cache["dados"] = _montar_bilhetes_home()
+                _bilhetes_home_cache["quando"] = agora
+            except Exception as erro:  # sem dado, a página esconde a seção
+                print(f"[bilhetes-home] falhou: {erro!r}", file=sys.stderr)
+                if _bilhetes_home_cache["dados"] is None:
+                    return jsonify({"erro": "indisponivel"}), 503
+        dados = _bilhetes_home_cache["dados"]
+    resposta = jsonify(dados)
+    resposta.headers["Cache-Control"] = "public, max-age=300"
+    return resposta
 
 @app.context_processor
 def injetar_liga_atual():
@@ -3779,7 +3934,7 @@ PAGINA_ROI = """
         """ + NAV_CSS + """
 """ + CSS_VISUAL_NOVO + """
         .conteudo { width: var(--degrau1); margin: 0 auto; }
-        .rotulo { font-family: var(--f-dado); font-size: 0.625rem; letter-spacing: .08em; text-transform: uppercase; color: var(--apagado); }
+        .rotulo { font-family: var(--f-corpo); font-size: 0.625rem; letter-spacing: 0; text-transform: none; color: var(--apagado); }
         .vidro { background: var(--vidro); border: 1px solid var(--vidro-borda); box-shadow: var(--vidro-sombra); border-radius: var(--raio); }
         .secao { margin-bottom: 3rem; }
         .secao-titulo { margin: 0 0 0.875rem; font-family: var(--f-corpo); font-weight: 300; font-size: clamp(1.25rem, 1.8vw, 1.75rem); letter-spacing: -.03em; line-height: 1.1; }
@@ -3879,7 +4034,7 @@ PAGINA_ROI = """
         .cartao.r-errou { border-left-color: rgba(180, 200, 242, .55); }
         .cartao-topo { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
         .quando { font-family: var(--f-dado); font-size: 0.6875rem; color: var(--apagado); }
-        .selo { font-family: var(--f-dado); font-size: 0.5625rem; letter-spacing: .08em; text-transform: uppercase; padding: 0.125rem 0.4375rem; border-radius: 999px; white-space: nowrap; }
+        .selo { font-family: var(--f-corpo); font-size: 0.5625rem; letter-spacing: 0; text-transform: none; padding: 0.125rem 0.4375rem; border-radius: 999px; white-space: nowrap; }
         .selo-acertou { color: var(--cta-texto); background: var(--ouro); }
         .selo-errou { color: var(--azul-claro); border: 1px solid rgba(180, 200, 242, .5); }
         .selo-pendente { color: var(--apagado); border: 1px solid var(--linha); }
@@ -3890,7 +4045,7 @@ PAGINA_ROI = """
         .metricas b { display: block; margin-top: 0.125rem; font-family: var(--f-dado); font-weight: 500; font-size: 0.875rem; color: var(--texto); font-variant-numeric: tabular-nums; }
         .metricas b.pos { color: var(--ouro); }
         .metricas b.neg { color: var(--azul-claro); }
-        .casa { font-family: var(--f-dado); font-size: 0.5625rem; letter-spacing: .06em; text-transform: uppercase; color: var(--apagado); margin-top: 0.5rem; }
+        .casa { font-family: var(--f-corpo); font-size: 0.5625rem; letter-spacing: 0; text-transform: none; color: var(--apagado); margin-top: 0.5rem; }
         .salvar-linha { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.75rem; flex-wrap: wrap; }
         .btn-pequeno { font-size: 0.6875rem; padding: 0.3125rem 0.75rem; }
         .btn-cancelar { background: transparent; color: var(--azul-claro); border-color: rgba(180, 200, 242, .5); }
@@ -3919,7 +4074,7 @@ PAGINA_ROI = """
         .modal-caixa h2 { margin: 0 0 0.25rem; font-size: 1.25rem; font-weight: 300; letter-spacing: -.02em; }
         .modal-sub { color: var(--apagado); font-size: 0.75rem; margin: 0 0 1.125rem; line-height: 1.5; }
         .modal-campo { margin-bottom: 0.875rem; }
-        .modal-campo label { display: block; margin-bottom: 0.3125rem; font-family: var(--f-dado); font-size: 0.5625rem; letter-spacing: .08em; text-transform: uppercase; color: var(--apagado); }
+        .modal-campo label { display: block; margin-bottom: 0.3125rem; font-family: var(--f-corpo); font-size: 0.5625rem; letter-spacing: 0; text-transform: none; color: var(--apagado); }
         .modal-linha-dupla { display: flex; gap: 0.625rem; }
         .modal-linha-dupla > div { flex: 1; min-width: 0; }
         .btn-adicionar-perna { width: 100%; background: rgba(63, 111, 209, .2); color: var(--azul-claro); border: 1px solid rgba(180, 200, 242, .4); border-radius: 0.5rem; }
@@ -5154,7 +5309,7 @@ PAGINA_JOGADORES = """
 """ + CSS_VISUAL_NOVO + """
         .conteudo { width: var(--degrau1); margin: 0 auto; }
         .rotulo {
-            font-family: var(--f-dado); font-size: 0.625rem; letter-spacing: .08em; text-transform: uppercase;
+            font-family: var(--f-corpo); font-size: 0.625rem; letter-spacing: 0; text-transform: none;
             color: var(--apagado);
         }
         .secao-titulo {
@@ -5182,14 +5337,14 @@ PAGINA_JOGADORES = """
             border: 1px solid rgba(180, 200, 242, .35);
         }
         .fileira-todos:hover { background: rgba(180, 200, 242, .1); }
-        .fileira-todos.ativo { color: var(--ouro); border-color: rgba(255, 210, 10, .5); background: rgba(255, 210, 10, .12); }
+        .fileira-todos.ativo { color: var(--texto); border-color: rgba(180, 200, 242, .6); background: rgba(63, 111, 209, .22); }
         .fileira-time {
             flex-shrink: 0; width: 2.375rem; height: 2.375rem; border-radius: 0.625rem; display: grid; place-items: center;
             border: 1px solid transparent; transition: background .15s, border-color .15s, transform .15s;
         }
         .fileira-time img { width: 1.5rem; height: 1.5rem; }
         .fileira-time:hover { background: rgba(255,255,255,.07); transform: translateY(-1px); }
-        .fileira-time.ativo { background: rgba(255, 210, 10, .12); border-color: rgba(255, 210, 10, .5); }
+        .fileira-time.ativo { background: rgba(63, 111, 209, .22); border-color: rgba(180, 200, 242, .6); }
 
         /* ---------- duas colunas ---------- */
         .grade { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 21rem); gap: 2.5rem; align-items: start; }
@@ -5476,7 +5631,7 @@ PAGINA_CLUBE = """
 """ + CSS_VISUAL_NOVO + """
         .conteudo { width: var(--degrau1); margin: 0 auto; }
         .rotulo {
-            font-family: var(--f-dado); font-size: 0.625rem; letter-spacing: .08em; text-transform: uppercase;
+            font-family: var(--f-corpo); font-size: 0.625rem; letter-spacing: 0; text-transform: none;
             color: var(--apagado);
         }
         .secao-titulo {
@@ -5504,14 +5659,14 @@ PAGINA_CLUBE = """
             border: 1px solid rgba(180, 200, 242, .35);
         }
         .fileira-todos:hover { background: rgba(180, 200, 242, .1); }
-        .fileira-todos.ativo { color: var(--ouro); border-color: rgba(255, 210, 10, .5); background: rgba(255, 210, 10, .12); }
+        .fileira-todos.ativo { color: var(--texto); border-color: rgba(180, 200, 242, .6); background: rgba(63, 111, 209, .22); }
         .fileira-time {
             flex-shrink: 0; width: 2.375rem; height: 2.375rem; border-radius: 0.625rem; display: grid; place-items: center;
             border: 1px solid transparent; transition: background .15s, border-color .15s, transform .15s;
         }
         .fileira-time img { width: 1.5rem; height: 1.5rem; }
         .fileira-time:hover { background: rgba(255,255,255,.07); transform: translateY(-1px); }
-        .fileira-time.ativo { background: rgba(255, 210, 10, .12); border-color: rgba(255, 210, 10, .5); }
+        .fileira-time.ativo { background: rgba(63, 111, 209, .22); border-color: rgba(180, 200, 242, .6); }
 
         /* ---------- duas colunas ---------- */
         .grade { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 21rem); gap: 2.5rem; align-items: start; }
@@ -6225,7 +6380,7 @@ PAGINA_TIMES = """
         }
         .cabeca p { margin: 0.375rem 0 0; color: var(--apagado); font-size: 0.8125rem; max-width: 40rem; }
         .rotulo {
-            font-family: var(--f-dado); font-size: 0.625rem; letter-spacing: .08em; text-transform: uppercase;
+            font-family: var(--f-corpo); font-size: 0.625rem; letter-spacing: 0; text-transform: none;
             color: var(--apagado);
         }
         .secao-titulo {
@@ -6246,7 +6401,7 @@ PAGINA_TIMES = """
         .tabela-caixa { overflow-x: auto; padding: 0.375rem 0.25rem; }
         .classificacao { width: 100%; border-collapse: collapse; font-size: 0.8125rem; white-space: nowrap; }
         .classificacao th {
-            font-family: var(--f-dado); font-weight: 500; font-size: 0.625rem; letter-spacing: .06em; text-transform: uppercase;
+            font-family: var(--f-corpo); font-weight: 500; font-size: 0.625rem; letter-spacing: 0; text-transform: none;
             color: var(--apagado); text-align: right; padding: 0.5rem 0.5rem 0.625rem; border-bottom: 1px solid var(--linha);
         }
         .classificacao td { text-align: right; padding: 0.4375rem 0.5rem; border-bottom: 1px solid var(--linha-fraca); font-family: var(--f-dado); font-variant-numeric: tabular-nums; color: var(--apagado); }
@@ -6544,7 +6699,7 @@ PAGINA_TIME = """
 """ + CSS_VISUAL_NOVO + """
         .conteudo { width: var(--degrau1); margin: 0 auto; }
         .rotulo {
-            font-family: var(--f-dado); font-size: 0.625rem; letter-spacing: .08em; text-transform: uppercase;
+            font-family: var(--f-corpo); font-size: 0.625rem; letter-spacing: 0; text-transform: none;
             color: var(--apagado);
         }
         .secao-titulo {
@@ -6581,7 +6736,7 @@ PAGINA_TIME = """
         }
         .fileira-time img { width: 1.5rem; height: 1.5rem; }
         .fileira-time:hover { background: rgba(255,255,255,.07); transform: translateY(-1px); }
-        .fileira-time.ativo { background: rgba(255, 210, 10, .12); border-color: rgba(255, 210, 10, .5); }
+        .fileira-time.ativo { background: rgba(63, 111, 209, .22); border-color: rgba(180, 200, 242, .6); }
 
         /* ---------- cabeçalho do time ---------- */
         .heroi { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 2.5rem; }
