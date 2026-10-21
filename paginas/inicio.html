@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-br">
+<html lang="pt-br" data-planeta="baixo">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -81,7 +81,10 @@ button{font:inherit;color:inherit}
 .cartao-nav.meio .rotulo{font-size:0.9375rem}
 
 /* ---------- palco do planeta ---------- */
-.viagem{position:relative;height:330vh;z-index:1}
+.viagem{position:relative;height:250vh;z-index:1}
+.secao.ligas{position:relative;z-index:2}
+/* planeta embaixo: a borda de baixo do palco some aos poucos, sem corte reto */
+@media (min-width:820px){:root[data-planeta="baixo"] .palco{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 30vh),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 30vh),transparent)}}
 .palco{position:sticky;top:0;height:100vh;height:100dvh;overflow:hidden}
 .caixa-globo{position:absolute;inset:0;will-change:transform,opacity;transform-origin:50% 50%}
 #globo{position:absolute;inset:0}
@@ -153,7 +156,9 @@ button{font:inherit;color:inherit}
 .times li{background:rgba(255,255,255,.04);border:1px solid var(--linha);border-radius:0.625rem;padding:0.5rem 0.625rem;min-width:0}
 .times li .pos{font-family:var(--f-dado);font-size:0.6875rem;color:var(--laranja)}
 .times li .n{display:block;font-weight:700;font-size:0.8125rem;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.times li .p{font-family:var(--f-dado);font-size:0.7188rem;color:var(--apagado);font-variant-numeric:tabular-nums}
+.times li .p{display:flex;flex-wrap:wrap;column-gap:0.5em;font-family:var(--f-dado);font-size:0.7188rem;color:var(--apagado);font-variant-numeric:tabular-nums}
+.times li .p i{font-style:normal;white-space:nowrap}
+.times li .p .sep{display:none}
 .times .vazio{color:var(--apagado);font-size:0.8125rem}
 .times .entrar{margin-top:0.625rem}
 
@@ -1096,6 +1101,45 @@ html.trava{overflow:hidden}
 #bh-pausa.bh-parado::before { width: 0; height: 0; border: 0; border-left: .5rem solid currentColor; border-top: .3125rem solid transparent; border-bottom: .3125rem solid transparent; margin-left: 2px; }
 .bh-trilho { touch-action: pan-y; }
 
+/* ---------- 20/10: botões do topo com a estética do topo das Recomendações ---------- */
+.nav{--v-fundo:linear-gradient(140deg,rgba(255,255,255,.13),rgba(255,255,255,.035) 55%,rgba(255,255,255,.07)),rgba(4,14,38,.55);
+  --v-borda:rgba(255,255,255,.17);--v-sombra:inset 0 1px 0 rgba(255,255,255,.25),inset 0 -1px 0 rgba(255,255,255,.04),0 0.875rem 2.75rem -1rem rgba(0,0,0,.6)}
+.nav .cartao-grande,.nav .cartao-grande.ativo,:root[data-vidro="sim"] .nav .cartao-grande.vidro{
+  background:var(--v-fundo)!important;border:1px solid var(--v-borda)!important;box-shadow:var(--v-sombra)!important;border-radius:1rem}
+.nav .cartao-grande .rotulo{font-family:var(--f-corpo);font-weight:600;font-size:0.9375rem;letter-spacing:0;color:var(--texto)}
+.nav .cartao-grande .sub,.nav .cartao-grande.ativo .sub{color:var(--apagado);font-size:0.75rem}
+.nav .cartao-grande.ativo{transition:background .15s,border-color .15s,transform .2s}
+.nav .cartao-grande.ativo:hover{border-color:rgba(255,255,255,.32)!important;transform:translateY(-1px);box-shadow:var(--v-sombra)!important;
+  background:linear-gradient(140deg,rgba(255,255,255,.18),rgba(255,255,255,.06) 55%,rgba(255,255,255,.1)),rgba(4,14,38,.55)!important}
+.nav .cartao-grande[aria-disabled="true"]{opacity:.6}
+.nav .cartao-grande[aria-disabled="true"] .rotulo{color:var(--apagado)}
+.nav .pequenos{gap:0.125rem;padding:0.25rem;border-radius:999px;pointer-events:auto;
+  background:var(--v-fundo);border:1px solid var(--v-borda);box-shadow:var(--v-sombra)}
+.nav .pequenos .cartao-nav,.nav .pequenos .cartao-nav.meio,:root[data-vidro="sim"] .nav .pequenos .cartao-nav.vidro{
+  background:none!important;border:0!important;box-shadow:none!important;padding:0.375rem 0.875rem;border-radius:999px;transform:none!important;transition:color .15s,background .15s}
+.nav .pequenos .cartao-nav .rotulo{font-family:var(--f-corpo);font-weight:500;font-size:0.8125rem;color:var(--apagado);white-space:nowrap}
+.nav .pequenos .cartao-nav:hover,:root[data-vidro="sim"] .nav .pequenos .cartao-nav.vidro:hover{background:rgba(255,255,255,.06)!important}
+.nav .pequenos .cartao-nav:hover .rotulo{color:var(--texto)}
+.nav .pequenos .cartao-nav[aria-current="page"],:root[data-vidro="sim"] .nav .pequenos .cartao-nav.vidro[aria-current="page"]{background:rgba(255,255,255,.1)!important}
+.nav .pequenos .cartao-nav[aria-current="page"] .rotulo{color:var(--texto)}
+.nav .conta,:root[data-vidro="sim"] .nav .conta.vidro{background:var(--v-fundo)!important;border:1px solid var(--v-borda)!important;box-shadow:var(--v-sombra);
+  font-family:var(--f-corpo);font-weight:600;font-size:0.8125rem;padding:0.4375rem 0.9375rem 0.4375rem 0.75rem;transition:border-color .15s}
+.nav .conta:hover{border-color:rgba(255,255,255,.32)!important;transform:none}
+.nav .conta svg{width:1rem;height:1rem}
+.nav .nav-icone,:root[data-vidro="sim"] .nav .nav-icone.vidro{background:var(--v-fundo)!important;border:1px solid var(--v-borda)!important;box-shadow:var(--v-sombra)}
+.nav .nav-icone:hover{border-color:rgba(255,255,255,.32)!important}
+/* aberto pelo ícone (página rolada): sem transparência, para ler em cima do conteúdo */
+.nav.recolhida.aberta{--v-fundo:linear-gradient(140deg,rgba(255,255,255,.08),rgba(255,255,255,.02) 55%,rgba(255,255,255,.05)),#0a1630}
+.nav.recolhida.aberta .cartao-grande.ativo:hover,:root[data-vidro="sim"] .nav.recolhida.aberta .cartao-grande.ativo:hover{background:linear-gradient(140deg,rgba(255,255,255,.13),rgba(255,255,255,.05) 55%,rgba(255,255,255,.08)),#0a1630!important}
+.nav.recolhida.aberta .cartao-grande[aria-disabled="true"]{opacity:1}
+.nav.recolhida.aberta .cartao-grande[aria-disabled="true"] .rotulo,.nav.recolhida.aberta .cartao-grande[aria-disabled="true"] .sub{opacity:.6}
+@media (max-width:620px){.nav .pequenos{width:auto;max-width:calc(100% - 1rem)}.nav .pequenos .cartao-nav{flex:0 1 auto;padding:0.375rem 0.75rem}}
+/* ---------- 20/10: seções sem corte reto entre uma e outra ---------- */
+.secao.ligas,:root[data-vidro] .secao.ligas{background:linear-gradient(to bottom,rgba(5,11,29,0),rgba(5,11,29,.85) 8rem,rgba(5,11,29,.85) calc(100% - 8rem),rgba(5,11,29,0))}
+.secao.bh-sec,:root[data-vidro] .secao.bh-sec{background:linear-gradient(to bottom,rgba(5,11,29,0),rgba(5,11,29,.9) 8rem,rgba(5,11,29,.9) calc(100% - 8rem),rgba(5,11,29,.9))}
+.secao.casas-sec,:root[data-vidro] .secao.casas-sec{background:linear-gradient(to bottom,rgba(2,8,24,0),rgba(2,8,24,.3) 8rem,rgba(2,8,24,.3) calc(100% - 8rem),rgba(2,8,24,0))}
+.secao.sobre,:root[data-vidro] .secao.sobre{background:linear-gradient(to bottom,rgba(5,11,29,0),rgba(5,11,29,.75) 8rem,rgba(5,11,29,.75) calc(100% - 8rem),rgba(5,11,29,0))}
+.secao.embreve,:root[data-vidro] .secao.embreve{background:linear-gradient(to bottom,rgba(5,11,29,0),rgba(5,11,29,.94) 8rem,rgba(5,11,29,.94) calc(100% - 8rem),rgba(5,11,29,.94))}
 </style>
 </head>
 <body>
@@ -1938,7 +1982,7 @@ document.getElementById("conta").addEventListener("click", () => SESSAO ? (locat
   texto: "No site, aqui abre o login. A página inicial fica pública; entrar só é pedido ao abrir uma liga.",
   botoes: [{ txt: "Fechar", cls: "fechar" }]
 }));
-document.getElementById("descer").addEventListener("click", () => irPara(viagem.offsetTop + (viagem.offsetHeight - innerHeight) * .62));
+document.getElementById("descer").addEventListener("click", () => irPara(viagem.offsetTop + innerHeight * 2.3 * .62));
 
 /* ---------- movimento ---------- */
 document.querySelectorAll("[data-letras]").forEach(el => {
@@ -2430,10 +2474,18 @@ if (globo) {
     s.d.classList.add("ativo");
     const c = s.f.properties.c, dados = LIDERES[c];
     timesBox.innerHTML = `<div class="cab"><b>${esc(dados.t)}</b><small>líderes · pontos · jogos</small></div><ol>` +
-      dados.l.map(([n, p, j], i) => `<li style="--i:${i}"><span class="pos">${i + 1}º</span><span class="n" title="${esc(n)}">${esc(n)}</span><span class="p">${p} pts · ${j} j</span></li>`).join("") + `</ol>` +
+      dados.l.map(([n, p, j], i) => `<li style="--i:${i}"><span class="pos">${i + 1}º</span><span class="n" title="${esc(n)}">${esc(n)}</span><span class="p"><i>${p} pts</i><i class="sep"> · </i><i class="j">${j} j</i></span></li>`).join("") + `</ol>` +
       (toque ? `<button class="entrar" type="button" data-entrar="${c}">Entrar em ${esc(s.f.properties.ligas[0].nome)}</button>` : "");
   }
   mostrarTimes(sils.find(s => s.f.properties.c === "BRA") || sils[0] || null);
+  if (window.ResizeObserver) {
+    let alturaVista = 0;
+    new ResizeObserver(() => {
+      const a = timesBox.offsetHeight;
+      if (lay && Math.abs(a - alturaVista) > 2) { alturaVista = a; layout(); ultimoP = -1; pedir(); }
+    }).observe(timesBox);
+  }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (lay) { layout(); ultimoP = -1; pedir(); } });
   document.addEventListener("numeros-atualizados", () => { const a = ativo; if (a) a.d.classList.remove("ativo"); ativo = null; mostrarTimes(a); });
   timesBox.addEventListener("click", e => {
     const b = e.target.closest("[data-entrar]"); if (!b) return;
@@ -2452,24 +2504,46 @@ if (globo) {
   let lay = null;
   function layout() {
     const w = palco.clientWidth, h = palco.clientHeight, estreito = w < 820;
-    const cols = 3, rows = Math.ceil(sils.length / cols);
+    const baixo = !estreito && document.documentElement.dataset.planeta === "baixo";
+    const cols = baixo ? 6 : 3, rows = Math.ceil(sils.length / cols);
     let fator = w < 620 ? .72 : (estreito ? .85 : 1);
-    const areaW = estreito ? w - 32 : Math.min(w * .58, 760 * K), x0Area = estreito ? 16 : Math.max(28, w * .04);
-    const nomeH = Math.max(36 * K, (sils[0] && sils[0].nome.offsetHeight) || 0) + 8 * K;   // nome + país embaixo da silhueta
+    const areaW = baixo ? Math.min(w * .84, 1100 * K) : (estreito ? w - 32 : Math.min(w * .58, 760 * K));
+    const x0Area = baixo ? (w - areaW) / 2 : (estreito ? 16 : Math.max(28, w * .04));
     tituloSplit.style.maxWidth = areaW + "px";
-    // começa logo abaixo do título; se a grade + o painel de líderes não couberem na altura, encolhe
+    tituloSplit.style.left = baixo ? x0Area + "px" : "";
+    timesBox.style.width = areaW + "px";
+    // 20/10: a grade é MEDIDA. Cada linha = silhueta + o nome de verdade (fonte, quebra, tamanho
+    // mínimo do navegador) + uma folga — antes o nome era suposto e a linha de baixo encostava
+    // no nome da de cima. Tudo em px sem a escala (offsetTop/offsetHeight não sofrem o transform).
+    const fimNome = Math.max(H + 40 * K, ...sils.map(s => s.nome.offsetTop + s.nome.offsetHeight));
+    const folga = 26 * K, linha = fimNome + folga;
     const fimTitulo = tituloSplit.offsetTop + tituloSplit.offsetHeight;
     const celular = w < 620;
-    const topo = celular ? fimTitulo + 14 * K : (estreito ? h * .25 : Math.max(h * .16, fimTitulo + 8 * K));
-    const alturaTimes = (timesBox.offsetHeight || 140 * K) + 16 * K;
-    const precisa = (H + nomeH + 20 * K) * rows + 16 * K + alturaTimes;
-    if (!estreito && topo + precisa * fator > h) fator = Math.max(.6, (h - topo - alturaTimes) / (precisa - alturaTimes));
-    if (celular) { const grade = (H + nomeH + 20 * K) * rows, cabe = (h - topo - 24 * K - alturaTimes) / grade; fator = Math.max(.38, Math.min(fator, cabe)); }
-    const passoX = areaW / cols, passoY = (H + nomeH + 20 * K) * fator;
-    const alvos = sils.map((_, i) => ({ x: x0Area + passoX * (i % cols + .5), y: topo + passoY * (Math.floor(i / cols) + .5), s: fator }));
-    const fimY = topo + passoY * (rows - .5) + (H / 2 + nomeH) * fator + 16 * K;
-    timesBox.style.left = x0Area + "px"; timesBox.style.top = fimY + "px"; timesBox.style.width = areaW + "px";
-    lay = { w, h, estreito, alvos, gx: estreito ? 0 : w * .3, gy: w < 620 ? -h * .44 : (estreito ? -h * .28 : 0), gs: estreito ? .55 : .66, apaga: w < 620 ? .9 : .55 };
+    const topo = celular ? fimTitulo + 14 * K : (estreito ? Math.max(h * .25, fimTitulo + 12 * K) : fimTitulo + 18 * K);
+    const alturaTimes = Math.max(timesBox.offsetHeight, 120 * K) + 14 * K;
+    const cabe = (h - topo - alturaTimes - 12 * K) / (linha * rows - folga);
+    fator = Math.max(celular ? .38 : .5, Math.min(fator, cabe));
+    const passoX = areaW / cols, passoY = linha * fator;
+    const alvos = sils.map((_, i) => ({ x: x0Area + passoX * (i % cols + .5), y: topo + passoY * Math.floor(i / cols) + H / 2 * fator, s: fator }));
+    const fimY = topo + passoY * (rows - 1) + fimNome * fator + 14 * K;
+    timesBox.style.left = x0Area + "px"; timesBox.style.top = fimY + "px";
+    lay = { w, h, estreito, alvos, gx: estreito ? 0 : w * .3, gy: w < 620 ? -h * .44 : (estreito ? -h * .28 : 0), gs: estreito ? .55 : .66, apaga: w < 620 ? .9 : .55, alt: null };
+    const fimTimes = fimY + Math.max(timesBox.offsetHeight, 120 * K);
+    if (baixo) {
+      // planeta nascendo embaixo: o topo do arco logo abaixo do painel de líderes.
+      // O tamanho vem da câmera (nítido); a escala por CSS só completa o que a câmera não alcança.
+      const topoArco = Math.min(h - 90 * K, fimTimes + 28 * K);
+      const fov = globo.camera().fov * Math.PI / 360;
+      const Rcam = h / 2 * .97, th = Math.atan(Rcam / (h / 2) * Math.tan(fov));
+      const Rquer = Math.max(Rcam, w * .5), s = Math.min(1.45, Rquer / Rcam);
+      lay.alt = 1 / Math.sin(th) - 1;
+      lay.gx = 0; lay.gs = s; lay.gy = topoArco + Rcam * s - h / 2; lay.apaga = 0; lay.veu = .35;
+      viagem.style.marginBottom = -Math.round(h * .14) + "px";   // a seção de baixo entra na parte que já está sumindo
+    } else {
+      // a sobra embaixo do painel de líderes não vira um vão: a seção seguinte sobe por cima dela
+      const livre = h - fimTimes - 8 * K;
+      viagem.style.marginBottom = livre > 0 ? -Math.round(livre) + "px" : "";
+    }
   }
 
   function origem() {
@@ -2485,14 +2559,14 @@ if (globo) {
 
   const suave = t => t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
   const fora = t => t <= 0 ? 0 : t >= 1 ? 1 : 1 - Math.pow(1 - t, 3);
-  let sujo = false, ultimoP = -1;
+  let sujo = false, ultimoP = -1, povIni = POV0;
   function pedir() { if (!sujo) { sujo = true; requestAnimationFrame(quadro); } }
   addEventListener("scroll", pedir, { passive: true });
 
   function quadro() {
     sujo = false;
     if (!lay) layout();
-    const total = viagem.offsetHeight - palco.clientHeight;
+    const total = palco.clientHeight * 2.3;   // 20/10: a mesma distância de antes para a animação (era 330vh − 100vh); a altura da seção caiu para 250vh
     const p = Math.max(0, Math.min(1, (scrollY - viagem.offsetTop) / Math.max(1, total)));
     if (p === ultimoP) return;
     ultimoP = p;
@@ -2502,13 +2576,14 @@ if (globo) {
     const novaFase = p > 0.04 ? 1 : 0;
     if (novaFase !== fase) {
       fase = novaFase;
-      if (fase) { hover = null; desmarcar(); origem(); ctrl.enableZoom = false; ctrl.autoRotate = false; }
+      if (fase) { hover = null; desmarcar(); origem(); ctrl.enableZoom = false; ctrl.autoRotate = false; povIni = globo.pointOfView(); }
       else { ctrl.enableZoom = toque || sobre; }
       redesenhar();
     }
     caixa.style.transform = `translate3d(${(lay.gx * g).toFixed(1)}px,${(lay.gy * g).toFixed(1)}px,0) scale(${(1 - (1 - lay.gs) * g).toFixed(4)})`;
     caixa.style.opacity = (1 - lay.apaga * g).toFixed(3);
-    veu.style.opacity = g.toFixed(3);
+    veu.style.opacity = (g * (lay.veu == null ? 1 : lay.veu)).toFixed(3);
+    if (lay.alt != null && fase) globo.pointOfView({ lat: povIni.lat + (30 - povIni.lat) * g, lng: povIni.lng, altitude: povIni.altitude + (lay.alt - povIni.altitude) * g }, 0);
     const ui1 = (1 - suave(p / 0.08)).toFixed(3);
     ui.forEach(x => x && (x.style.opacity = ui1));
     const tt = suave((p - 0.32) / 0.14).toFixed(3);
