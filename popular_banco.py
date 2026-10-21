@@ -317,12 +317,18 @@ def get_or_create_jogador(cur, api_football_id, nome):
 
       1. Procura pelo api_football_id - se achar, é o jogador certo, sem
          ambiguidade nenhuma.
-      2. Se não achar pelo id, procura pelo nome (cobre jogadores que já
-         existiam no banco antes dessa mudança, cadastrados só com nome).
-         Se encontrar um jogador com esse nome que ainda não tem id salvo,
-         aproveita e completa o registro com o id agora.
-      3. Se não encontrar de nenhuma forma, cria um jogador novo já com
-         nome + id.
+      2. Se não achar pelo id, procura pelo nome, mas SÓ entre jogadores que
+         ainda não têm id da API (cadastrados só com nome — antes dessa
+         mudança, ou pela OddsPapi). Achou: completa o registro com o id.
+      3. Se não encontrar (inclusive quando o único com esse nome já tem
+         OUTRO api_football_id, ou seja, é um homônimo), cria um jogador
+         novo já com nome + id.
+
+    21/10/2026 (H-ID, Fase 1 — `claude/arquitetura_identidade_jogador.md`):
+    até aqui o passo 2 devolvia o jogador de mesmo nome MESMO QUE ele tivesse
+    outro api_football_id, e o segundo "Vitinho" virava o primeiro desde 2022.
+    Agora nome igual com id diferente vira jogador novo. Não mexe no acervo:
+    só jogo coletado depois do deploy grava separado (a Fase 2 separa o resto).
 
     Se a API não mandar o id (caso raro, dados incompletos), cai de volta
     pro comportamento antigo: busca/cria só pelo nome.
@@ -333,15 +339,18 @@ def get_or_create_jogador(cur, api_football_id, nome):
         if row:
             return row[0]
 
-        cur.execute("SELECT id, api_football_id FROM jogadores WHERE nome = %s", (nome,))
+        cur.execute(
+            "SELECT id FROM jogadores WHERE nome = %s AND api_football_id IS NULL "
+            "ORDER BY id LIMIT 1",
+            (nome,),
+        )
         row = cur.fetchone()
         if row:
-            jogador_id, id_existente = row
-            if id_existente is None:
-                cur.execute(
-                    "UPDATE jogadores SET api_football_id = %s WHERE id = %s",
-                    (api_football_id, jogador_id),
-                )
+            jogador_id = row[0]
+            cur.execute(
+                "UPDATE jogadores SET api_football_id = %s WHERE id = %s",
+                (api_football_id, jogador_id),
+            )
             return jogador_id
 
         cur.execute(
@@ -352,7 +361,7 @@ def get_or_create_jogador(cur, api_football_id, nome):
 
     # sem id vindo da API (não deveria acontecer normalmente, mas por segurança
     # não trava o script - cai pro comportamento antigo, só por nome)
-    cur.execute("SELECT id FROM jogadores WHERE nome = %s", (nome,))
+    cur.execute("SELECT id FROM jogadores WHERE nome = %s ORDER BY id LIMIT 1", (nome,))
     row = cur.fetchone()
     if row:
         return row[0]
