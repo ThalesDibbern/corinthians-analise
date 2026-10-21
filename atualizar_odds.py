@@ -350,7 +350,13 @@ def get_or_create_jogador(cur, nome):
     API-Football)."""
     nome_normalizado = normalizar_nome_oddspapi(nome)
 
-    cur.execute("SELECT id FROM jogadores WHERE nome = %s", (nome_normalizado,))
+    # 21/10/2026 (H-ID): com os homônimos separados (`popular_banco` desde 21/10,
+    # `separar_homonimos.py`) pode haver 2+ `jogadores` com o mesmo nome. Sem
+    # ORDER BY, o Postgres devolveria qualquer um (a ordem física muda a cada
+    # UPDATE do `motor_padroes`). `ORDER BY id` = sempre o mais antigo, que é o
+    # que este casamento só por nome já usava na prática. O casamento certo
+    # (nome + time do jogo) é a Fase 3 (`claude/arquitetura_identidade_jogador.md`).
+    cur.execute("SELECT id FROM jogadores WHERE nome = %s ORDER BY id LIMIT 1", (nome_normalizado,))
     row = cur.fetchone()
     if row:
         return row[0]
@@ -358,7 +364,7 @@ def get_or_create_jogador(cur, nome):
     # rede de segurança: se por algum motivo já existir um registro com o
     # nome no formato original (não normalizado), aproveita em vez de duplicar
     if nome_normalizado != nome:
-        cur.execute("SELECT id FROM jogadores WHERE nome = %s", (nome,))
+        cur.execute("SELECT id FROM jogadores WHERE nome = %s ORDER BY id LIMIT 1", (nome,))
         row = cur.fetchone()
         if row:
             return row[0]

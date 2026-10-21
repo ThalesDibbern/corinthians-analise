@@ -20,7 +20,10 @@ banco (jogo, `jogadores.id`, time — o time vem do lado real da estatística):
             contido no outro) → a linha é desse id da API
   provavel  nenhum compatível, mas exatamente um com o mesmo PRIMEIRO nome
             no time → separado do intruso; a Fase 2 decide se usa
-  ambiguo   não está, e há 2+ compatíveis → não decide
+  ambiguo   não está, e há 2+ compatíveis, nenhum ou mais de um com o nome
+            IGUAL → não decide. (21/10, noite: com 2+ compatíveis e exatamente
+            um de nome igual, é intruso desse — a fusão é por nome igual;
+            `candidatos` > 1 marca esses casos)
   sem_par   não está, e nenhum compatível → não decide
   id_zero   o `jogadores` tem api_football_id = 0: a API deu id 0 a quem não
             tinha cadastro e todos caíram no mesmo jogador — outra causa
@@ -383,6 +386,14 @@ def classificar(dono, nome_banco, escalacao, jogo_inteiro):
         if len(cand) == 1:
             return "intruso", cand[0][0], cand[0][1], 1
         if cand:
+            # 21/10: a fusão acontece por nome IGUAL (`popular_banco`), então,
+            # entre vários compatíveis, o de nome igual é o que se fundiu
+            # ("Diego" × "Diego" e "Diego Alves"; "Nathan" × "Nathan" e
+            # "Nathan Fernandes"). Só vale com exatamente UM igual; o nº de
+            # compatíveis fica em `candidatos` (> 1 = resolvido pelo nome igual).
+            exatos = [(a, n) for a, n in cand if normalizar(n) == normalizar(nome_banco)]
+            if len(exatos) == 1:
+                return "intruso", exatos[0][0], exatos[0][1], len(cand)
             return "ambiguo", None, None, len(cand)
     pn = primeiro_nome(nome_banco)
     cand = [(a, n) for a, n in escalacao if a != dono and pn and primeiro_nome(n) == pn]
@@ -453,6 +464,12 @@ def relatorio(cur, lista_suspeitos, todos):
     print(f"\n## INTRUSOS: {len(pares)} par(es) (jogadores.id fundido → id da API de outra pessoa); até 40")
     for jid, nome, dono, certo, nome_api, n in pares[:40]:
         print(f"   {jid:>6} {nome:<24} (dono api {dono})  ← api {certo:>7} \"{nome_api}\"  {int(n):>4} linha(s)")
+
+    cur.execute("SELECT COUNT(*), COUNT(DISTINCT jogador_id_atual) FROM public.homonimos_linha "
+                "WHERE situacao = 'intruso' AND candidatos > 1")
+    n_ex, j_ex = cur.fetchone()
+    print(f"   (desses, {int(n_ex)} linha(s) de {int(j_ex)} jogadores.id resolvidas pelo nome IGUAL "
+          f"entre 2+ compatíveis)")
 
     destinos = {int(r[0]) for r in pares}
     cur.execute("SELECT DISTINCT jogador_id_atual FROM public.homonimos_linha WHERE situacao = 'provavel'")
