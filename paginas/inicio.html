@@ -379,7 +379,7 @@ dialog .botoes{display:flex;gap:0.625rem;justify-content:flex-end;flex-wrap:wrap
 @media (max-width:620px){.testes{top:auto;bottom:calc(4rem + env(safe-area-inset-bottom,0px));right:0.75rem;padding:0.5rem}.testes .cores{display:none}}
 
 /* ---------- quem somos ---------- */
-.sobre{padding-block:5.625rem 4.375rem}
+.sobre{padding-block:5.625rem 1rem}
 .sobre .envolve{display:block}
 .sobre .rascunho{font-family:var(--f-corpo);font-size:0.6875rem;letter-spacing:0;text-transform:none;color:var(--laranja);margin-bottom:0.625rem}
 .sobre h2{font-family:var(--f-titulo);font-size:clamp(1.875rem,4.4vw,3.625rem);line-height:1;margin:0 0 1.375rem;text-wrap:balance}
@@ -428,7 +428,8 @@ dialog .botoes{display:flex;gap:0.625rem;justify-content:flex-end;flex-wrap:wrap
 .rodadas .honesto small{display:block;color:var(--apagado);margin-top:0.25rem;font-size:0.75rem}
 
 /* ---------- como funciona (rolagem guiada) ---------- */
-.como{position:relative;z-index:2}
+.como{position:relative;z-index:2;margin-top:-3rem;pointer-events:none}
+.como-grade,.como-pontos{pointer-events:auto}
 .como-pista{height:560vh;position:relative}
 .como-palco{position:sticky;top:0;height:100vh;height:100dvh;display:flex;align-items:center;overflow:hidden;
   padding-left:max(1rem,env(safe-area-inset-left,0px));padding-right:max(1rem,env(safe-area-inset-right,0px))}
@@ -720,6 +721,8 @@ html.trava{overflow:hidden}
 }
 /* ================= v16: tutorial das páginas (seção "Por dentro") ================= */
 .tour{padding-block:4.5rem 5rem}
+.tour-pagina{padding:2.5rem max(1rem,env(safe-area-inset-left,0px)) calc(3.75rem + env(safe-area-inset-bottom,0px))}
+.tour-pagina .sobe,.tour-pagina .palavras .w{opacity:1;transform:none;filter:none}
 .tour .eyebrow-t{font-family:var(--f-corpo);font-size:0.7188rem;letter-spacing:0;text-transform:none;color:var(--laranja);margin-bottom:.5rem}
 .tour-abas{display:flex;gap:.375rem;flex-wrap:wrap;margin:0 0 1rem}
 .tour-aba{font-family:var(--f-corpo);font-size:.8125rem;font-weight:600;color:var(--apagado);background:rgba(255,255,255,.04);border:1px solid var(--linha);border-radius:999px;padding:.4375rem .9375rem;cursor:pointer;transition:color .15s,background .15s,border-color .15s}
@@ -986,6 +989,97 @@ html.trava{overflow:hidden}
 .rodadas .chart.estreito svg{min-width:0}
 .rodadas .chart.estreito .rot{font-size:0.5625rem}
 .rodadas .chart.estreito .rot-forte{font-size:0.6875rem}
+
+/* ================= 21/10: ligas em tabela, casas em faixa, líderes com mais dados ================= */
+#grade{display:none}
+.u-card{position:relative;overflow:hidden;background:var(--painel-solido);border:1px solid var(--linha);border-radius:1.125rem;min-width:0}
+.u-v{font-family:var(--f-dado);font-variant-numeric:tabular-nums}
+.ua{padding:0.5rem 0.75rem 0.75rem}
+.ua-rolo{overflow-x:auto}
+.ua table{width:100%;border-collapse:collapse;min-width:44rem}
+.ua th{font-weight:500;font-size:0.7188rem;color:var(--apagado);text-align:right;padding:0.75rem 0.625rem 0.5rem;white-space:nowrap}
+.ua th:first-child{text-align:left}
+.ua td{padding:0.6875rem 0.625rem;border-top:1px solid var(--linha);text-align:right;vertical-align:middle}
+.ua td:first-child{text-align:left}
+.ua tbody tr{cursor:pointer;transition:background .15s}
+.ua tbody tr:hover,.ua tbody tr.ativo{background:rgba(63,111,209,.10)}
+.ua .liga-cel{display:flex;align-items:center;gap:0.625rem;min-width:0}
+.ua .liga-cel b{display:block;font-size:0.9062rem;font-weight:600;white-space:nowrap}
+.ua .liga-cel small{display:block;font-size:0.7188rem;color:var(--apagado);white-space:nowrap}
+.ua .n{font-size:0.9375rem;display:inline-block;padding:0.1875rem 0.4375rem;border-radius:0.4375rem;border:1px solid transparent}
+.ua .n.destaque{border-color:rgba(255,210,10,.55);color:var(--laranja)}
+.ua .mini{height:0.1875rem;border-radius:2px;background:rgba(140,180,255,.15);margin:0.3125rem 0 0 auto;width:3.5rem;overflow:hidden}
+.ua .mini i{display:block;height:100%;background:var(--azul)}
+.ua .destaque + .mini i{background:var(--laranja)}
+.ua .entrar{padding:0.4375rem 0.875rem;font-size:0.8125rem}
+.ua-pe{display:flex;align-items:center;gap:0.625rem;flex-wrap:wrap;padding:0.875rem 0.625rem 0.25rem;border-top:1px solid var(--linha);font-size:0.8438rem}
+.ua-pe .frase{flex:1;min-width:14rem}
+.ua-pe .quem{font-weight:600}
+@media (max-width:760px){
+  .ua table{min-width:0}
+  .ua thead,.ua .cel-t{display:none}
+  .ua tbody tr{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0.25rem;padding:0.75rem 0.25rem;border-top:1px solid var(--linha)}
+  .ua td{border:0;padding:0;text-align:center}
+  .ua td:first-child{grid-column:1/5;grid-row:1;align-self:center}
+  .ua .cel-e{grid-column:5;grid-row:1;text-align:right}
+  .ua .cel-n{grid-row:2;padding-top:0.5rem}
+  .ua .cel-n::after{content:attr(data-r);display:block;font-size:0.5938rem;color:var(--apagado);line-height:1.15;margin-top:0.25rem}
+  .ua .n{font-size:0.8438rem;padding:0.125rem 0.25rem}
+  .ua .mini{margin:0.25rem auto 0;width:80%}
+  .ua .entrar{padding:0.375rem 0.625rem;font-size:0.75rem}
+}
+/* casas: um card em faixa */
+.kc{position:relative;overflow:hidden;border-radius:1.125rem;border:1px solid var(--linha);background:var(--painel-solido)}
+.kc-super{position:relative;display:flex;flex-direction:row;align-items:center;justify-content:flex-start;flex-wrap:wrap;gap:0.75rem 1.5rem;text-align:left;
+  padding:1.125rem 1.375rem;width:100%;font:inherit;color:inherit;cursor:pointer;border:0;overflow:hidden;
+  background:radial-gradient(120% 140% at 0% 0%,#2c5bbf 0%,#0b2a6b 45%,#04133a 100%)}
+.kc-super::after{content:"";position:absolute;inset:-40%;background:conic-gradient(from 0deg,transparent 0 70%,rgba(255,210,10,.2) 80%,transparent 90%);animation:gira-casa 7s linear infinite;pointer-events:none}
+.kc-super > *{position:relative;z-index:1}
+.kc-super .marca-casa{font-family:var(--f-titulo);font-weight:700;font-size:clamp(1.5rem,2.4vw,2rem);letter-spacing:-.01em;
+  background:linear-gradient(100deg,#fff 0%,#fff3b0 45%,#ffd20a 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.kc-super .info{font-size:0.8125rem;color:#d6def0;max-width:32ch;flex:1;min-width:14rem}
+.kc-lado{padding:0.875rem 1.375rem 1.125rem;display:flex;flex-wrap:wrap;align-items:center;gap:0.375rem 1.25rem;border-top:1px solid var(--linha)}
+.kc-rot{font-size:0.75rem;color:var(--apagado);margin:0;display:flex;align-items:center;gap:0.5rem}
+.kc-rot b{font-family:var(--f-titulo);font-weight:700;font-size:0.8125rem;color:#dfe2ea;letter-spacing:.04em}
+.kc-nomes{display:flex;flex-wrap:wrap;gap:0.25rem 1.25rem;list-style:none;margin:0;padding:0}
+.kc-nomes button{font:inherit;background:none;border:0;color:rgba(189,191,199,.7);font-family:var(--f-titulo);font-weight:600;font-size:0.875rem;padding:0.25rem 0;cursor:pointer}
+.kc-nomes button:hover{color:#e4e6ec}
+@media (prefers-reduced-motion:reduce){.kc-super::after{animation:none}}
+/* Quem somos: 6 números e a frase da calibração */
+.dados.seis{grid-template-columns:repeat(3,minmax(0,1fr))}
+.qs-frase{margin:0.25rem 0 0.625rem;font-size:0.875rem;color:#dfe6f6}
+.qs-frase[hidden]{display:none}
+.qs-frase::before{content:"";display:inline-block;width:0.4375rem;height:0.4375rem;border-radius:50%;background:var(--laranja);margin-right:0.5rem;vertical-align:1px}
+.qs-frase small{color:var(--apagado);font-size:0.75rem}
+@media (max-width:900px){.dados.seis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* líderes do planeta: tabela com forma, artilheiro, V-E-D, saldo, aproveitamento */
+.times ol{display:block}
+.times .lx{display:grid;grid-template-columns:1.75rem minmax(0,1fr) auto 4.25rem 3.25rem 3.5rem 3rem;align-items:center;gap:0.25rem 0.75rem;padding:0.4375rem 0.125rem;border-top:1px solid var(--linha);animation:item .45s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i) * 55ms)}
+.times .lx.simples{grid-template-columns:1.75rem minmax(0,1fr) 3rem 3rem}
+.times .lx.cab-lx{border-top:0;padding-top:0;font-size:0.625rem;color:var(--apagado);animation:none}
+.times .lx .pos{font-family:var(--f-dado);font-size:0.75rem;color:var(--laranja)}
+.times .lx .tm b{display:block;font-size:0.8438rem;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.times .lx .tm small{display:block;font-size:0.6875rem;color:var(--apagado);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.times .lx .tm small em{font-style:normal;font-family:var(--f-dado);color:#dfe6f6}
+.times .lx .nm{font-family:var(--f-dado);font-size:0.75rem;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.times .lx .pts{font-size:0.9375rem;color:#fff}
+.times .lx .nm small{color:var(--apagado);font-size:0.625rem;margin-left:2px}
+.times .forma{display:flex;gap:3px}
+.times .forma i{width:1.125rem;height:1.125rem;border-radius:0.3125rem;display:grid;place-items:center;font:600 0.5938rem/1 var(--f-dado);font-style:normal;color:#06112b}
+.times .forma i.V{background:#5fd38d}
+.times .forma i.E{background:#bdbfc7}
+.times .forma i.D{background:#ff6b6b}
+.times .lx.cab-lx .nm,.times .lx.cab-lx .forma{font:inherit;color:inherit}
+.times .lx-destaque{margin:0.625rem 0 0;font-size:0.8125rem;color:#dfe6f6}
+.times .lx-destaque::before{content:"";display:inline-block;width:0.4375rem;height:0.4375rem;border-radius:50%;background:var(--laranja);margin-right:0.5rem;vertical-align:1px}
+.times .lx-destaque b{color:#fff}
+@media (max-width:620px){
+  .times .lx{grid-template-columns:1.5rem minmax(0,1fr) auto 2.75rem;gap:0.25rem 0.5rem}
+  .times .lx.simples{grid-template-columns:1.5rem minmax(0,1fr) 2.75rem 2.75rem}
+  .times .lx .ved,.times .lx .sg,.times .lx .apr{display:none}
+  .times .forma i{width:1rem;height:1rem}
+  .times .cab small{display:inline}
+}
 </style>
 <style>
 /* ---------- 20/10/2026: bilhetes das múltiplas que acertaram ---------- */
@@ -1154,14 +1248,9 @@ html.trava{overflow:hidden}
 
 <nav class="nav" aria-label="Seções do site">
   <div class="grandes">
-    <button class="cartao-grande vidro entra ativo" style="--atraso:60ms" type="button" id="card-recomendacoes"><span class="rotulo">Recomendações</span><span class="sub">As apostas com valor de hoje</span></button>
+    <button class="cartao-grande vidro entra ativo" style="--atraso:60ms" type="button" id="card-quem"><span class="rotulo">Quem somos</span><span class="sub">O projeto e os números</span></button>
     <button class="cartao-grande vidro entra ativo" style="--atraso:140ms" type="button" id="card-tecnico" aria-haspopup="dialog"><span class="rotulo">Como funcionamos</span><span class="sub">O sistema por dentro</span></button>
-    <div class="cartao-grande vidro entra" style="--atraso:220ms" aria-disabled="true"><span class="rotulo">Em definição</span><span class="sub">Seção a definir</span></div>
-  </div>
-  <div class="pequenos">
-    <button class="cartao-nav vidro esq entra" style="--atraso:300ms" id="nav-ligas" type="button"><span class="rotulo">Ligas</span></button>
-    <button class="cartao-nav vidro meio entra" style="--atraso:360ms" type="button" aria-current="page" id="nav-planeta"><span class="rotulo">Ligas globais</span></button>
-    <button class="cartao-nav vidro dir entra" style="--atraso:420ms" type="button" id="nav-sobre"><span class="rotulo">Quem somos</span></button>
+    <button class="cartao-grande vidro entra ativo" style="--atraso:220ms" type="button" id="card-paginas" aria-haspopup="dialog"><span class="rotulo">Conheça as páginas</span><span class="sub">O site por dentro, em miniatura</span></button>
   </div>
   <button class="nav-icone vidro" id="nav-icone" type="button" aria-label="Abrir menu" aria-expanded="false">
     <svg viewBox="0 0 20 20" aria-hidden="true"><rect class="q q1" x="2" y="2" width="7" height="7" rx="2" fill="currentColor"/><rect class="q q2" x="11" y="2" width="7" height="7" rx="2" fill="currentColor" opacity=".55"/><rect class="q q3" x="2" y="11" width="7" height="7" rx="2" fill="currentColor" opacity=".55"/><rect class="q q4" x="11" y="11" width="7" height="7" rx="2" fill="currentColor"/></svg>
@@ -1235,25 +1324,14 @@ html.trava{overflow:hidden}
       <h2 id="t-casas" class="palavras" data-palavras>Casas de apostas</h2>
       <p class="sobe">As odds de todas as análises vêm de uma casa. As outras entram aos poucos.</p>
     </div>
-    <div class="casas">
-      <button class="casa casa-on sobe" type="button" data-casa="Superbet">
-        <span class="pilula on">Disponível</span>
-        <span class="marca-casa">Superbet</span>
-        <span class="info">Odds coletadas todo dia, em todos os mercados que analisamos</span>
-      </button>
-      <div class="casas-off">
-        <div class="grade-off">
-          <button class="casa casa-cinza sobe" style="--atraso:40ms" type="button" data-casa="BetMGM"><span class="marca-casa">BetMGM</span></button>
-          <button class="casa casa-cinza sobe" style="--atraso:80ms" type="button" data-casa="bet365"><span class="marca-casa">bet365</span></button>
-          <button class="casa casa-cinza sobe" style="--atraso:120ms" type="button" data-casa="Betano"><span class="marca-casa">Betano</span></button>
-          <button class="casa casa-cinza sobe" style="--atraso:160ms" type="button" data-casa="Betfair"><span class="marca-casa">Betfair</span></button>
-          <button class="casa casa-cinza sobe" style="--atraso:200ms" type="button" data-casa="Sportingbet"><span class="marca-casa">Sportingbet</span></button>
-          <button class="casa casa-cinza sobe" style="--atraso:240ms" type="button" data-casa="KTO"><span class="marca-casa">KTO</span></button>
-          <button class="casa casa-cinza sobe" style="--atraso:280ms" type="button" data-casa="Winbet"><span class="marca-casa">Winbet</span></button>
-          <button class="casa casa-cinza sobe" style="--atraso:320ms" type="button" data-casa="bwin"><span class="marca-casa">bwin</span></button>
-        </div>
-        <div class="selo-breve" aria-hidden="true"><span>EM BREVE</span></div>
-      </div>
+    <div class="kc" id="casas-card">
+      <button class="kc-super sobe" type="button" data-casa="Superbet"><span class="pilula on">Disponível</span><span class="marca-casa">Superbet</span><span class="info">Odds coletadas todo dia, em todos os mercados que analisamos</span></button>
+      <div class="kc-lado"><p class="kc-rot"><b>EM BREVE</b> as próximas casas</p><ul class="kc-nomes">
+        <li><button type="button" data-casa="BetMGM">BetMGM</button></li><li><button type="button" data-casa="bet365">bet365</button></li>
+        <li><button type="button" data-casa="Betano">Betano</button></li><li><button type="button" data-casa="Betfair">Betfair</button></li>
+        <li><button type="button" data-casa="Sportingbet">Sportingbet</button></li><li><button type="button" data-casa="KTO">KTO</button></li>
+        <li><button type="button" data-casa="Winbet">Winbet</button></li><li><button type="button" data-casa="bwin">bwin</button></li>
+      </ul></div>
     </div>
   </div>
 </section>
@@ -1263,12 +1341,15 @@ html.trava{overflow:hidden}
     <h2 id="t-sobre" class="palavras" data-palavras>Quem somos</h2>
     <p class="manifesto destaca" data-destaca>Um projeto pessoal que cruza as estatísticas de cada partida com as odds das casas de apostas, calcula a probabilidade histórica de cada mercado e procura as odds mal precificadas: aquelas em que a casa paga mais do que o jogo indica.</p>
 
-    <div class="dados">
+    <div class="dados seis">
       <div class="dado vidro sobe" style="--atraso:90ms"><span class="v" data-int="9099" data-chave="jogos">9.099</span><span class="r">jogos disputados e analisados, em 6 ligas</span></div>
       <div class="dado vidro sobe" style="--atraso:180ms"><span class="v" data-int="75944" data-chave="odds">75.944</span><span class="r">odds de mercado coletadas</span></div>
       <div class="dado vidro sobe" style="--atraso:270ms"><span class="v" data-int="2350" data-chave="recomendacoes">2.350</span><span class="r">recomendações conferidas desde 24/07/2026</span></div>
       <div class="dado vidro sobe" style="--atraso:360ms"><span class="v" data-int="9782" data-chave="multiplas">9.782</span><span class="r">múltiplas avaliadas, uma a uma</span></div>
+      <div class="dado vidro sobe" style="--atraso:450ms"><span class="v" data-int="1078" data-chave="odds_por_jogo">1.078</span><span class="r">odds por jogo, em 18 tipos de mercado</span></div>
+      <div class="dado vidro sobe" style="--atraso:540ms"><span class="v" data-int="8590" data-chave="previsoes">8.590</span><span class="r">previsões gravadas antes do apito, sem poder mudar depois</span></div>
     </div>
+    <p class="qs-frase sobe" id="qs-frase">Na última rodada, quando o sistema deu entre 70% e 80% de chance, a aposta aconteceu em <b>74%</b> das vezes. <small>Rodada 31, 62 apostas.</small></p>
     <p class="dados-data sobe" id="dados-data">Atualizado em 14/10/2026</p>
 
     <div class="bloco">
@@ -1371,7 +1452,21 @@ html.trava{overflow:hidden}
   </div>
 </section>
 
-<section class="secao tour" id="tour" aria-labelledby="t-tour">
+<section class="secao embreve" id="embreve" aria-labelledby="t-embreve">
+  <div class="envolve">
+    <h2 id="t-embreve" class="palavras" data-palavras>Em breve</h2>
+    <p class="sub sobe">44 ligas que aparecem em cinza no planeta. Elas entram aos poucos.</p>
+    <div class="chips" id="chips"><div class="faixa"><div class="trilho" id="trilho1"></div></div><div class="faixa volta"><div class="trilho" id="trilho2"></div></div></div>
+  </div>
+</section>
+<footer class="secao rodape"><div class="envolve"><span id="rodape-nome">Achismo Zero · <span data-slogan>só o que os números dizem</span></span><span>Projeto pessoal · 2026</span></div></footer>
+
+<div class="pagina" id="pagina-paginas" role="dialog" aria-modal="true" aria-labelledby="t-tour" hidden>
+  <div class="pagina-barra">
+    <span class="pb-nome">Conheça as páginas</span>
+    <button class="pb-fechar" type="button" id="pp-fechar">Fechar <span aria-hidden="true">✕</span></button>
+  </div>
+<section class="tour tour-pagina" id="tour" aria-labelledby="t-tour">
   <div class="envolve">
     <div class="cabeca-sec">
       <div><div class="eyebrow-t">Por dentro do sistema</div><h2 id="t-tour" class="palavras" data-palavras>Conheça as páginas</h2></div>
@@ -1677,16 +1772,7 @@ html.trava{overflow:hidden}
     </div>
   </div>
 </section>
-
-<section class="secao embreve" id="embreve" aria-labelledby="t-embreve">
-  <div class="envolve">
-    <h2 id="t-embreve" class="palavras" data-palavras>Em breve</h2>
-    <p class="sub sobe">44 ligas que aparecem em cinza no planeta. Elas entram aos poucos.</p>
-    <div class="chips" id="chips"><div class="faixa"><div class="trilho" id="trilho1"></div></div><div class="faixa volta"><div class="trilho" id="trilho2"></div></div></div>
-  </div>
-</section>
-<footer class="secao rodape"><div class="envolve"><span id="rodape-nome">Achismo Zero · <span data-slogan>só o que os números dizem</span></span><span>Projeto pessoal · 2026</span></div></footer>
-
+</div>
 <div class="pagina" id="pagina-tecnica" role="dialog" aria-modal="true" aria-labelledby="pt-titulo" hidden>
   <div class="pagina-barra">
     <span class="pb-nome">Como funcionamos</span>
@@ -1965,18 +2051,79 @@ function fraseDe(c) {
   chips.addEventListener("click", e => { const b = e.target.closest(".chip"); if (!b) return; const l = LIGAS[+b.dataset.i]; ligaEmBreve(l, nomePais[l.pais] || l.pais); });
 })();
 
+/* ---------- 21/10: ligas em tabela ---------- */
+(function ligasTabela() {
+  const grade = document.getElementById("grade");
+  const caixa = document.createElement("div"); caixa.id = "ligas-tabela"; grade.after(caixa);
+  const fmt = (k, v) => k === "m25" || k === "am" ? v.toFixed(1).replace(".", ",") + "%" : v.toFixed(2).replace(".", ",");
+  const max = {}; Object.keys(ROT).forEach(k => (max[k] = Math.max(...ORDEM_ON.map(c => NUM[c][k]))));
+  const L = disponiveis.map(f => ({ f, c: f.properties.c, n: NUM[f.properties.c], liga: f.properties.ligas[0], pais: f.properties.n, fr: fraseDe(f.properties.c) }));
+  const cab = `<tr><th>Liga</th>${Object.keys(ROT).map(k => `<th>${ROT[k]}</th>`).join("")}<th>Temporada</th><th></th></tr>`;
+  const linhas = L.map((x, i) => `<tr data-i="${i}"${i === 0 ? ' class="ativo"' : ""}><td><div class="liga-cel">${selo(x.liga, 32)}<div><b>${esc(x.liga.nome)}</b><small>${esc(x.pais)} · ${x.n.times} times</small></div></div></td>` +
+    Object.keys(ROT).map(k => `<td class="cel-n" data-r="${ROT[k]}"><span class="n u-v${x.fr.campo === k ? " destaque" : ""}">${fmt(k, x.n[k])}</span><div class="mini"><i style="width:${(x.n[k] / max[k] * 100).toFixed(0)}%"></i></div></td>`).join("") +
+    `<td class="cel-t"><small class="u-v" style="color:var(--apagado);font-size:.6875rem">${x.n.t} · ${x.n.j} jogos</small></td><td class="cel-e"><button class="entrar" type="button" data-c="${x.c}">Entrar</button></td></tr>`).join("");
+  caixa.innerHTML = `<div class="u-card ua sobe"><div class="ua-rolo"><table><thead>${cab}</thead><tbody>${linhas}</tbody></table></div>` +
+    `<div class="ua-pe"><span class="quem" id="ua-quem"></span><p class="frase" id="ua-frase"></p></div></div>`;
+  const mostra = i => {
+    const x = L[i];
+    document.getElementById("ua-quem").textContent = x.liga.nome + ":";
+    document.getElementById("ua-frase").textContent = x.fr.texto;
+    caixa.querySelectorAll("tbody tr").forEach(tr => tr.classList.toggle("ativo", +tr.dataset.i === i));
+  };
+  mostra(0);
+  const corpo = caixa.querySelector("tbody");
+  corpo.addEventListener("mouseover", e => { const tr = e.target.closest("tr"); if (tr) mostra(+tr.dataset.i); });
+  corpo.addEventListener("click", e => {
+    const b = e.target.closest("button[data-c]"), tr = e.target.closest("tr");
+    if (b) { const x = L.find(y => y.c === b.dataset.c); entrarLiga(x.liga, x.pais); } else if (tr) mostra(+tr.dataset.i);
+  });
+})();
+
+/* ---------- 21/10: líderes do planeta em tabela ---------- */
+function tabelaLideres(ls) {
+  const rico = ls.length && ls[0].length >= 11;
+  if (!rico) {
+    return `<div class="lx simples cab-lx"><span></span><span>time</span><span class="nm">pts</span><span class="nm">jogos</span></div>` +
+      ls.map(([n, p, j], i) => `<div class="lx simples" style="--i:${i}"><span class="pos">${i + 1}º</span><span class="tm"><b title="${esc(n)}">${esc(n)}</b></span><span class="nm pts">${p}</span><span class="nm">${j}</span></div>`).join("");
+  }
+  const seq = (f, ok) => { let k = 0; for (const c of f) { if (ok.includes(c)) k++; else break; } return k; };
+  let melhor = null;
+  ls.forEach(([n, pts, jg, v, e, d, gp, gc, f]) => {
+    const op = [];
+    if (v === jg && jg >= 3) op.push({ p: 100 + jg, t: `<b>${esc(n)}</b> venceu todos os ${jg} jogos da temporada.` });
+    const sv = seq(f, "V"); if (sv >= 3) op.push({ p: sv * 1.3, t: `<b>${esc(n)}</b> venceu os últimos ${sv} jogos.` });
+    const si = seq(f, "VE"); if (si >= 5) op.push({ p: si, t: `<b>${esc(n)}</b> está há ${si} jogos sem perder.` });
+    if (d === 0 && jg >= 5) op.push({ p: jg * 1.2, t: `<b>${esc(n)}</b> ainda não perdeu na temporada (${jg} jogos).` });
+    op.forEach(o => { if (!melhor || o.p > melhor.p) melhor = o; });
+  });
+  if (!melhor) {
+    const [n, , jg, , , , gp] = ls.reduce((a, b) => (b[6] / b[2] > a[6] / a[2] ? b : a));
+    melhor = { t: `<b>${esc(n)}</b> tem o melhor ataque entre os líderes: ${(gp / jg).toFixed(2).replace(".", ",")} gols por jogo.` };
+  }
+  const cab = `<div class="lx cab-lx"><span></span><span>time · artilheiro</span><span class="forma">últimos 5</span><span class="nm ved">V-E-D</span><span class="nm sg">saldo</span><span class="nm apr">aprov.</span><span class="nm">pts</span></div>`;
+  return cab + ls.map(([n, pts, jg, v, e, d, gp, gc, f, art, ng], i) => {
+    const sg = gp - gc, apr = Math.round(pts / (jg * 3) * 100);
+    const forma = [...String(f).slice(0, 5)].map(c => `<i class="${c}">${c}</i>`).join("");
+    return `<div class="lx" style="--i:${i}"><span class="pos">${i + 1}º</span><span class="tm"><b title="${esc(n)}">${esc(n)}</b><small>${art ? `${esc(art)} · <em>${ng}</em> gols` : ""}</small></span>` +
+      `<span class="forma">${forma}</span><span class="nm ved">${v}-${e}-${d}</span><span class="nm sg">${sg > 0 ? "+" : ""}${sg}</span><span class="nm apr">${apr}%</span><span class="nm pts">${pts}<small>${jg}j</small></span></div>`;
+  }).join("") + `<p class="lx-destaque">${melhor.t}</p>`;
+}
+
+/* ---------- 21/10: casas em faixa ---------- */
+document.getElementById("casas-card").addEventListener("click", e => {
+  const b = e.target.closest("[data-casa]"); if (!b) return;
+  const nome = b.dataset.casa;
+  if (nome === "Superbet") abrir({ aviso: SESSAO ? "" : "PROTÓTIPO", titulo: nome, texto: "É a casa de onde vêm as odds de todas as análises de hoje.", botoes: [{ txt: "Fechar", cls: "fechar" }] });
+  else abrir({ titulo: "Essa casa ainda não está disponível", texto: `${nome} está na fila. Quando as odds dela entrarem nas análises, ela passa para o lado da Superbet.`, botoes: [{ txt: "Fechar", cls: "fechar" }] });
+});
+
+
 const viagem = document.getElementById("viagem");
 const irPara = y => scrollTo({ top: y, behavior: reduz ? "auto" : "smooth" });
-document.getElementById("nav-ligas").addEventListener("click", () => irPara(document.getElementById("ligas").offsetTop));
-document.getElementById("nav-planeta").addEventListener("click", () => irPara(0));
-document.getElementById("nav-sobre").addEventListener("click", () => irPara(document.getElementById("sobre").offsetTop));
 // botão do canto: "Entrar" sem login; "Conta" logado (por enquanto leva a Minhas Apostas)
 if (SESSAO && SESSAO.logado) document.querySelector("#conta span").textContent = "Conta";
-document.getElementById("card-recomendacoes").addEventListener("click", () => SESSAO ? (location.href = SESSAO.logado ? "/" : paraLogin("/")) : abrir({
-  aviso: "PROTÓTIPO", titulo: "Recomendações",
-  texto: "No site, leva à página de recomendações (pede login antes, se precisar).",
-  botoes: [{ txt: "Fechar", cls: "fechar" }]
-}));
+document.getElementById("card-quem").addEventListener("click", () => irPara(document.getElementById("sobre").offsetTop));
+
 document.getElementById("conta").addEventListener("click", () => SESSAO ? (location.href = SESSAO.logado ? "/minhas-apostas" : paraLogin("/")) : abrir({
   aviso: "PROTÓTIPO", titulo: "Entrar na conta",
   texto: "No site, aqui abre o login. A página inicial fica pública; entrar só é pedido ao abrir uma liga.",
@@ -2119,7 +2266,8 @@ const fmtInt = v => Math.round(v).toLocaleString("pt-BR");
 /* ---------- números da página: um lugar só ----------
    No protótipo, valores de 14/10/2026. No site, a rota /api/numeros-home devolve o mesmo formato
    (contado no banco, com cache), e a página troca sozinha; se a rota falhar, ficam estes. */
-const NUMEROS_HOME = { atualizado: "2026-10-14", jogos: 9099, odds: 75944, recomendacoes: 2350, multiplas: 9782 };
+const NUMEROS_HOME = { atualizado: "2026-10-14", jogos: 9099, odds: 75944, recomendacoes: 2350, multiplas: 9782,
+  odds_por_jogo: 1078, previsoes: 8590, calibracao: { faixa: "70-80", rodada: 31, n: 62, pct: 74 } };
 function aplicarNumeros(n) {
   document.querySelectorAll("[data-chave]").forEach(el => {
     const v = +n[el.dataset.chave]; if (!isFinite(v) || v <= 0) return;
@@ -2127,6 +2275,12 @@ function aplicarNumeros(n) {
     if (el.hasAttribute("data-int-vis")) el.dataset.intVis = v;
     el.textContent = fmtInt(v);
   });
+  const fr = document.getElementById("qs-frase");
+  if (fr) {
+    const c = n.calibracao;
+    if (c && c.n >= 20) fr.innerHTML = `Na última rodada medida, quando o sistema deu entre 70% e 80% de chance, a aposta aconteceu em <b>${c.pct}%</b> das vezes. <small>Rodada ${c.rodada}, ${c.n} apostas.</small>`;
+    else if (n !== NUMEROS_HOME) fr.hidden = true;
+  }
   const d = /^(\d{4})-(\d{2})-(\d{2})/.exec(n.atualizado || "");
   if (d) document.getElementById("dados-data").textContent = `Atualizado em ${d[3]}/${d[2]}/${d[1]}`;
   if (n.lideres) {
@@ -2270,6 +2424,29 @@ function comoRolagem() {
   card.addEventListener("click", abrirPag);
   document.getElementById("pt-fechar").addEventListener("click", fecharPag);
   document.getElementById("pt-voltar").addEventListener("click", fecharPag);
+  addEventListener("keydown", e => { if (e.key === "Escape" && !pag.hidden) fecharPag(); });
+})();
+
+/* ---------- 21/10: página "Conheça as páginas" (igual à "Como funcionamos") ---------- */
+(function paginaPaginas() {
+  const pag = document.getElementById("pagina-paginas"), card = document.getElementById("card-paginas");
+  let antes = null;
+  function abrirPag() {
+    antes = document.activeElement;
+    pag.hidden = false; pag.scrollTop = 0;
+    document.documentElement.classList.add("trava");
+    requestAnimationFrame(() => { pag.classList.add("aberta"); if (window.tourRemontar) window.tourRemontar(); });
+    document.getElementById("pp-fechar").focus({ preventScroll: true });
+    if (nav.classList.contains("aberta")) { nav.classList.remove("aberta"); navIcone.setAttribute("aria-expanded", "false"); }
+  }
+  function fecharPag() {
+    pag.classList.remove("aberta");
+    document.documentElement.classList.remove("trava");
+    setTimeout(() => { pag.hidden = true; }, reduz ? 0 : 350);
+    if (antes && antes.focus) antes.focus({ preventScroll: true });
+  }
+  card.addEventListener("click", abrirPag);
+  document.getElementById("pp-fechar").addEventListener("click", fecharPag);
   addEventListener("keydown", e => { if (e.key === "Escape" && !pag.hidden) fecharPag(); });
 })();
 
@@ -2473,8 +2650,7 @@ if (globo) {
     if (!s) { timesBox.innerHTML = `<div class="vazio">${toque ? "Toque num país" : "Passe o mouse num país"} para ver os 5 primeiros da temporada.</div>`; return; }
     s.d.classList.add("ativo");
     const c = s.f.properties.c, dados = LIDERES[c];
-    timesBox.innerHTML = `<div class="cab"><b>${esc(dados.t)}</b><small>líderes · pontos · jogos</small></div><ol>` +
-      dados.l.map(([n, p, j], i) => `<li style="--i:${i}"><span class="pos">${i + 1}º</span><span class="n" title="${esc(n)}">${esc(n)}</span><span class="p"><i>${p} pts</i><i class="sep"> · </i><i class="j">${j} j</i></span></li>`).join("") + `</ol>` +
+    timesBox.innerHTML = `<div class="cab"><b>${esc(dados.t)}</b><small>temporada atual</small></div><ol>${tabelaLideres(dados.l)}</ol>` +
       (toque ? `<button class="entrar" type="button" data-entrar="${c}">Entrar em ${esc(s.f.properties.ligas[0].nome)}</button>` : "");
   }
   mostrarTimes(sils.find(s => s.f.properties.c === "BRA") || sils[0] || null);
@@ -2823,6 +2999,7 @@ document.getElementById("testes-botao").addEventListener("click", () => {
     if (balao.classList.contains("mostra") && atual >= 0) posicionar(partes[atual]);
   });
   montar("recomendacoes");
+  window.tourRemontar = () => { parar(); montar(telaAtual); };
 })();
 </script>
 <script>

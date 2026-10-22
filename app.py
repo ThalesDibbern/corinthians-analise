@@ -3236,18 +3236,61 @@ SCHEMAS_NUMEROS_HOME = (
 # Cada perspectiva (linha de `jogos`) é um time num jogo: somar por
 # nosso_time_id dá a tabela. Temporada atual = ano do último jogo com placar
 # (Brasileirão) ou a maior `temporada` (ligas). Jogo sem placar fica fora.
+# 21/10/2026: além de pontos e jogos, V-E-D, gols pró/contra, a forma (os 5 últimos,
+# do mais recente para o mais antigo) e o artilheiro do time na temporada (gols
+# marcados PELO time: `gols.lado = 'mandante'` é o time da perspectiva, §5.2).
 SQL_LIDERES_HOME = """
-    SELECT t.nome,
-           SUM(CASE WHEN j.placar_corinthians > j.placar_adversario THEN 3
-                    WHEN j.placar_corinthians = j.placar_adversario THEN 1 ELSE 0 END) AS pts,
-           COUNT(*) AS jg
-    FROM {s}.jogos j
-    JOIN {s}.times t ON t.id = j.nosso_time_id
-    WHERE j.placar_corinthians IS NOT NULL AND j.placar_adversario IS NOT NULL AND {filtro}
-    GROUP BY t.id, t.nome
-    ORDER BY pts DESC, SUM(j.placar_corinthians - j.placar_adversario) DESC,
-             SUM(j.placar_corinthians) DESC, t.nome
-    LIMIT 5
+    WITH b AS (
+        SELECT j.id, j.nosso_time_id AS t, j.data_jogo AS d,
+               j.placar_corinthians AS gp, j.placar_adversario AS gc
+        FROM {s}.jogos j
+        WHERE j.placar_corinthians IS NOT NULL AND j.placar_adversario IS NOT NULL AND {filtro}
+    ), tab AS (
+        SELECT t, SUM(CASE WHEN gp > gc THEN 3 WHEN gp = gc THEN 1 ELSE 0 END) AS pts, COUNT(*) AS jg,
+               SUM(CASE WHEN gp > gc THEN 1 ELSE 0 END) AS v, SUM(CASE WHEN gp = gc THEN 1 ELSE 0 END) AS e,
+               SUM(CASE WHEN gp < gc THEN 1 ELSE 0 END) AS dd, SUM(gp) AS gp, SUM(gc) AS gc
+        FROM b GROUP BY t
+    ), topo AS (
+        SELECT tab.*, tm.nome FROM tab JOIN {s}.times tm ON tm.id = tab.t
+        ORDER BY pts DESC, gp - gc DESC, gp DESC, tm.nome LIMIT 5
+    ), forma AS (
+        SELECT t, LEFT(string_agg(CASE WHEN gp > gc THEN 'V' WHEN gp = gc THEN 'E' ELSE 'D' END, ''
+                                  ORDER BY d DESC, id DESC), 20) AS f
+        FROM b WHERE t IN (SELECT t FROM topo) GROUP BY t
+    ), art AS (
+        SELECT DISTINCT ON (b.t) b.t, jg.nome, COUNT(*) AS n
+        FROM b
+        JOIN {s}.gols g ON g.jogo_id = b.id AND g.lado = 'mandante' AND g.gol_contra IS NOT TRUE
+        JOIN {s}.jogadores jg ON jg.id = g.jogador_id
+        WHERE b.t IN (SELECT t FROM topo)
+        GROUP BY b.t, jg.id, jg.nome
+        ORDER BY b.t, COUNT(*) DESC, jg.nome
+    )
+    SELECT topo.nome, topo.pts, topo.jg, topo.v, topo.e, topo.dd, topo.gp, topo.gc,
+           COALESCE(forma.f, ''), art.nome, art.n
+    FROM topo LEFT JOIN forma ON forma.t = topo.t LEFT JOIN art ON art.t = topo.t
+    ORDER BY topo.pts DESC, topo.gp - topo.gc DESC, topo.gp DESC, topo.nome
+"""
+
+# Odds por jogo da casa em uso (a da odd mais recente), contando o jogo por fixture.
+SQL_ODDS_POR_JOGO_HOME = """
+    SELECT ROUND(COUNT(*)::numeric / NULLIF(COUNT(DISTINCT j.fixture_id_api), 0))
+    FROM odds o JOIN jogos j ON j.id = o.jogo_id
+    WHERE o.casa_aposta = (SELECT casa_aposta FROM odds ORDER BY coletado_em DESC LIMIT 1)
+"""
+# "Quando o sistema deu entre 70% e 80%, aconteceu em X%": a rodada mais recente
+# (2026) com pelo menos 20 recomendações arquivadas nessa faixa.
+SQL_CALIBRACAO_HOME = """
+    WITH h AS (
+        SELECT j.rodada_numero AS rn, h.resultado AS r
+        FROM historico_recomendacoes h JOIN jogos j ON j.id = h.jogo_id
+        WHERE h.data_jogo >= date_trunc('year', CURRENT_DATE)::date
+          AND h.resultado IN ('acertou', 'errou')
+          AND h.probabilidade_historica >= 70 AND h.probabilidade_historica < 80
+    )
+    SELECT rn, COUNT(*), ROUND(100.0 * AVG(CASE WHEN r = 'acertou' THEN 1 ELSE 0 END))
+    FROM h GROUP BY rn HAVING COUNT(*) >= 20
+    ORDER BY rn DESC LIMIT 1
 """
 FILTRO_TEMPORADA_BRASILEIRAO = ("j.data_jogo >= date_trunc('year', (SELECT MAX(data_jogo) FROM public.jogos "
                                 "WHERE placar_corinthians IS NOT NULL))::date")
@@ -3267,13 +3310,26 @@ def _contar_numeros_home():
             jogos += cur.fetchone()[0] or 0
             filtro = FILTRO_TEMPORADA_BRASILEIRAO if s == "public" else FILTRO_TEMPORADA_LIGA.format(s=s)
             cur.execute(SQL_LIDERES_HOME.format(s=s, filtro=filtro))
-            lideres[pais] = [[nome, int(pts), int(jg)] for nome, pts, jg in cur.fetchall()]
+            lideres[pais] = [[nome, int(pts), int(jg), int(v), int(e), int(d), int(gp), int(gc), forma or "",
+                              art, int(n_art) if n_art is not None else None]
+                             for nome, pts, jg, v, e, d, gp, gc, forma, art, n_art in cur.fetchall()]
         cur.execute("SELECT COUNT(*) FROM odds")
         odds = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM historico_recomendacoes")
         recomendacoes = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM multiplas_candidatas WHERE avaliada")
         multiplas = cur.fetchone()[0]
+        cur.execute(SQL_ODDS_POR_JOGO_HOME)
+        odds_por_jogo = cur.fetchone()[0]
+        previsoes = 0
+        cur.execute("SELECT to_regclass('public.registro_modelo') IS NOT NULL")
+        if cur.fetchone()[0]:
+            cur.execute("SELECT COUNT(*) FROM registro_modelo")
+            previsoes = cur.fetchone()[0]
+        cur.execute(SQL_CALIBRACAO_HOME)
+        linha = cur.fetchone()
+        calibracao = ({"faixa": "70-80", "rodada": int(linha[0]), "n": int(linha[1]), "pct": int(linha[2])}
+                      if linha else None)
         cur.close()
         conn.rollback()
     finally:
@@ -3282,6 +3338,8 @@ def _contar_numeros_home():
         "atualizado": datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat(timespec="minutes"),
         "jogos": int(jogos), "odds": int(odds),
         "recomendacoes": int(recomendacoes), "multiplas": int(multiplas),
+        "odds_por_jogo": int(odds_por_jogo or 0), "previsoes": int(previsoes),
+        "calibracao": calibracao,
         "lideres": lideres,
     }
 
