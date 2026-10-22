@@ -298,24 +298,28 @@ def barra_navegacao_nova(pagina_atual, banca_atual=None):
         ("index", "/", "Recomendações"),
         ("jogadores", "/jogadores", "Jogadores"),
         ("roi", "/minhas-apostas", "Minhas Apostas"),
-        ("inicio", "/inicio", "Ligas globais"),
     ]
+    # 22/10/2026: "Ligas globais" saiu do menu; a logo leva à /inicio.
     links = ""
     for chave, href, rotulo in itens:
         ativo = chave == pagina_atual
         classe = "topo-link topo-ativo" if ativo else "topo-link"
         atual = ' aria-current="page"' if ativo else ""
-        links += f'<a href="{href}" class="{classe}"{atual}>{rotulo}</a>'
+        links += f'<a href="{href}" class="{classe}" data-prev="{chave}"{atual}>{rotulo}</a>'
     banca = ""
     if banca_atual is not None:
         banca = f'<a href="/minhas-apostas" class="topo-banca">Banca R$ {banca_atual:.2f}</a>'
     return (
         '<header class="topo">'
-        f'<a href="/" class="topo-marca" aria-label="{MARCA}" title="{MARCA}, {SLOGAN["pt"]}">'
+        f'<a href="/inicio" class="topo-marca" aria-label="{MARCA} - Ligas globais" title="{MARCA}, {SLOGAN["pt"]} - Ligas globais">'
         'Achismo <span class="logo-zero" aria-hidden="true"></span></a>'
         f'<nav class="topo-nav" aria-label="Páginas">{links}</nav>'
         f'<div class="topo-direita">{banca}<a href="/minhas-apostas" class="topo-conta">Conta</a></div>'
         '</header>'
+        # 22/10/2026: prévia das páginas ao passar o mouse (static/topo/)
+        '<link rel="stylesheet" href="/static/topo/previas.css">'
+        '<div id="prev" class="prev" aria-hidden="true"><div class="prev-palco"></div></div>'
+        '<script src="/static/topo/previas.js" defer></script>'
         f'{barra_ligas(visual_novo=True)}'
     )
 
