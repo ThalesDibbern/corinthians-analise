@@ -60,7 +60,20 @@ app = Flask(__name__)
 # variável de ambiente SECRET_KEY no Railway com um valor aleatório - sem
 # isso, a sessão de todo mundo seria invalidada (logout forçado) toda vez
 # que o serviço reiniciar/fizer novo deploy.
-app.secret_key = os.environ.get("SECRET_KEY", "troque-essa-chave-numa-variavel-de-ambiente-SECRET_KEY")
+# 23/10/2026: SEM chave reserva escrita no código. Até 22/10 o serviço rodou
+# sem a variável e usava o texto fixo que estava aqui — e quem tem o código
+# poderia forjar um login. Sem SECRET_KEY, agora cada processo sorteia uma
+# chave própria: ninguém consegue forjar sessão, e o sintoma vira "o login cai
+# a cada deploy/reinício" (e o aviso abaixo no log). Não levanta erro porque
+# scripts avulsos importam funções do app (`corrigir_estatisticas_pontual`,
+# `reabrir_apostas_desatualizadas`) e rodam sem a variável.
+_SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
+if len(_SECRET_KEY) < 32:
+    print("⚠️ SECRET_KEY ausente ou curta (< 32 caracteres): usando chave aleatória deste "
+          "processo — os logins caem a cada reinício. Configure SECRET_KEY no Railway.",
+          file=sys.stderr, flush=True)
+    _SECRET_KEY = secrets.token_hex(32)
+app.secret_key = _SECRET_KEY
 # 13/10/2026: o login dura 90 dias. Antes o cookie de sessão não era
 # "permanente" e sumia quando o navegador fechava - e é por essa sessão que a
 # leitura do banco (`/api/consulta`) funciona. Vale só para logins feitos
