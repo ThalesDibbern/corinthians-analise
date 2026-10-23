@@ -19,7 +19,13 @@ banco (jogo, `jogadores.id`, time — o time vem do lado real da estatística):
             com nome compatível (sem acento, maiúscula ou pontuação; um nome
             contido no outro) → a linha é desse id da API
   provavel  nenhum compatível, mas exatamente um com o mesmo PRIMEIRO nome
-            no time → separado do intruso; a Fase 2 decide se usa
+            no time → separado do intruso; a Fase 2 não usa.
+            23/10/2026 (decisão do usuário): o `provavel` vira INTRUSO quando o
+            calendário prova — o `jogadores.id` tem estatística em 2+ jogos
+            no MESMO DIA e esta linha é a de um deles (a do dono sai como
+            dono). Marcado com `candidatos = 0`. Foram os casos do Matheus
+            Pereira (683 → Matheus Rossetto) e do Wesley Ribeiro (778 →
+            Wesley Gassova, só no 838110). Sem dia duplo, continua `provavel`.
   ambiguo   não está, e há 2+ compatíveis, nenhum ou mais de um com o nome
             IGUAL → não decide. (21/10, noite: com 2+ compatíveis e exatamente
             um de nome igual, é intruso desse — a fusão é por nome igual;
@@ -69,6 +75,10 @@ usa o mesmo contador e o teto dele é 7.000.
 CRITÉRIO A1 (escrito antes do dado, arquitetura §4): todo jogador do teste
 do mesmo dia tem de aparecer como destino de pelo menos um intruso. Se faltar
 algum, o mapa está errado e a Fase 2 não roda.
+23/10/2026 (decisão do usuário): ficam FORA do A1, como casos à parte que esta
+separação não trata, os de causa conhecida que não é homônimo — `id_zero`
+(api_football_id = 0) e os listados em EXCECOES_A1. Qualquer outro que falte
+continua reprovando.
 ⚠️ O `jogadores.id` usado é o de HOJE. Depois do H1 (21/10) o intruso que
 voltar a jogar ganha `jogadores` próprio e as linhas NOVAS já nascem nele; as
 antigas continuam no id fundido — é o que o mapa descreve.
@@ -90,6 +100,14 @@ import popular_banco as pb
 import coletar_ligas as cl
 
 TETO_PADRAO = 6500
+
+# 23/10/2026: suspeitos do teste do mesmo dia que NÃO são homônimo — causa
+# conhecida, fora desta separação (decisão do usuário). Lista fechada: só
+# entra aqui com a causa escrita e aberta antes.
+EXCECOES_A1 = {
+    127: "Gil — em parte de 2022 o lado da estatística está trocado (3 dias duplos, sem_par); "
+         "não é outra pessoa (3_HISTORICO §3.115)",
+}
 PAUSA_ENTRE_CHAMADAS = float(os.environ.get("PAUSA_API_SEGUNDOS", "1.0"))
 
 TABELAS_VIGIADAS = ["jogadores", "escalacoes", "jogador_estatisticas_jogo",
@@ -345,6 +363,20 @@ SQL_LINHAS_ESTATISTICA = """
     JOIN public.times tv ON tv.id = j.visitante_id
     WHERE j.fixture_id_api IN (SELECT fixture_id_api FROM public.homonimos_fixture)
 """
+# 23/10: (jogadores.id, jogo) em que o jogador tem estatística em 2+ jogos no
+# mesmo dia — a prova de calendário que promove o `provavel`.
+SQL_LINHAS_DIA_DUPLO = """
+    WITH duplos AS (
+        SELECT jeg.jogador_id, j.data_jogo
+        FROM public.jogador_estatisticas_jogo jeg
+        JOIN public.jogos j ON j.id = jeg.jogo_id
+        GROUP BY jeg.jogador_id, j.data_jogo
+        HAVING COUNT(DISTINCT j.fixture_id_api) >= 2)
+    SELECT DISTINCT d.jogador_id, j.fixture_id_api
+    FROM duplos d
+    JOIN public.jogos j ON j.data_jogo = d.data_jogo
+    JOIN public.jogador_estatisticas_jogo jeg ON jeg.jogo_id = j.id AND jeg.jogador_id = d.jogador_id
+"""
 # Escalação sem estatística (reserva que não entrou): o banco não sabe o time.
 SQL_LINHAS_SO_ESCALACAO = """
     SELECT DISTINCT j.fixture_id_api, e.jogador_id
@@ -411,6 +443,9 @@ def montar_mapa(cur):
     cur.execute("SELECT id, nome, api_football_id FROM public.jogadores")
     jog = {int(i): (n, (int(a) if a is not None else None)) for i, n, a in cur.fetchall()}
 
+    cur.execute(SQL_LINHAS_DIA_DUPLO)
+    dia_duplo = {(int(a), int(b)) for a, b in cur.fetchall()}
+
     saida, contagem = [], {}
     cur.execute(SQL_LINHAS_ESTATISTICA)
     for f, jid, tm in cur.fetchall():
@@ -419,6 +454,8 @@ def montar_mapa(cur):
         tm = int(tm) if tm is not None else 0          # 0 = time desconhecido
         esc = por_time.get((f, tm), []) if tm else por_jogo.get(f, [])
         sit, certo, nome_api, nc = classificar(dono, nome, esc, por_jogo.get(f, []))
+        if sit == "provavel" and (jid, f) in dia_duplo:
+            sit, nc = "intruso", 0                      # promovido pelo calendário (23/10)
         contagem[("estatistica", sit)] = contagem.get(("estatistica", sit), 0) + 1
         if sit != "dono":
             saida.append((f, jid, tm, "estatistica", sit, certo, nome_api, nc))
@@ -470,6 +507,13 @@ def relatorio(cur, lista_suspeitos, todos):
     n_ex, j_ex = cur.fetchone()
     print(f"   (desses, {int(n_ex)} linha(s) de {int(j_ex)} jogadores.id resolvidas pelo nome IGUAL "
           f"entre 2+ compatíveis)")
+    cur.execute("""SELECT h.fixture_id_api, h.jogador_id_atual, jg.nome, h.api_id_certo, h.nome_api
+                   FROM public.homonimos_linha h JOIN public.jogadores jg ON jg.id = h.jogador_id_atual
+                   WHERE h.situacao = 'intruso' AND h.candidatos = 0 ORDER BY 2, 1""")
+    promovidos = cur.fetchall()
+    print(f"   (e {len(promovidos)} linha(s) 'provavel' promovida(s) a intruso pelo calendário — dia duplo:)")
+    for f, jid, nome, certo, nome_api in promovidos:
+        print(f"      jogo {f}: {jid} {nome} ← api {certo} \"{nome_api}\"")
 
     destinos = {int(r[0]) for r in pares}
     cur.execute("SELECT DISTINCT jogador_id_atual FROM public.homonimos_linha WHERE situacao = 'provavel'")
@@ -479,6 +523,12 @@ def relatorio(cur, lista_suspeitos, todos):
     faltam = [s for s in lista_suspeitos if s[0] not in destinos]
     print(f"\n## CRITÉRIO A1: {len(lista_suspeitos) - len(faltam)} de {len(lista_suspeitos)} "
           f"suspeitos do teste do mesmo dia são destino de um intruso")
+    for jid, nome, api, dias in faltam:
+        if jid in ids_zero:
+            print(f"   ➖ {jid:>6}  {nome:<28} fora do A1: id 0 da API — outra causa, caso à parte")
+        elif jid in EXCECOES_A1:
+            print(f"   ➖ {jid:>6}  {nome:<28} fora do A1: {EXCECOES_A1[jid]}")
+    faltam = [s for s in faltam if s[0] not in ids_zero and s[0] not in EXCECOES_A1]
     for jid, nome, api, dias in faltam[:30]:
         cur.execute("SELECT situacao, COUNT(*) FROM public.homonimos_linha WHERE jogador_id_atual = %s "
                     "GROUP BY 1 ORDER BY 1", (jid,))
