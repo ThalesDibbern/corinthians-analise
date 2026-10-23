@@ -50,6 +50,30 @@ import psycopg2
 
 # ---------- Configurações ----------
 API_KEY = os.environ["ODDSPAPI_KEY"]
+
+
+# 23/10/2026: a chave NUNCA vai para o log. Os erros do `requests` trazem a URL
+# completa, e a OddsPapi recebe a chave como `apiKey=` na URL — num 403 de jogo
+# ao vivo (rodar_liga, 23/10) a chave paga saiu inteira no log do Railway.
+# Todo erro HTTP/de conexão desta biblioteca passa por aqui antes de subir.
+_RE_APIKEY = re.compile(r"(apiKey=)[^&\s'\"]+", re.IGNORECASE)
+
+
+def mascarar(texto):
+    texto = _RE_APIKEY.sub(r"\1***", str(texto))
+    for nome in ("ODDSPAPI_KEY", "ODDSPAPI_KEY_TESTE", "API_FOOTBALL_KEY"):
+        chave = os.environ.get(nome)
+        if chave and len(chave) >= 8:
+            texto = texto.replace(chave, "***")
+    return texto
+
+
+def _checar_status(resp):
+    """`raise_for_status` com a mensagem mascarada (sem a URL com a chave)."""
+    try:
+        resp.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        raise requests.exceptions.HTTPError(mascarar(e), response=resp) from None
 API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY")  # opcional: sem ela, só pula o árbitro
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -128,7 +152,8 @@ def get_com_retry_429(url, params, tentativas=5, espera_segundos=20):
             resp = requests.get(url, params=params, timeout=30)
         except requests.exceptions.RequestException as e:
             if tentativa == tentativas - 1:
-                raise
+                raise requests.exceptions.ConnectionError(
+                    f"{e.__class__.__name__}: {mascarar(e)}") from None
             print(f"  Aviso: erro de conexão com a OddsPapi ({e.__class__.__name__}) - "
                   f"esperando {espera_segundos}s e tentando de novo...")
             time.sleep(espera_segundos)
@@ -136,7 +161,7 @@ def get_com_retry_429(url, params, tentativas=5, espera_segundos=20):
 
         if resp.status_code == 429:
             if tentativa == tentativas - 1:
-                resp.raise_for_status()
+                _checar_status(resp)
             print(f"  Aviso: limite de requisição da OddsPapi atingido (429) - "
                   f"esperando {espera_segundos}s e tentando de novo...")
             time.sleep(espera_segundos)
@@ -153,7 +178,7 @@ def buscar_catalogo_mercados():
         f"{API_BASE}/markets",
         params={"sportId": SPORT_ID, "language": "pt", "apiKey": API_KEY},
     )
-    resp.raise_for_status()
+    _checar_status(resp)
     mercados = resp.json()
 
     catalogo = {}
@@ -181,7 +206,7 @@ def _calendario_do_torneio():
             f"{API_BASE}/fixtures",
             params={"tournamentId": TOURNAMENT_ID, "sportId": SPORT_ID, "apiKey": API_KEY},
         )
-        resp.raise_for_status()
+        _checar_status(resp)
         _CALENDARIO_TORNEIO_CACHE.append(resp.json())
     return _CALENDARIO_TORNEIO_CACHE[0]
 
@@ -202,7 +227,7 @@ def buscar_proximos_jogos(participant_id):
                 "apiKey": API_KEY,
             },
         )
-        resp.raise_for_status()
+        _checar_status(resp)
         jogos = resp.json()
 
     hoje = datetime.now(timezone.utc).date()
@@ -280,7 +305,7 @@ def buscar_odds(fixture_id, bookmakers=None):
                 print(f"  Aviso: acesso negado (RESTRICTED_ACCESS), mas não foi possível "
                       f"identificar qual bookmaker está restrito. Detalhe da API: "
                       f"{erro.get('details')}")
-                resp.raise_for_status()
+                _checar_status(resp)
 
             # guarda no cache, pra não precisar redescobrir isso a cada jogo
             _bookmakers_restritos_conhecidos.update(restritos)
@@ -289,7 +314,7 @@ def buscar_odds(fixture_id, bookmakers=None):
                   f"Tentando de novo só com {restantes or '(nenhum restante)'}...")
             return buscar_odds(fixture_id, bookmakers=restantes)
 
-    resp.raise_for_status()
+    _checar_status(resp)
     return resp.json()
 
 
@@ -316,7 +341,7 @@ def buscar_fixture_api_football(data_jogo, team_api_football_id):
             headers={"x-apisports-key": API_FOOTBALL_KEY},
             params={"team": team_api_football_id, "date": data_jogo},
         )
-        resp.raise_for_status()
+        _checar_status(resp)
         dados = resp.json()
         jogos = dados.get("response", [])
         if not jogos:
@@ -664,7 +689,7 @@ def buscar_lesoes_suspensos(fixture_id_api):
             params={"fixture": fixture_id_api},
             timeout=15,
         )
-        resp.raise_for_status()
+        _checar_status(resp)
         dados = resp.json()
         if dados.get("errors"):
             print(f"  Aviso: API-Football retornou erro em /injuries: {dados['errors']}")
@@ -1203,7 +1228,7 @@ def main():
                 try:
                     dados_odds = buscar_odds(jogo["fixtureId"])
                 except Exception as e:
-                    print(f"  Aviso: não foi possível buscar odds desse jogo ({e}). Pulando pro próximo.")
+                    print(f"  Aviso: não foi possível buscar odds desse jogo ({mascarar(e)}). Pulando pro próximo.")
                     continue
 
                 # NOVO: só apaga as odds antigas se a resposta nova realmente
@@ -1225,7 +1250,7 @@ def main():
 
     except Exception as e:
         conn.rollback()
-        print(f"\nErro durante a execução: {e}")
+        print(f"\nErro durante a execução: {mascarar(e)}")
         raise
     finally:
         cur.close()
