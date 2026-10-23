@@ -35,6 +35,10 @@ execução em vermelho. A gravação acontece ANTES disso.
 Uma checagem que dá erro (tabela que não existe, consulta que quebra) vira
 FALHA com o erro no detalhe, e as outras continuam.
 
+23/10/2026: `checagem_anterior` — no primeiro dia depois de um buraco (dia sem
+nenhuma checagem gravada, como 21/10 com o Railway fora), acende ALERTA com os
+dias que faltaram. Avisa uma vez só.
+
 Variáveis de ambiente:
   DATABASE_URL         obrigatória
   CHECAGEM_CASA        casa esperada nas odds (padrão superbet.rs)
@@ -43,7 +47,7 @@ Variáveis de ambiente:
 
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import psycopg2
 
@@ -441,6 +445,26 @@ def chk_banco(cur, ctx):
     return [("banco_tamanho", status, round(pct, 1), detalhe)]
 
 
+def chk_checagem_anterior(cur, ctx):
+    """23/10/2026 (K4): o dia em que o cron NÃO roda não deixa linha nenhuma, e
+    ausência de linha não acende nada (21/10, Railway fora). Na primeira
+    execução depois do buraco, esta checagem compara hoje com o último dia
+    anterior que tem checagem gravada e lista os dias que faltaram. Avisa UMA
+    vez (no dia da volta), não todo dia."""
+    if not existe(cur, "public.checagem_diaria"):
+        return [("checagem_anterior", "INFO", 0, "tabela ainda não existe — primeira execução")]
+    ultimo = um(cur, "SELECT MAX(dia) FROM public.checagem_diaria WHERE dia < %s", (ctx["hoje"],))[0]
+    if ultimo is None:
+        return [("checagem_anterior", "INFO", 0, "nenhum dia anterior gravado")]
+    faltaram = [ultimo + timedelta(days=i) for i in range(1, (ctx["hoje"] - ultimo).days)]
+    if faltaram:
+        return [("checagem_anterior", "ALERTA", len(faltaram),
+                 f"{len(faltaram)} dia(s) SEM checagem antes de hoje (o cron das 15 UTC não rodou ou "
+                 f"falhou antes da checagem): " + listar(f"{d:%d/%m}" for d in faltaram)
+                 + f" · última checagem anterior: {ultimo:%d/%m}")]
+    return [("checagem_anterior", "OK", 0, f"checagem de ontem ({ultimo:%d/%m}) gravada")]
+
+
 def chk_api(cur, ctx):
     linha = um(cur, "SELECT requisicoes FROM controle_api_uso WHERE dia = %s", (ctx["hoje"],))
     n = linha[0] if linha else 0
@@ -452,6 +476,7 @@ CHECAGENS = [
     chk_cron_12utc, chk_odds, chk_recomendacoes, chk_registro_modelo, chk_registro_publico,
     chk_placar, chk_estatistica, chk_arquivamento, chk_duplicados, chk_pares, chk_presas,
     chk_data_divergente, chk_rodada_carimbada, chk_ligas, chk_banco, chk_api,
+    chk_checagem_anterior,
 ]
 
 
