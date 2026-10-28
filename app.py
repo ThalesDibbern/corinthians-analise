@@ -3334,7 +3334,7 @@ def _contar_numeros_home():
         odds = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM historico_recomendacoes")
         recomendacoes = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM multiplas_candidatas WHERE avaliada")
+        cur.execute("SELECT COUNT(*) FROM multiplas_candidatas WHERE avaliada AND resultado IN ('acertou', 'errou')")
         multiplas = cur.fetchone()[0]
         cur.execute(SQL_ODDS_POR_JOGO_HOME)
         odds_por_jogo = cur.fetchone()[0]
@@ -3452,7 +3452,7 @@ def _montar_bilhetes_home():
             FROM multiplas_candidatas m
             CROSS JOIN LATERAL jsonb_array_elements(m.pernas) p
             JOIN jogos_liga jl ON jl.fixture_id_api = (p->>'fixture_id_api')::bigint
-            WHERE m.avaliada
+            WHERE m.avaliada AND m.resultado IN ('acertou', 'errou')
             ORDER BY m.primeiro_apito DESC
             LIMIT 1
         """)

@@ -663,7 +663,13 @@ def selecionar_top5_do_jogo(cur, jogo_id):
     tem QUALQUER linha comprimida (casa_aposta NULL) em
     historico_multiplas_destaque, significa que ele já saiu da janela de
     2 rodadas com detalhe completo - não reabre o detalhe dele só porque
-    uma candidata atrasada terminou de ser avaliada agora."""
+    uma candidata atrasada terminou de ser avaliada agora.
+
+    NOVO (27/10/2026, C4): só entra múltipla com resultado 'acertou' ou
+    'errou'. O `varrer_multiplas_presas.py` marca como `avaliada = TRUE,
+    resultado = 'retirada'` a múltipla que tinha uma perna retirada antes do
+    apito - ela não estava mais sendo recomendada e não pode aparecer nas
+    Múltiplas em Destaque."""
     cur.execute(
         "SELECT COUNT(*) FROM historico_multiplas_destaque WHERE jogo_id = %s AND casa_aposta IS NULL",
         (jogo_id,),
@@ -675,7 +681,7 @@ def selecionar_top5_do_jogo(cur, jogo_id):
         """
         SELECT assinatura, casa_aposta, descricao, odd_combinada, jogos, probabilidade_combinada, resultado
         FROM multiplas_candidatas
-        WHERE avaliada = TRUE AND jogos @> %s::jsonb
+        WHERE avaliada = TRUE AND resultado IN ('acertou', 'errou') AND jogos @> %s::jsonb
         ORDER BY probabilidade_combinada DESC
         LIMIT 5
         """,
