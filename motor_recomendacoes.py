@@ -90,10 +90,33 @@ import os
 import psycopg2
 
 from tabela import calcular_tabela
+from combinacoes import MERCADOS_JOGO_INTEIRO, MERCADOS_JOGADOR
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 VALOR_ESPERADO_MINIMO = 0.0  # só guarda recomendações com VE acima disso
+
+# =====================================================================
+# NOVO (27/10/2026) - TETO DE ODD EM MERCADO DE TIME E DE JOGADOR
+# =====================================================================
+#
+# Recomendação de TIME ou de JOGADOR com odd >= ODD_TETO_TIME_JOGADOR não
+# é salva. JOGO INTEIRO fica sem teto. A probabilidade de nada muda: o
+# teto só decide o que entra (`claude/arquitetura_teto_odd.md`).
+#
+# Medido sobre o histórico deduplicado [medido, 27/10, revisão
+# independente]: o ROI vai de -9,0% para -6,4% na Superbet BR (rodadas
+# 4-28, 2.350 recomendações) e de -15,8% para -7,3% na superbet.rs
+# (rodadas 31-32, 868), e melhora em 6 das 7 rodadas completas.
+#
+# ⚠️ O teto fica em `main()`, NÃO em `calcular_recomendacoes`: o
+# `registrar_modelo.py` chama `calcular_recomendacoes` com odds fictícias
+# (1000+) e perderia todas as linhas de time e jogador. Lá ele continua
+# medindo tudo — é o grupo de controle (o M5 do `avaliar_registro_modelo`
+# passa a ser "sem teto").
+#
+# Variável de ambiente ODD_TETO_TIME_JOGADOR muda o valor; 0 desliga.
+ODD_TETO_TIME_JOGADOR = float(os.environ.get("ODD_TETO_TIME_JOGADOR", "3.0"))
 
 # =====================================================================
 # NOVO (03/09/2026) - CORREÇÃO DA SELEÇÃO ADVERSA DO VE (pendência 28)
@@ -3226,6 +3249,32 @@ def calcular_recomendacoes(cur):
     return recomendacoes
 
 
+def populacao_da_recomendacao(tipo_padrao, jogador_id):
+    """JOGO (jogo inteiro), JOGADOR (mercado de jogador COM jogador_id) ou
+    TIME (o resto, inclusive `cartao` sem jogador - 1_ESSENCIAL §5.20)."""
+    if tipo_padrao in MERCADOS_JOGO_INTEIRO:
+        return "JOGO"
+    if tipo_padrao in MERCADOS_JOGADOR and jogador_id is not None:
+        return "JOGADOR"
+    return "TIME"
+
+
+def aplicar_teto_de_odd(recomendacoes, teto=None):
+    """Separa as recomendações em (ficam, cortadas) pelo teto de odd de
+    TIME e JOGADOR. Teto <= 0 desliga (todas ficam)."""
+    teto = ODD_TETO_TIME_JOGADOR if teto is None else teto
+    if not teto or teto <= 0:
+        return list(recomendacoes), []
+    ficam, cortadas = [], []
+    for r in recomendacoes:
+        pop = populacao_da_recomendacao(r["tipo_padrao"], r.get("jogador_id"))
+        if pop in ("TIME", "JOGADOR") and float(r["odd_oferecida"]) >= teto:
+            cortadas.append(r)
+        else:
+            ficam.append(r)
+    return ficam, cortadas
+
+
 def salvar_recomendacoes(cur, recomendacoes):
     # limpa só as recomendações de jogos FUTUROS antes de gerar as novas
     # (as de jogos já ocorridos ficam intactas até o script de arquivamento
@@ -3263,6 +3312,18 @@ def main():
     try:
         print("Cruzando padrões com odds de jogos futuros...")
         recomendacoes = calcular_recomendacoes(cur)
+
+        # NOVO (27/10/2026): teto de odd em TIME e JOGADOR (ver o topo).
+        recomendacoes, cortadas = aplicar_teto_de_odd(recomendacoes)
+        if ODD_TETO_TIME_JOGADOR > 0:
+            por_pop = {}
+            for r in cortadas:
+                pop = populacao_da_recomendacao(r["tipo_padrao"], r.get("jogador_id"))
+                por_pop[pop] = por_pop.get(pop, 0) + 1
+            print(f"Teto de odd {ODD_TETO_TIME_JOGADOR:g} (time e jogador): "
+                  f"{len(cortadas)} cortada(s) {por_pop or ''} · {len(recomendacoes)} ficam.")
+        else:
+            print("Teto de odd DESLIGADO (ODD_TETO_TIME_JOGADOR = 0).")
 
         if not recomendacoes:
             print("Nenhuma recomendação de valor encontrada no momento "
