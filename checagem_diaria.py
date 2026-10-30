@@ -39,6 +39,19 @@ FALHA com o erro no detalhe, e as outras continuam.
 nenhuma checagem gravada, como 21/10 com o Railway fora), acende ALERTA com os
 dias que faltaram. Avisa uma vez só.
 
+29/10/2026: dois alarmes falsos da primeira semana tirados.
+  - Ligas: jogo com status de jogo não disputado (STATUS_SEM_JOGO: adiado,
+    cancelado, abandonado, suspenso, a definir) em `<liga>.jogos_liga` sai do
+    ALERTA de placar e de estatística e vira INFO (era o Rayo x Athletic, ABD,
+    todo dia).
+  - Múltiplas presas: `multiplas_presas` vira só INFO (o total, como antes) e
+    nasce `multiplas_presas_antigas`, que conta só as presas cujo último jogo
+    começou há mais de HORAS_PRESA_ANTIGA (72h, a mesma folga do
+    `varrer_multiplas_presas`). O ALERTA passa a ser dela, comparada com ela
+    mesma no último dia anterior. As recentes ainda podem ser resolvidas pelo
+    próximo arquivamento (a múltipla congela às 15:00 UTC, depois do
+    arquivamento das 12:00 UTC, e só é avaliada no dia seguinte).
+
 Variáveis de ambiente:
   DATABASE_URL         obrigatória
   CHECAGEM_CASA        casa esperada nas odds (padrão superbet.rs)
@@ -75,6 +88,10 @@ MAX_LISTADOS = 8
 # Status da API-Football de jogo que não foi (ou não terminou de ser) jogado:
 # adiado, cancelado, abandonado, suspenso, a definir. Sem placar é o esperado.
 STATUS_SEM_JOGO = ("PST", "CANC", "ABD", "SUSP", "TBD")
+# Presa "antiga" = o último jogo das pernas começou há mais disto. Mesma folga
+# do varrer_multiplas_presas (FOLGA_HORAS): antes disso o arquivamento normal
+# ainda pode avaliar a múltipla.
+HORAS_PRESA_ANTIGA = 72
 
 STATUS_VALIDOS = ("OK", "INFO", "ALERTA", "FALHA")
 
@@ -349,18 +366,45 @@ def chk_pares(cur, ctx):
 
 
 def chk_presas(cur, ctx):
-    n, mais_nova = um(cur, """
-        SELECT COUNT(*), MAX(primeiro_apito) FROM multiplas_candidatas
-        WHERE congelada = TRUE AND avaliada = FALSE
-    """)
+    """Total de presas (INFO) e presas antigas (as que o arquivamento normal já
+    não resolve; o ALERTA é delas). Antiga = o último jogo das pernas começou
+    há mais de HORAS_PRESA_ANTIGA; perna sem jogo no banco conta como antiga."""
+    n, antigas, mais_nova = um(cur, """
+        WITH p AS (
+            SELECT m.id, m.primeiro_apito,
+                   MAX(COALESCE(j.datahora_jogo, j.data_jogo::timestamp)) AS ultimo_jogo
+            FROM multiplas_candidatas m
+            CROSS JOIN LATERAL jsonb_array_elements(m.pernas) AS e(perna)
+            LEFT JOIN jogos j ON j.id = (e.perna->>'jogo_id')::int
+            WHERE m.congelada = TRUE AND m.avaliada = FALSE
+            GROUP BY m.id, m.primeiro_apito
+        )
+        SELECT COUNT(*),
+               COUNT(*) FILTER (WHERE ultimo_jogo IS NULL
+                                   OR ultimo_jogo < %s - %s * interval '1 hour'),
+               MAX(primeiro_apito)
+        FROM p
+    """, (ctx["agora"], HORAS_PRESA_ANTIGA))
+    recentes = n - antigas
+    saida = [("multiplas_presas", "INFO", n,
+              f"{n} múltipla(s) presa(s): {antigas} antiga(s) e {recentes} recente(s) "
+              f"(último jogo há menos de {HORAS_PRESA_ANTIGA}h, o arquivamento ainda pode avaliar); "
+              f"apito mais recente {mais_nova}")]
+    detalhe = (f"{antigas} múltipla(s) presa(s) com o último jogo há mais de {HORAS_PRESA_ANTIGA}h "
+               f"(o arquivamento normal não resolve mais; o varrer_multiplas_presas resolve as retiradas)")
     anterior = ctx.get("presas_anterior")
-    detalhe = f"{n} múltipla(s) presa(s), apito mais recente {mais_nova}"
     if anterior is None:
-        return [("multiplas_presas", "INFO", n, detalhe + " (sem medição anterior para comparar)")]
+        saida.append(("multiplas_presas_antigas", "INFO", antigas,
+                      detalhe + " (sem medição anterior para comparar)"))
+        return saida
     valor_ant, dia_ant = anterior
-    if n > valor_ant:
-        return [("multiplas_presas", "ALERTA", n, detalhe + f" — eram {int(valor_ant)} em {dia_ant:%d/%m} (§5.18)")]
-    return [("multiplas_presas", "INFO", n, detalhe + f" — eram {int(valor_ant)} em {dia_ant:%d/%m}")]
+    if antigas > valor_ant:
+        saida.append(("multiplas_presas_antigas", "ALERTA", antigas,
+                      detalhe + f" — eram {int(valor_ant)} em {dia_ant:%d/%m} (§5.18)"))
+    else:
+        saida.append(("multiplas_presas_antigas", "INFO", antigas,
+                      detalhe + f" — eram {int(valor_ant)} em {dia_ant:%d/%m}"))
+    return saida
 
 
 def chk_data_divergente(cur, ctx):
@@ -400,9 +444,23 @@ def chk_ligas(cur, ctx):
     """)]
     if not schemas:
         return [("ligas_em_dia", "INFO", 0, "nenhum schema liga_* encontrado")]
-    sem_placar, sem_estat, resumo = [], [], []
+    sem_placar, sem_estat, resumo, sem_jogo = [], [], [], []
     for s in schemas:
         temporada = um(cur, f"SELECT MAX(temporada) FROM {s}.jogos")[0]
+        # Jogo não disputado (adiado, abandonado...) pelo status da própria
+        # tabela da liga. Sem `jogos_liga` no schema, nenhum jogo é excluído.
+        if existe(cur, f"{s}.jogos_liga"):
+            filtro_jogado = (f"NOT EXISTS (SELECT 1 FROM {s}.jogos_liga jl "
+                             f"WHERE jl.fixture_id_api = j.fixture_id_api AND jl.status = ANY(%s))")
+            excl = [r[0] for r in todos(cur, f"""
+                SELECT DISTINCT j.fixture_id_api FROM {s}.jogos j JOIN {s}.jogos_liga jl
+                  ON jl.fixture_id_api = j.fixture_id_api
+                WHERE j.temporada = %s AND jl.status = ANY(%s) AND j.datahora_jogo < %s
+                ORDER BY 1
+            """, (temporada, list(STATUS_SEM_JOGO), ctx["agora"]))]
+            params_excl = [list(STATUS_SEM_JOGO)]
+        else:
+            filtro_jogado, excl, params_excl = "TRUE", [], []
         a, b, ultimo = um(cur, f"""
             SELECT
               COUNT(DISTINCT j.fixture_id_api) FILTER (
@@ -411,15 +469,23 @@ def chk_ligas(cur, ctx):
                   WHERE j.placar_corinthians IS NOT NULL AND j.datahora_jogo < %s - %s * interval '1 hour'
                     AND NOT EXISTS (SELECT 1 FROM {s}.estatisticas_jogo e WHERE e.jogo_id = j.id)),
               MAX(j.datahora_jogo) FILTER (WHERE j.placar_corinthians IS NOT NULL)
-            FROM {s}.jogos j WHERE j.temporada = %s
-        """, (ctx["agora"], HORAS_PLACAR_LIGA, ctx["agora"], HORAS_ESTATISTICA_LIGA, temporada))
+            FROM {s}.jogos j WHERE j.temporada = %s AND {filtro_jogado}
+        """, (ctx["agora"], HORAS_PLACAR_LIGA, ctx["agora"], HORAS_ESTATISTICA_LIGA, temporada,
+              *params_excl))
         nome = s[len("liga_"):]
         if a:
             sem_placar.append(f"{nome} {a}")
         if b:
             sem_estat.append(f"{nome} {b}")
+        if excl:
+            sem_jogo.append(f"{nome} " + listar(excl))
         resumo.append(f"{nome} {ultimo:%d/%m}" if ultimo else f"{nome} —")
     saida = []
+    if sem_jogo:
+        saida.append(("ligas_sem_jogo", "INFO", len(sem_jogo),
+                      "jogo(s) não disputado(s) pelo status da liga "
+                      f"({'/'.join(STATUS_SEM_JOGO)}), fora dos alertas de placar e estatística: "
+                      + "; ".join(sem_jogo)))
     if sem_placar:
         saida.append(("ligas_placar", "ALERTA", len(sem_placar),
                       f"jogo(s) da temporada atual sem placar {HORAS_PLACAR_LIGA}h depois do apito "
@@ -501,7 +567,7 @@ def presas_anterior(cur, hoje):
         return None
     return um(cur, """
         SELECT valor, dia FROM public.checagem_diaria
-        WHERE checagem = 'multiplas_presas' AND dia < %s
+        WHERE checagem = 'multiplas_presas_antigas' AND dia < %s
         ORDER BY dia DESC, id DESC LIMIT 1
     """, (hoje,))
 
