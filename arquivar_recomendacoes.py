@@ -669,7 +669,13 @@ def selecionar_top5_do_jogo(cur, jogo_id):
     'errou'. O `varrer_multiplas_presas.py` marca como `avaliada = TRUE,
     resultado = 'retirada'` a múltipla que tinha uma perna retirada antes do
     apito - ela não estava mais sendo recomendada e não pode aparecer nas
-    Múltiplas em Destaque."""
+    Múltiplas em Destaque.
+
+    NOVO (03/11/2026, múltiplas vigentes): também fica de fora a múltipla
+    com `vigente_no_apito = FALSE` — ela tinha saído do top 300 do cron
+    antes do apito, então não era recomendação. Continua avaliada (o
+    veredito fica guardado, como sombra). NULL (desconhecido: Superbet BR e
+    o que congelou antes do primeiro cron desta versão) entra como antes."""
     cur.execute(
         "SELECT COUNT(*) FROM historico_multiplas_destaque WHERE jogo_id = %s AND casa_aposta IS NULL",
         (jogo_id,),
@@ -681,7 +687,8 @@ def selecionar_top5_do_jogo(cur, jogo_id):
         """
         SELECT assinatura, casa_aposta, descricao, odd_combinada, jogos, probabilidade_combinada, resultado
         FROM multiplas_candidatas
-        WHERE avaliada = TRUE AND resultado IN ('acertou', 'errou') AND jogos @> %s::jsonb
+        WHERE avaliada = TRUE AND resultado IN ('acertou', 'errou')
+          AND vigente_no_apito IS NOT FALSE AND jogos @> %s::jsonb
         ORDER BY probabilidade_combinada DESC
         LIMIT 5
         """,

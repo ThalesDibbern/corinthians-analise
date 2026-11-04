@@ -22,6 +22,15 @@ Duas responsabilidades, nessa ordem:
    próximo já começou - a partir daí, a odd/probabilidade guardada é
    definitiva ("a última geração antes do apito").
 
+NOVO (03/11/2026, múltiplas vigentes — claude/arquitetura_multiplas_vigentes.md):
+cada execução grava uma linha em `multiplas_lotes` (mesmo com 0
+capturadas), na MESMA transação das capturas, e as capturas daqui levam
+`origem = 'cron'` (marcam `capturada_cron_em`). No congelamento,
+`vigente_no_apito` diz se a múltipla estava no top 300 do último cron antes
+do apito. Pré-requisito: `criar_vigencia_multiplas.py aplicar` (colunas e
+tabela, no public e nas 5 ligas) — sem isso este script para com erro
+antes de gravar qualquer coisa.
+
 A seleção do top-5 por jogo e a avaliação de acerto/erro acontecem
 DEPOIS, em arquivar_recomendacoes.py, quando o jogo já terminou e o
 resultado de cada perna já é conhecido.
@@ -36,6 +45,7 @@ import psycopg2
 from combinacoes import (
     buscar_recomendacoes, montar_combinacoes,
     capturar_candidatas_multiplas, congelar_candidatas_vencidas,
+    registrar_lote_multiplas,
 )
 
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -59,6 +69,7 @@ def main():
         print("Buscando recomendações ativas...")
         recomendacoes = buscar_recomendacoes(cur)
 
+        capturadas = 0
         if not recomendacoes:
             print("Nenhuma recomendação ativa no momento - nada pra combinar.")
         else:
@@ -69,14 +80,26 @@ def main():
             if not multiplas:
                 print("Nenhuma múltipla de valor encontrada no momento.")
             else:
-                capturadas = capturar_candidatas_multiplas(cur, multiplas)
-                conn.commit()
+                capturadas = capturar_candidatas_multiplas(cur, multiplas, origem="cron")
                 print(f"Concluído! {capturadas} múltipla(s) candidata(s) capturada(s)/atualizada(s).")
+
+        # o lote entra na mesma transação das capturas (mesmo NOW())
+        rodou_em = registrar_lote_multiplas(cur, capturadas)
+        conn.commit()
+        print(f"Lote registrado em multiplas_lotes: {rodou_em} · {capturadas} capturada(s).")
 
         congeladas = congelar_candidatas_vencidas(cur)
         conn.commit()
         if congeladas:
             print(f"{congeladas} candidata(s) congelada(s) (jogo mais próximo já começou).")
+            cur.execute(
+                "SELECT vigente_no_apito, COUNT(*) FROM multiplas_candidatas "
+                "WHERE congelada AND NOT avaliada GROUP BY 1 ORDER BY 1"
+            )
+            partes = {v: n for v, n in cur.fetchall()}
+            print(f"  congeladas sem avaliação: vigentes {partes.get(True, 0)} · "
+                  f"não vigentes {partes.get(False, 0)} · desconhecidas {partes.get(None, 0)}")
+            conn.rollback()
         else:
             print("Nenhuma candidata nova pra congelar no momento.")
 

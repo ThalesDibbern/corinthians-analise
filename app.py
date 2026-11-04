@@ -3334,7 +3334,9 @@ def _contar_numeros_home():
         odds = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM historico_recomendacoes")
         recomendacoes = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM multiplas_candidatas WHERE avaliada AND resultado IN ('acertou', 'errou')")
+        # múltiplas vigentes (03/11/2026): a não vigente no apito fica de fora
+        cur.execute("SELECT COUNT(*) FROM multiplas_candidatas WHERE avaliada AND resultado IN ('acertou', 'errou') "
+                    "AND vigente_no_apito IS NOT FALSE")
         multiplas = cur.fetchone()[0]
         cur.execute(SQL_ODDS_POR_JOGO_HOME)
         odds_por_jogo = cur.fetchone()[0]
@@ -3452,7 +3454,7 @@ def _montar_bilhetes_home():
             FROM multiplas_candidatas m
             CROSS JOIN LATERAL jsonb_array_elements(m.pernas) p
             JOIN jogos_liga jl ON jl.fixture_id_api = (p->>'fixture_id_api')::bigint
-            WHERE m.avaliada AND m.resultado IN ('acertou', 'errou')
+            WHERE m.avaliada AND m.resultado IN ('acertou', 'errou') AND m.vigente_no_apito IS NOT FALSE
             ORDER BY m.primeiro_apito DESC
             LIMIT 1
         """)
@@ -3482,7 +3484,7 @@ def _montar_bilhetes_home():
         cur.execute("""
             SELECT id, odd_combinada, probabilidade_combinada, resultado, casa_aposta, pernas
             FROM multiplas_candidatas
-            WHERE avaliada AND resultado IN ('acertou', 'errou')
+            WHERE avaliada AND resultado IN ('acertou', 'errou') AND vigente_no_apito IS NOT FALSE
               AND primeiro_apito >= %s::date - 1 AND primeiro_apito < %s::date + 2
         """, (min(datas), max(datas)))
         da_rodada = []
@@ -9003,7 +9005,8 @@ def index():
             # real (não em F5/navegação passiva) - mesmo critério que já
             # decide se dispara atualização de odds.
             if eh_clique_real:
-                capturar_candidatas_multiplas(cur, combinacoes)
+                # origem 'site': não marca `capturada_cron_em` (múltiplas vigentes, 03/11/2026)
+                capturar_candidatas_multiplas(cur, combinacoes, origem="site")
                 conn.commit()
 
             aplicar_totais_apostados(combinacoes, buscar_totais_apostados(cur, session["usuario_id"]))

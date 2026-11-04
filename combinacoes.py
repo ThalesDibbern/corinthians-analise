@@ -834,7 +834,7 @@ def _assinatura_combo(casa_aposta, pernas):
     return hashlib.sha256(bruto.encode("utf-8")).hexdigest()
 
 
-def capturar_candidatas_multiplas(cur, combinacoes_geradas):
+def capturar_candidatas_multiplas(cur, combinacoes_geradas, origem="site"):
     """NOVO: grava/atualiza (upsert) cada múltipla (2+ pernas) gerada em
     `multiplas_candidatas` - chamada tanto pelo app.py (quando alguém
     clica "Gerar/Atualizar recomendações" de verdade) quanto pelo
@@ -846,7 +846,21 @@ def capturar_candidatas_multiplas(cur, combinacoes_geradas):
     `congelada = FALSE` - depois que o jogo mais próximo envolvido já
     começou (ver congelar_candidatas_vencidas), a linha para de mudar,
     garantindo que o que sobra é sempre "a última geração antes do
-    apito"."""
+    apito".
+
+    NOVO (03/11/2026, múltiplas vigentes — claude/arquitetura_multiplas_vigentes.md):
+    `origem` diz quem capturou. Só `'cron'` (motor_combinacoes) grava
+    `capturada_cron_em = NOW()` — o mesmo NOW() do lote que o motor grava
+    em `multiplas_lotes` na mesma transação. O site (`'site'`, padrão) não
+    toca a coluna: o que ele mostra é o filtro de quem clicou, não a
+    recomendação do sistema. E o cron só marca múltipla cujo primeiro
+    apito ainda não passou: a de jogo já começado (que continua em
+    `recomendacoes` até o arquivamento do dia seguinte) é recapturada sem
+    a marca nova, para o congelamento comparar com o último cron ANTES do
+    apito."""
+    if origem not in ("cron", "site"):
+        raise ValueError(f"origem inválida: {origem!r}")
+    marca_cron = origem == "cron"
     capturadas = 0
     for c in combinacoes_geradas:
         if len(c["pernas"]) < 2:
@@ -863,21 +877,25 @@ def capturar_candidatas_multiplas(cur, combinacoes_geradas):
             """
             INSERT INTO multiplas_candidatas
                 (assinatura, casa_aposta, descricao, odd_combinada, probabilidade_combinada,
-                 pernas, jogos, primeiro_apito, congelada, atualizada_em)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE, NOW())
+                 pernas, jogos, primeiro_apito, congelada, atualizada_em, capturada_cron_em)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE, NOW(),
+                    CASE WHEN %s AND %s > (NOW() AT TIME ZONE 'UTC') THEN NOW() END)
             ON CONFLICT (assinatura) DO UPDATE SET
                 odd_combinada = EXCLUDED.odd_combinada,
                 probabilidade_combinada = EXCLUDED.probabilidade_combinada,
                 pernas = EXCLUDED.pernas,
                 jogos = EXCLUDED.jogos,
                 primeiro_apito = EXCLUDED.primeiro_apito,
-                atualizada_em = NOW()
+                atualizada_em = NOW(),
+                capturada_cron_em = COALESCE(EXCLUDED.capturada_cron_em,
+                                             multiplas_candidatas.capturada_cron_em)
             WHERE multiplas_candidatas.congelada = FALSE
             """,
             (
                 assinatura, c["casa_aposta"], c["descricao"], c["odd_combinada"],
                 c["probabilidade_combinada"], json.dumps(c["pernas"], ensure_ascii=False),
                 json.dumps(jogos, ensure_ascii=False, default=str), primeiro_apito,
+                marca_cron, primeiro_apito,
             ),
         )
         capturadas += 1
@@ -892,8 +910,43 @@ def congelar_candidatas_vencidas(cur):
     de odds de jogo em andamento (o projeto evita depender cegamente de
     comportamento de API de terceiro sem essa segunda camada de
     segurança)."""
+    # NOVO (03/11/2026, múltiplas vigentes): no momento em que congela,
+    # grava `vigente_no_apito` = a múltipla estava no top 300 do ÚLTIMO
+    # cron que rodou antes do primeiro apito dela (`capturada_cron_em` igual
+    # ao `rodou_em` desse lote). Sem nenhum lote antes do apito (o que
+    # congelar antes do primeiro cron com esta versão), fica NULL =
+    # desconhecido, e quem lê trata como antes (`IS NOT FALSE`).
+    # `primeiro_apito` é UTC sem fuso (§5.7): a comparação com o relógio do
+    # banco é feita explicitamente em UTC.
     cur.execute(
-        "UPDATE multiplas_candidatas SET congelada = TRUE "
-        "WHERE congelada = FALSE AND primeiro_apito <= NOW()"
+        """
+        UPDATE multiplas_candidatas m
+        SET congelada = TRUE,
+            vigente_no_apito = (
+                SELECT CASE WHEN l.rodou_em IS NULL THEN NULL
+                            ELSE COALESCE(m.capturada_cron_em = l.rodou_em, FALSE) END
+                FROM (SELECT MAX(rodou_em) AS rodou_em FROM multiplas_lotes
+                      WHERE rodou_em <= (m.primeiro_apito AT TIME ZONE 'UTC')) l
+            )
+        WHERE m.congelada = FALSE AND m.primeiro_apito <= (NOW() AT TIME ZONE 'UTC')
+        """
     )
     return cur.rowcount
+
+
+VERSAO_LOTE = "combinacoes 03/11/2026 vigentes v1"
+
+
+def registrar_lote_multiplas(cur, capturadas, versao_codigo=VERSAO_LOTE):
+    """NOVO (03/11/2026, múltiplas vigentes): uma linha em `multiplas_lotes`
+    por execução do cron, MESMO com 0 capturadas (cron sem recomendação
+    viva também é "o último cron": nada anterior fica vigente). Tem de ser
+    chamada na MESMA transação das capturas: `rodou_em` é o NOW() da
+    transação, o mesmo carimbo gravado em `capturada_cron_em`. Devolve o
+    `rodou_em`."""
+    cur.execute(
+        "INSERT INTO multiplas_lotes (rodou_em, capturadas, versao_codigo) "
+        "VALUES (NOW(), %s, %s) RETURNING rodou_em",
+        (int(capturadas), versao_codigo),
+    )
+    return cur.fetchone()[0]
