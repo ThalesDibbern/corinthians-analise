@@ -70,6 +70,23 @@ COMO RODAR (serviço `abundant-abundance`)
     python varrer_multiplas_presas.py verificar
     python varrer_multiplas_presas.py verificar --limite 200
     python varrer_multiplas_presas.py aplicar
+    python varrer_multiplas_presas.py verificar --liga premier,laliga,seriea,bundesliga,ligue1
+    python varrer_multiplas_presas.py aplicar   --liga premier,laliga,seriea,bundesliga,ligue1
+
+`--liga` (C4e, 05/11/2026): varre as ligas extras em vez do Brasileirão, uma
+liga por vez, cada uma na SUA transação. Para cada liga:
+  - roda a trava do `rodar_liga` (importada): toda tabela do pipeline tem de
+    resolver para `liga_<chave>`, senão a liga é recusada e nada é tocado;
+  - conecta com `search_path = liga_<chave>,public` (o mesmo do `rodar_liga`)
+    e confere com `SHOW search_path`; `recomendacoes`, `historico_*`,
+    `multiplas_*`, `jogos` etc. resolvem para o schema da liga; `registro_*`
+    para o `public` (compartilhadas);
+  - o `registro_publico` é lido só com `liga = <chave>` — ids de jogo se
+    repetem entre schemas (1_ESSENCIAL §6.2), então o filtro de liga é o que
+    impede a prova de uma liga valer para outra;
+  - `multiplas_retiradas` tem de existir no schema da liga (o `preparar` a
+    criou em 31/10); o script não cria tabela em liga.
+Sem `--liga`, o comportamento é o de antes (Brasileirão, `public`).
 
 `verificar` abre a transação como READ ONLY (conferido) e termina em
 rollback. `--limite N` olha só as N presas de apito mais recente (fatia).
@@ -93,9 +110,9 @@ from combinacoes import MERCADOS_JOGO_INTEIRO
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
-VERSAO = "varrer_multiplas_presas 27/10/2026 v1"
+VERSAO = "varrer_multiplas_presas 05/11/2026 v2 (ligas)"
 FOLGA_HORAS = 72          # mesma janela de eventos do popular_banco
-LIGA = "brasileirao"      # registro_publico.liga deste schema (ligas: fase 2)
+LIGA = "brasileirao"      # registro_publico.liga do schema em uso; `--liga` troca por execução
 RESULTADO_RETIRADA = "retirada"
 
 CLASSES_QUE_LIBERAM = ("RETIRADA_PROVADA", "SUMIU_SEM_PROVA")
@@ -303,7 +320,9 @@ TABELAS_INTOCADAS = ("recomendacoes", "historico_recomendacoes", "registro_publi
 
 
 def md5_tabela(cur, tabela):
-    cur.execute("SELECT to_regclass(%s) IS NOT NULL", (f"public.{tabela}",))
+    # nome sem schema: resolve pelo search_path (public no Brasileirão;
+    # liga_<chave> para recomendacoes/historico e public para registro_* nas ligas)
+    cur.execute("SELECT to_regclass(%s) IS NOT NULL", (tabela,))
     if not cur.fetchone()[0]:
         return None
     cur.execute(f"SELECT COUNT(*), md5(COALESCE(string_agg(t::text, '|' ORDER BY t.id), '')) FROM {tabela} t")
@@ -392,20 +411,66 @@ def imprimir(cur, decisoes, por_multipla, por_perna, por_casa):
 
 def ler_argumentos(argv):
     if len(argv) < 2 or argv[1] not in ("verificar", "aplicar"):
-        raise SystemExit("uso: python varrer_multiplas_presas.py verificar|aplicar [--limite N]")
-    fase, limite = argv[1], None
+        raise SystemExit("uso: python varrer_multiplas_presas.py verificar|aplicar [--limite N] [--liga a,b,...]")
+    fase, limite, ligas = argv[1], None, None
     if "--limite" in argv:
         limite = int(argv[argv.index("--limite") + 1])
     if fase == "aplicar" and limite:
         raise SystemExit("--limite só vale no verificar (o aplicar varre tudo)")
-    return fase, limite
+    if "--liga" in argv:
+        i = argv.index("--liga")
+        if i + 1 >= len(argv) or argv[i + 1].startswith("--"):
+            raise SystemExit("--liga precisa de uma lista: --liga premier,laliga,...")
+        ligas = [c.strip() for c in argv[i + 1].split(",") if c.strip()]
+    return fase, limite, ligas
+
+
+def conectar_liga(chave):
+    """Trava do rodar_liga + conexão com o search_path da liga, conferido."""
+    import rodar_liga
+    if chave not in rodar_liga.LIGAS:
+        raise SystemExit(f"liga desconhecida: {chave!r} (conhecidas: {', '.join(rodar_liga.LIGAS)})")
+    schema = rodar_liga.schema_de(chave)
+    n = rodar_liga.trava(chave)        # TravaRecusou se algo resolve fora da liga
+    conn = rodar_liga.conectar(f"{schema},public")
+    cur = conn.cursor()
+    cur.execute("SHOW search_path")
+    visto = cur.fetchone()[0].replace(" ", "")
+    if visto != f"{schema},public":
+        conn.close()
+        raise rodar_liga.TravaRecusou(f"search_path = `{visto}` (esperado `{schema},public`)")
+    if rodar_liga.schema_da_tabela(cur, "multiplas_retiradas") != schema:
+        conn.close()
+        raise rodar_liga.TravaRecusou(f"`multiplas_retiradas` não existe em `{schema}` — rode `rodar_liga.py preparar`")
+    conn.rollback()
+    print(f"\n##### liga {chave} (`{schema}`) · trava ok: {n} tabelas do pipeline no schema da liga")
+    return conn
 
 
 def main(argv):
-    fase, limite = ler_argumentos(argv)
+    global LIGA
+    fase, limite, ligas = ler_argumentos(argv)
     print(f"=== {VERSAO} · fase {fase.upper()} · argv {argv[1:]} · "
           f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S} UTC ===")
-    conn = psycopg2.connect(DATABASE_URL)
+    if not ligas:
+        LIGA = "brasileirao"
+        return varrer_um(psycopg2.connect(DATABASE_URL), fase, limite, criar_tabela=True)
+    import rodar_liga
+    codigo = 0
+    for chave in ligas:
+        try:
+            conn = conectar_liga(chave)
+        except rodar_liga.TravaRecusou as e:
+            print(f"\n🔴 liga {chave}: {e}\n   nada foi tocado nesta liga.")
+            codigo = 1
+            continue
+        LIGA = chave
+        codigo = max(codigo, varrer_um(conn, fase, limite, criar_tabela=False))
+    LIGA = "brasileirao"
+    return codigo
+
+
+def varrer_um(conn, fase, limite, criar_tabela):
     conn.autocommit = False
     cur = conn.cursor()
     try:
@@ -419,17 +484,18 @@ def main(argv):
         imprimir(cur, decisoes, por_multipla, por_perna, por_casa)
 
         if fase == "verificar":
-            print("\nFASE VERIFICAR — nada gravado: multiplas_candidatas e multiplas_retiradas "
+            print(f"\nFASE VERIFICAR ({LIGA}) — nada gravado: multiplas_candidatas e multiplas_retiradas "
                   "não foram tocadas (transação READ ONLY, rollback).")
             return 0
 
         antes_tab = {t: md5_tabela(cur, t) for t in TABELAS_INTOCADAS}
         ids = [d["id"] for d in decisoes]
         antes_cand = md5_candidatas(cur, ids)
-        cur.execute(SQL_CRIAR_TABELA)
-        cur.execute("SELECT 1 FROM pg_roles WHERE rolname = 'claude_leitura'")
-        if cur.fetchone():
-            cur.execute("GRANT SELECT ON public.multiplas_retiradas TO claude_leitura")
+        if criar_tabela:      # só no Brasileirão; nas ligas a tabela vem do `preparar`
+            cur.execute(SQL_CRIAR_TABELA)
+            cur.execute("SELECT 1 FROM pg_roles WHERE rolname = 'claude_leitura'")
+            if cur.fetchone():
+                cur.execute("GRANT SELECT ON public.multiplas_retiradas TO claude_leitura")
 
         for d in decisoes:
             cur.execute(
@@ -457,7 +523,7 @@ def main(argv):
                 print("   " + f)
             return 1
         conn.commit()
-        print(f"\n✅ FASE APLICAR — {len(ids)} múltipla(s) marcadas como '{RESULTADO_RETIRADA}' e "
+        print(f"\n✅ FASE APLICAR ({LIGA}) — {len(ids)} múltipla(s) marcadas como '{RESULTADO_RETIRADA}' e "
               f"registradas em multiplas_retiradas. A1-A3 ok; rodar de novo deve marcar 0 (A4).")
         return 0
     finally:
